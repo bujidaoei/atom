@@ -1,4 +1,6 @@
 .git
+.logs
+data
 **/node_modules
 **/.venv
 **/__pycache__
@@ -7,3 +9,10 @@ frontend/dist
 backend/data
 **/.env
 *.md
+
+# The vendored Pi tree is verified byte-for-byte against pi-source.lock.json
+# during the image build, so no general-purpose ignore rule may remove
+# anything from it. Re-include everything under runtime/, then drop only its
+# installed dependencies.
+!runtime/**
+runtime/node_modules
