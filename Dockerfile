@@ -49,14 +49,26 @@ ENV PATH="/opt/node/bin:${PATH}"
 
 COPY --from=ghcr.io/astral-sh/uv:0.11.14 /uv /uvx /bin/
 
-# Same reasoning as APT_MIRROR. The lock file pins hashes, so a mirror can
-# only serve the same artefacts or fail the install.
 ARG PYPI_INDEX=""
-ENV UV_DEFAULT_INDEX=${PYPI_INDEX}
 
 WORKDIR /app/backend
 COPY backend/pyproject.toml backend/uv.lock ./
-RUN uv sync --frozen --no-dev
+
+# `uv sync --frozen` downloads from the URLs recorded in uv.lock, which point
+# at files.pythonhosted.org. That ran at 3.5 kB/s on the deployment box, ten
+# minutes for a two megabyte wheel. Exporting the lock to a hash-pinned
+# requirements file and installing that from a nearby index keeps the exact
+# same versions and hashes while fetching over a fast path.
+RUN if [ -n "$PYPI_INDEX" ]; then \
+      uv export --frozen --no-dev --no-emit-project --format requirements-txt \
+        -o /tmp/requirements.txt \
+      && uv venv \
+      && uv pip install --index-url "$PYPI_INDEX" --require-hashes \
+        -r /tmp/requirements.txt \
+      && rm /tmp/requirements.txt ; \
+    else \
+      uv sync --frozen --no-dev ; \
+    fi
 COPY backend/app ./app
 
 COPY --from=runtime /runtime /app/runtime
