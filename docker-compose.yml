@@ -1,0 +1,13 @@
+services:
+  atom:
+    build: .
+    ports:
+      - "80:80"
+    env_file:
+      - .env
+    volumes:
+      - atom-data:/data
+    restart: unless-stopped
+
+volumes:
+  atom-data:

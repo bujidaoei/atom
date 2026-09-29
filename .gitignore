@@ -1,0 +1,11 @@
+.env
+backend/.env
+backend/.venv
+backend/data
+frontend/node_modules
+frontend/dist
+__pycache__/
+.pytest_cache/
+*.pyc
+_feishu_raw.txt
+.DS_Store
