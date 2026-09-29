@@ -1,8 +1,8 @@
 import { FormEvent, useEffect, useState } from "react";
-import { Link } from "react-router-dom";
 import { api, readError } from "../api";
+import { AppShell } from "../Shell";
 import type { SettingsView } from "../types";
-import { Button, Wordmark, inputClass } from "../ui";
+import { Button, inputClass } from "../ui";
 
 export function SettingsPage() {
   const [view, setView] = useState<SettingsView | null>(null);
@@ -84,13 +84,7 @@ export function SettingsPage() {
   }
 
   return (
-    <div className="min-h-screen">
-      <header className="flex items-center gap-6 border-b border-line px-5 py-4 md:px-10">
-        <Wordmark to="/app" />
-        <Link to="/app" className="text-sm text-muted hover:text-ink">
-          返回项目
-        </Link>
-      </header>
+    <AppShell>
       <main className="mx-auto max-w-4xl px-5 py-10 md:px-10">
         <h1 className="font-display text-5xl font-medium tracking-[-0.03em]">网关</h1>
         <p className="mt-3 max-w-xl text-sm leading-6 text-muted">
@@ -201,6 +195,6 @@ export function SettingsPage() {
           </label>
         </section>
       </main>
-    </div>
+    </AppShell>
   );
 }

@@ -1,12 +1,20 @@
 import { FormEvent, useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { AgentFace, team } from "../agents";
 import { api, readError } from "../api";
+import { AppShell } from "../Shell";
 import { useSession } from "../session";
 import type { ProjectSummary, Usage } from "../types";
-import { Button, Wordmark, formatWhen, inputClass, statusLabel } from "../ui";
+import { Button, formatWhen, statusLabel } from "../ui";
+
+const starters = [
+  "给街角咖啡馆做一个今日烘焙看板，店员能把卖完的标出来，刷新后还在",
+  "给自由职业者做一个回款记录，能记下客户、金额和有没有到账",
+  "做一个小面试表，记下候选人、时间和一句备注",
+];
 
 export function DashboardPage() {
-  const { user, setUser } = useSession();
+  const { user } = useSession();
   const navigate = useNavigate();
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [usage, setUsage] = useState<Usage | null>(null);
@@ -16,7 +24,7 @@ export function DashboardPage() {
   const [confirmId, setConfirmId] = useState("");
 
   useEffect(() => {
-    document.title = "工作台 · Atom";
+    document.title = "首页 · Atom";
     api.projects().then(setProjects).catch((err) => setError(readError(err)));
     api.usage().then(setUsage).catch(() => setUsage(null));
   }, []);
@@ -24,7 +32,7 @@ export function DashboardPage() {
   async function create(event: FormEvent) {
     event.preventDefault();
     if (prompt.trim().length < 4) {
-      setError("再多写一句");
+      setError("再多写一句，小队才知道要做什么");
       return;
     }
     setBusy(true);
@@ -49,72 +57,76 @@ export function DashboardPage() {
     }
   }
 
-  async function logout() {
-    await api.logout();
-    setUser(null);
-    navigate("/");
-  }
-
   return (
-    <div className="min-h-screen">
-      <header className="flex items-center gap-6 border-b border-line px-5 py-4 md:px-10">
-        <Wordmark to="/app" />
-        <Link to="/app/settings" className="text-sm text-muted hover:text-ink">
-          网关设置
-        </Link>
-        <div className="ml-auto flex items-center gap-4 text-sm">
-          <span className="text-muted">{user?.name}</span>
-          <button type="button" onClick={logout} className="hover:text-copper">
-            退出
-          </button>
-        </div>
-      </header>
-      <main className="mx-auto max-w-4xl px-5 py-10 md:px-10">
-        <div className="flex flex-wrap items-end justify-between gap-4">
-          <h1 className="font-display text-5xl font-medium tracking-[-0.03em]">项目</h1>
-          <p className="text-sm text-muted">
-            {usage
-              ? `已调用 ${usage.calls} 次 · 输入 ${usage.prompt_tokens.toLocaleString("zh-CN")} / 输出 ${usage.completion_tokens.toLocaleString("zh-CN")} tokens`
-              : "用量还在读取"}
-          </p>
-        </div>
-
-        <form className="mt-8" onSubmit={create}>
-          <label htmlFor="next-idea" className="text-sm">
-            新的想法
+    <AppShell>
+      <div className="flex justify-end px-6 py-3 text-sm text-muted">
+        {usage ? `已调用 ${usage.calls} 次` : "用量读取中"}
+      </div>
+      <div className="mx-auto flex w-full max-w-2xl flex-col items-center px-5 pb-20">
+        <ul className="flex items-end gap-2">
+          {team.map((person) => (
+            <li key={person.id} className="text-center">
+              <AgentFace name={person.name} fill={person.fill} mouth={person.mouth} />
+              <span className="mt-1 block text-[11px] text-muted">{person.name}</span>
+            </li>
+          ))}
+        </ul>
+        <h1 className="mt-6 text-center font-display text-[clamp(2.1rem,4vw,3.25rem)] font-medium leading-tight tracking-[-0.03em]">
+          你想创造什么{user?.name ? `，${user.name}` : ""}？
+        </h1>
+        <form onSubmit={create} className="mt-8 w-full rounded-2xl border border-line bg-raised p-4 shadow-sheet">
+          <label htmlFor="idea" className="sr-only">
+            想做什么
           </label>
           <textarea
-            id="next-idea"
+            id="idea"
             value={prompt}
             onChange={(event) => setPrompt(event.target.value)}
             rows={3}
-            className={`${inputClass} mt-2`}
-            placeholder="谁在用，第一版要能完成什么。"
+            placeholder="请 Alex 做一个能用的小页面。写清谁在用、第一版要完成什么。"
+            className="w-full resize-none bg-transparent text-base leading-7 outline-none placeholder:text-muted/70"
           />
-          <Button type="submit" className="mt-3" disabled={busy}>
-            {busy ? "正在创建" : "创建项目"}
-          </Button>
+          <div className="mt-2 flex items-center justify-between gap-3">
+            <p className="text-xs leading-5 text-muted">小队先写契约。你点头之后，页面才会出现在右边。</p>
+            <Button type="submit" disabled={busy}>
+              {busy ? "正在交给小队" : "构建"}
+            </Button>
+          </div>
         </form>
+        {error ? <p className="mt-3 w-full text-sm text-clay">{error}</p> : null}
+        <div className="mt-4 flex w-full flex-wrap gap-2">
+          {starters.map((item) => (
+            <button
+              key={item}
+              type="button"
+              onClick={() => setPrompt(item)}
+              className="rounded-full border border-line bg-raised px-3 py-1.5 text-left text-xs text-muted hover:border-ink/30 hover:text-ink"
+            >
+              {item.slice(0, 18)}…
+            </button>
+          ))}
+        </div>
 
-        {error ? <p className="mt-4 text-sm text-clay">{error}</p> : null}
-
-        <div className="mt-10 border-t border-line">
+        <section id="projects" className="mt-16 w-full scroll-mt-8">
+          <div className="flex items-baseline justify-between">
+            <h2 className="text-sm font-medium">我的项目</h2>
+            <span className="text-xs text-muted">{projects.length} 个</span>
+          </div>
           {projects.length === 0 ? (
-            <p className="py-8 text-sm text-muted">还没有项目。上面写下一句，就会从契约开始。</p>
+            <p className="mt-4 text-sm text-muted">还没有项目。上面写下一句，就会从契约开始。</p>
           ) : (
-            <ul>
+            <ul className="mt-3 divide-y divide-line border-y border-line">
               {projects.map((project) => (
-                <li key={project.id} className="grid items-center gap-3 border-b border-line py-4 md:grid-cols-[1fr_120px_140px_auto]">
+                <li key={project.id} className="grid items-center gap-2 py-3 sm:grid-cols-[minmax(0,1fr)_88px_auto]">
                   <div className="min-w-0">
-                    <Link to={`/app/p/${project.id}`} className="text-base hover:text-copper">
+                    <Link to={`/app/p/${project.id}`} className="hover:text-copper">
                       {project.name || "未命名"}
                     </Link>
                     <p className="truncate text-sm text-muted">{project.prompt}</p>
                   </div>
                   <span className="text-sm text-muted">{statusLabel[project.status] || project.status}</span>
-                  <span className="text-sm text-muted">{formatWhen(project.updated_at)}</span>
-                  <div className="flex gap-3 text-sm">
-                    <Link to={`/app/p/${project.id}`}>打开</Link>
+                  <div className="flex items-center gap-3 text-sm">
+                    <span className="text-muted">{formatWhen(project.updated_at)}</span>
                     {confirmId === project.id ? (
                       <button type="button" className="text-clay" onClick={() => remove(project.id)}>
                         确认删除
@@ -129,8 +141,8 @@ export function DashboardPage() {
               ))}
             </ul>
           )}
-        </div>
-      </main>
-    </div>
+        </section>
+      </div>
+    </AppShell>
   );
 }

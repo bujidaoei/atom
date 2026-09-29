@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { api, readError } from "../api";
 import type { Project, RuntimeResult } from "../types";
+import { AgentFace, team } from "../agents";
 import { Button, StatusDot, Wordmark, roleLabel, statusLabel } from "../ui";
 import { PreviewPane } from "./PreviewPane";
 
@@ -14,14 +15,6 @@ function sharedPlan(id: string) {
   planJobs.set(id, job);
   return job;
 }
-
-const people = [
-  { id: "mike", name: "Mike", job: "带队" },
-  { id: "iris", name: "Iris", job: "研究" },
-  { id: "emma", name: "Emma", job: "契约" },
-  { id: "bob", name: "Bob", job: "结构" },
-  { id: "alex", name: "Alex", job: "工程" },
-] as const;
 
 export function WorkspacePage() {
   const { id = "" } = useParams();
@@ -176,7 +169,7 @@ export function WorkspacePage() {
           <div className="border-b border-line px-4 py-4">
             <p className="text-xs text-muted">小队</p>
             <ul className="mt-3 space-y-3">
-              {people.map((person) => {
+              {team.map((person) => {
                 const note =
                   person.id === "mike"
                     ? project.lead_note
@@ -193,10 +186,11 @@ export function WorkspacePage() {
                             : "";
                 return (
                   <li key={person.id}>
-                    <div className="flex items-baseline justify-between gap-3">
-                      <span className="text-sm">
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="flex items-center gap-2 text-sm">
+                        <AgentFace name={person.name} fill={person.fill} mouth={person.mouth} className="h-7 w-7" />
                         {person.name}
-                        <span className="ml-2 text-xs text-muted">{person.job}</span>
+                        <span className="text-xs text-muted">{person.job}</span>
                       </span>
                       <StatusDot tone={note ? "ok" : working ? "work" : "wait"} />
                     </div>
