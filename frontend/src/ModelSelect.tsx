@@ -36,10 +36,13 @@ export function ModelSelect({ onError }: { onError?: (message: string) => void }
   }, []);
 
   async function change(model: string) {
+    setOpen(false);
+    const previous = view;
+    setView((current) => (current ? { ...current, model } : current));
     try {
       setView(await api.saveSettings({ model }));
-      setOpen(false);
     } catch (err) {
+      setView(previous);
       onError?.(readError(err));
     }
   }
@@ -65,7 +68,7 @@ export function ModelSelect({ onError }: { onError?: (message: string) => void }
         <ul
           role="listbox"
           aria-label="网关模型"
-          className="absolute bottom-8 right-0 z-30 max-h-80 w-[240px] overflow-auto rounded-xl bg-white py-1 shadow-[0_12px_40px_rgba(15,23,42,0.16)]"
+          className="absolute bottom-full right-0 z-30 mb-2 max-h-80 w-[240px] overflow-auto rounded-xl bg-white py-1 shadow-[0_12px_40px_rgba(15,23,42,0.16)]"
         >
           {models.map((model) => {
             const selected = model.id === current;
@@ -75,7 +78,11 @@ export function ModelSelect({ onError }: { onError?: (message: string) => void }
                   type="button"
                   role="option"
                   aria-selected={selected}
-                  onClick={() => change(model.id)}
+                  onMouseDown={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    change(model.id);
+                  }}
                   className={`w-full truncate px-4 py-2.5 text-left text-sm text-[#1f2937] ${selected ? "bg-[#f3f4f6]" : "hover:bg-[#f7f7f8]"}`}
                 >
                   {model.id}
@@ -116,7 +123,7 @@ export function ComposerDock({
         placeholder={placeholder}
         className="w-full resize-none bg-transparent text-[15px] leading-7 text-[#1a1a1a] outline-none placeholder:text-[#9aa0a6]"
         onKeyDown={(event) => {
-          if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+          if (event.key === "Enter" && !event.shiftKey) {
             event.preventDefault();
             event.currentTarget.form?.requestSubmit();
           }
@@ -136,8 +143,8 @@ export function ComposerDock({
           <button
             type="submit"
             aria-label="发送"
-            disabled={disabled || busy}
-            className="flex h-9 w-9 items-center justify-center rounded-full bg-[#8b9098] text-white disabled:opacity-40"
+            disabled={disabled || busy || !value.trim()}
+            className="relative z-40 flex h-9 w-9 items-center justify-center rounded-full bg-[#3b6cff] text-white disabled:bg-[#8b9098] disabled:opacity-40"
           >
             <SendMark />
           </button>

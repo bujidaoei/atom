@@ -24,6 +24,9 @@ def resolve_gateway(db: Session, user: User) -> tuple[str, str, str]:
         raise GatewayError("还没有可用的 API Key。请到设置里填写，或由部署方配置服务器默认密钥。")
     if not model:
         raise GatewayError("还没有选择模型。")
+    lowered = model.lower()
+    if any(token in lowered for token in ("image", "seedream", "embedding", "nano-banana")):
+        raise GatewayError("这个模型不能写页面。请在输入框旁换成 qwen3.7-plus 这类文本模型。")
     return base_url, api_key, model
 
 

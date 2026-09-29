@@ -13,6 +13,7 @@ export function SettingsPage() {
   const [showKey, setShowKey] = useState(false);
   const [baseUrl, setBaseUrl] = useState("");
   const [busy, setBusy] = useState("");
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     document.title = "网关设置 · Atom";
@@ -22,7 +23,8 @@ export function SettingsPage() {
         setView(next);
         setBaseUrl(next.base_url);
       })
-      .catch((err) => setError(readError(err)));
+      .catch((err) => setError(readError(err)))
+      .finally(() => setLoading(false));
   }, []);
 
   async function saveKey(event: FormEvent) {
@@ -90,6 +92,7 @@ export function SettingsPage() {
         <p className="mt-3 max-w-xl text-sm leading-6 text-muted">
           模型请求走你配置的 OpenAI 兼容网关。密钥只在服务器上保存，页面上只显示前两位和后两位。
         </p>
+        {loading ? <p className="mt-4 text-sm text-muted">正在读取网关配置</p> : null}
         {error ? <p className="mt-4 text-sm text-clay">{error}</p> : null}
         {notice ? <p className="mt-4 text-sm text-sage">{notice}</p> : null}
 
@@ -159,9 +162,10 @@ export function SettingsPage() {
                 {view?.base_url_source === "user" ? "使用本账号地址" : "使用服务器默认地址"}
               </span>
               <input
-                className={`${inputClass} mt-3 font-mono`}
+                className={`${inputClass} mt-3 font-mono text-[#1c1915]`}
                 value={baseUrl}
                 onChange={(event) => setBaseUrl(event.target.value)}
+                placeholder={loading ? "正在读取" : "https://"}
                 aria-label="API 请求地址"
               />
             </label>
@@ -177,18 +181,20 @@ export function SettingsPage() {
             <span className="mt-2 block max-w-xl text-sm leading-6 text-muted">
               默认用较快的模型，方便把契约、页面和验收走完。换成更强的模型，页面通常更好，等待也更长。
             </span>
+            <p className="mt-3 text-sm text-[#1c1915]">{loading ? "正在读取模型" : view?.model || "还没有模型"}</p>
             <select
-              className={`${inputClass} mt-3 max-w-md`}
+              className={`${inputClass} mt-2 max-w-md text-[#1c1915]`}
               value={view?.model || ""}
+              disabled={!view}
               onChange={(event) => saveModel(event.target.value)}
               aria-label="模型"
             >
               {(view?.models || []).map((model) => (
                 <option key={model.id} value={model.id}>
-                  {model.label}
+                  {model.id}
                 </option>
               ))}
-              {view && !view.models.some((model) => model.id === view.model) ? (
+              {view && !(view.models || []).some((model) => model.id === view.model) ? (
                 <option value={view.model}>{view.model}</option>
               ) : null}
             </select>

@@ -49,6 +49,8 @@ def pi_complete(
     if completed.returncode != 0:
         detail = (completed.stderr or completed.stdout or "").strip().splitlines()
         message = detail[-1] if detail else "Pi agent 没有完成这一轮。"
+        if "timed out" in message.lower() or "timeout" in message.lower():
+            message = "模型网关没有连上。请再试一次；如果还是不行，换 qwen3.7-plus。"
         raise GatewayError(message[:300])
     raw = completed.stdout.strip()
     line = raw[raw.rfind("\n") + 1 :] if raw else ""

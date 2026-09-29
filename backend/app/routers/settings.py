@@ -34,18 +34,17 @@ def _view(row: UserSettings) -> dict:
     else:
         source = "none"
         effective = ""
+    base_url = (row.base_url or "").strip() or (settings.llm_base_url or "").strip() or "https://ai-gateway.skg.com/v1"
+    model = (row.model or "").strip() or (settings.llm_model or "").strip() or "qwen3.7-plus"
     return {
-        "base_url": (row.base_url or "").strip() or settings.llm_base_url,
+        "base_url": base_url,
         "base_url_source": "user" if (row.base_url or "").strip() else "server",
-        "model": (row.model or "").strip() or settings.llm_model,
+        "model": model,
         "model_source": "user" if (row.model or "").strip() else "server",
         "api_key_masked": mask_secret(effective),
         "api_key_source": source,
         "configured": bool(effective),
-        "models": [{"id": model_id, "label": model_id} for model_id in list_model_ids(
-            (row.base_url or "").strip() or settings.llm_base_url,
-            effective,
-        )],
+        "models": [{"id": model_id, "label": model_id} for model_id in list_model_ids(base_url, effective)],
     }
 
 

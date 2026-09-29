@@ -31,7 +31,7 @@ def list_model_ids(base_url: str, api_key: str) -> list[str]:
         response = httpx.get(
             f"{base}/models",
             headers={"Authorization": f"Bearer {key}"},
-            timeout=8,
+            timeout=3,
         )
         response.raise_for_status()
         payload = response.json()
