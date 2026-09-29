@@ -20,10 +20,18 @@ export type Requirement = {
   checks: Check[];
 };
 
+export type ActivityStep = {
+  kind: "narration" | "tool" | "thinking";
+  title: string;
+  detail: string;
+  status: "run" | "done";
+};
+
 export type Message = {
   id: string;
   role: Role;
   content: string;
+  activity?: ActivityStep[];
   created_at: string;
 };
 

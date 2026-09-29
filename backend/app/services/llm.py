@@ -11,6 +11,9 @@ async def complete(
     messages: list[dict],
     max_tokens: int,
     temperature: float | None = 0.2,
+    on_event=None,
+    extra: dict | None = None,
+    timeout: int = 58,
 ) -> tuple[str, dict]:
     del temperature
     return await asyncio.to_thread(
@@ -20,4 +23,7 @@ async def complete(
         model=model,
         messages=messages,
         max_tokens=max_tokens,
+        on_event=on_event,
+        extra=extra,
+        timeout=timeout,
     )

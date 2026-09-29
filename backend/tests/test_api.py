@@ -68,6 +68,24 @@ HTML
 
 async def _fake_complete(**kwargs):
     system = kwargs["messages"][0]["content"]
+    if system.startswith("你是 Mike"):
+        return "第一版只做售罄看板，不做收银。\n@Iris 先看风险。\n@Bob 定键。\n@Emma 写契约。", {
+            "prompt_tokens": 4,
+            "completion_tokens": 8,
+            "model": "test",
+        }
+    if system.startswith("你是 Iris"):
+        return "店员在柜台边用。最大的风险是刷新后把状态弄丢。\n@Bob 按这个定结构。", {
+            "prompt_tokens": 4,
+            "completion_tokens": 8,
+            "model": "test",
+        }
+    if system.startswith("你是 Bob"):
+        return "单页。数据存在 localStorage 键 bake-board。\n@Emma 按这个写契约。", {
+            "prompt_tokens": 4,
+            "completion_tokens": 8,
+            "model": "test",
+        }
     if "requirements" in system and "localStorage" in system and "NOTES" not in system:
         return json.dumps(PLAN, ensure_ascii=False), {"prompt_tokens": 10, "completion_tokens": 20, "model": "test"}
     if "compatible" in system or "amend" in system:
@@ -129,6 +147,9 @@ def test_plan_build_and_acceptance(client, monkeypatch):
     assert body["status"] == "awaiting_approval"
     assert body["name"] == "今日烘焙"
     assert len(body["requirements"]) == 3
+    roles = [message["role"] for message in body["messages"]]
+    assert roles[:5] == ["system", "mike", "iris", "bob", "emma"]
+    assert body["messages"][1]["activity"][0]["title"] == "读取这条需求"
     assert any(message["role"] == "emma" for message in body["messages"])
 
     built = client.post(f"/api/projects/{project_id}/build")

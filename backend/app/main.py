@@ -16,6 +16,10 @@ logger = logging.getLogger("atom")
 async def lifespan(_app: FastAPI):
     Path(settings.db_path).parent.mkdir(parents=True, exist_ok=True)
     Base.metadata.create_all(bind=engine)
+    with engine.begin() as connection:
+        columns = {row[1] for row in connection.exec_driver_sql("PRAGMA table_info(messages)").fetchall()}
+        if "activity_json" not in columns:
+            connection.exec_driver_sql("ALTER TABLE messages ADD COLUMN activity_json TEXT DEFAULT '[]'")
     if settings.secret == "dev-only-change-me":
         logger.warning("ATOM_SECRET is still the development default")
     yield

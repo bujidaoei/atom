@@ -1,13 +1,36 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { api, readError } from "../api";
-import type { Project, RuntimeResult } from "../types";
+import type { ActivityStep, Project, RuntimeResult } from "../types";
 import { AgentFace, team } from "../agents";
 import { ComposerDock } from "../ModelSelect";
 import { Button, StatusDot, Wordmark, roleLabel, statusLabel } from "../ui";
 import { PreviewPane } from "./PreviewPane";
 
 const planJobs = new Map<string, Promise<Project>>();
+
+function ActivityCard({ steps, open }: { steps: ActivityStep[]; open: boolean }) {
+  const [expanded, setExpanded] = useState(open);
+  if (!steps.length) return null;
+  return (
+    <div className="mt-2">
+      <button type="button" className="text-xs text-[#6b7280]" onClick={() => setExpanded((value) => !value)}>
+        已处理 {steps.length} 个步骤
+      </button>
+      {expanded ? (
+        <ol className="mt-2 space-y-2 border-l border-[#e7e7e7] pl-3">
+          {steps.map((step, index) => (
+            <li key={`${step.title}-${index}`} className="text-xs leading-5 text-[#4b5563]">
+              <span>{step.kind === "tool" ? `工具 · ${step.title}` : step.kind === "thinking" ? "推理" : step.title}</span>
+              {step.status === "run" ? <span className="ml-2 text-[#8f4318]">进行中</span> : null}
+              {step.detail ? <span className="mt-0.5 block whitespace-pre-wrap text-[#6b7280]">{step.detail}</span> : null}
+            </li>
+          ))}
+        </ol>
+      ) : null}
+    </div>
+  );
+}
 
 function sharedPlan(id: string) {
   const existing = planJobs.get(id);
@@ -49,26 +72,34 @@ export function WorkspacePage() {
   }, [id]);
 
   useEffect(() => {
-    if (!project || project.id !== id || project.status !== "draft") return;
-    let cancelled = false;
+    if (!id || project?.status !== "draft") return;
     setBusy("plan");
-    sharedPlan(project.id)
+    sharedPlan(id)
       .then((next) => {
-        if (!cancelled && next.id === id) setProject(next);
+        if (next.id === id) setProject(next);
       })
       .catch(async (err) => {
-        if (cancelled) return;
         setError(readError(err));
-        const fresh = await api.project(project.id).catch(() => null);
-        if (fresh && !cancelled) setProject(fresh);
+        const fresh = await api.project(id).catch(() => null);
+        if (fresh) setProject(fresh);
       })
-      .finally(() => {
-        if (!cancelled) setBusy("");
+      .finally(async () => {
+        const fresh = await api.project(id).catch(() => null);
+        if (fresh) setProject(fresh);
+        setBusy("");
       });
-    return () => {
-      cancelled = true;
-    };
-  }, [project]);
+  }, [id, project?.status]);
+
+  useEffect(() => {
+    const running = project?.status === "planning" || project?.status === "building" || busy === "plan" || busy === "build" || busy === "revise";
+    if (!id || !running) return;
+    const timer = window.setInterval(() => {
+      api.project(id).then((next) => {
+        if (next.id === id) setProject(next);
+      }).catch(() => undefined);
+    }, 800);
+    return () => window.clearInterval(timer);
+  }, [id, project?.status, busy]);
 
   useEffect(() => {
     document.title = project ? `${project.name} · Atom` : "项目 · Atom";
@@ -129,7 +160,7 @@ export function WorkspacePage() {
   }
 
   const acceptance = new Map(project.latest_acceptance?.items.map((item) => [item.key, item]) || []);
-  const working = busy === "plan" || project.status === "planning" || busy === "build" || project.status === "building";
+  const working = busy === "plan" || project.status === "planning" || busy === "build" || project.status === "building" || busy === "revise";
   const activeFile = project.files.find((file) => file.path === filePath) || project.files[0];
   const stepText =
     busy === "build" || project.status === "building"
@@ -148,6 +179,8 @@ export function WorkspacePage() {
   ].filter(Boolean);
 
   const personByRole = new Map<string, (typeof team)[number]>(team.map((person) => [person.id, person]));
+  const latestAgent = [...project.messages].reverse().find((message) => message.role !== "user" && message.role !== "system");
+  const workingLine = working && latestAgent ? `Working Process · ${roleLabel[latestAgent.role] || latestAgent.role}` : stepText;
 
   return (
     <div className="flex h-screen min-h-0 flex-col bg-[#f3f4f6]">
@@ -163,33 +196,34 @@ export function WorkspacePage() {
         <aside className="flex min-h-[520px] flex-col border-b border-[#e7e7e7] bg-white lg:min-h-0 lg:border-b-0 lg:border-r">
           <div ref={logRef} className="min-h-0 flex-1 overflow-auto px-4 py-4">
             <p className="text-sm leading-6 text-[#1a1a1a]">{project.prompt}</p>
-            {project.messages.length === 0 && working ? (
+            {working ? (
               <p className="mt-4 flex items-center gap-2 text-sm text-[#6b7280]">
                 <StatusDot tone="work" />
-                正在把想法写成契约
+                {workingLine}
               </p>
             ) : null}
             <ul className="mt-4 space-y-4">
               {project.messages.map((message) => {
                 const person = personByRole.get(message.role);
+                const steps = message.activity || [];
+                const live = working && message.id === latestAgent?.id;
                 return (
                   <li key={message.id} className="flex gap-2">
                     {person ? <AgentFace name={person.name} fill={person.fill} mouth={person.mouth} className="h-7 w-7 shrink-0" /> : <span className="w-7 shrink-0" />}
                     <div className="min-w-0">
                       <p className="text-xs text-[#6b7280]">{roleLabel[message.role] || message.role}</p>
+                      <ActivityCard steps={steps} open={live || steps.some((step) => step.status === "run")} />
                       <p className="mt-1 whitespace-pre-wrap text-sm leading-6">{message.content}</p>
+                      {message.role === "alex" && project.html && !working ? (
+                        <p className="mt-2 rounded-lg border border-[#e7e7e7] px-3 py-2 text-sm">
+                          版本 {project.contract_version}：{project.name}
+                        </p>
+                      ) : null}
                     </div>
                   </li>
                 );
               })}
             </ul>
-            {project.status === "building" || busy === "build" || busy === "revise" ? (
-              <p className="mt-4 flex items-center gap-2 text-sm text-[#6b7280]">
-                <StatusDot tone="work" />
-                工程师正在改页面
-              </p>
-            ) : null}
-
             <div className="mt-6">
               <div className="flex items-baseline justify-between">
                 <p className="text-xs text-[#6b7280]">契约</p>
@@ -282,7 +316,7 @@ export function WorkspacePage() {
         <section className="flex min-h-[480px] flex-col bg-[#f3f4f6] lg:min-h-0">
           <div className="flex h-10 shrink-0 items-center gap-3 border-b border-[#e7e7e7] bg-white px-4 text-xs text-[#6b7280]">
             <StatusDot tone={project.status === "error" ? "bad" : working ? "work" : project.status === "ready" ? "ok" : "wait"} />
-            <span>{stepText}</span>
+            <span>{workingLine}</span>
             <div className="ml-auto flex gap-3">
               <button type="button" className={pane === "preview" ? "text-ink" : ""} onClick={() => setPane("preview")}>
                 预览

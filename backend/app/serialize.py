@@ -64,6 +64,7 @@ def project_detail(db: Session, project: Project) -> dict:
                 "id": item.id,
                 "role": item.role,
                 "content": item.content,
+                "activity": loads_json(item.activity_json, []),
                 "created_at": iso(item.created_at),
             }
             for item in messages

@@ -1,16 +1,33 @@
 import json
+import time
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from app.config import settings
+from app.db import SessionLocal
 from app.errors import ContractError, GatewayError
 from app.models import Message, Project, ProjectFile, Requirement, Usage, User, UserSettings, utcnow
 from app.services.acceptance import static_failures
 from app.services.llm import complete
 from app.services.parsing import extract_json, normalize_requirements, parse_build
-from app.services.prompts import BUILD_SYSTEM, CLASSIFY_SYSTEM, PLAN_SYSTEM, REPAIR_HINT
+from app.services.prompts import (
+    ALEX_SYSTEM,
+    BOB_SYSTEM,
+    BUILD_SYSTEM,
+    CLASSIFY_SYSTEM,
+    IRIS_SYSTEM,
+    MIKE_SYSTEM,
+    PLAN_SYSTEM,
+    REPAIR_HINT,
+)
+
+TOOL_TITLES = {
+    "read_contract": "读取契约",
+    "write_page": "编写代码",
+    "check_page": "检查页面",
+}
 
 
 def resolve_gateway(db: Session, user: User) -> tuple[str, str, str]:
@@ -51,11 +68,93 @@ def record_usage(db: Session, user: User, project: Project, usage: dict) -> None
     )
 
 
-def add_message(db: Session, project: Project, role: str, content: str) -> None:
+def add_message(db: Session, project: Project, role: str, content: str, activity: list | None = None) -> Message | None:
     text = (content or "").strip()
     if not text:
-        return
-    db.add(Message(project_id=project.id, role=role, content=text[:4000]))
+        return None
+    row = Message(
+        project_id=project.id,
+        role=role,
+        content=text[:4000],
+        activity_json=json.dumps(activity or [], ensure_ascii=False),
+    )
+    db.add(row)
+    return row
+
+
+def _load_steps(raw: str) -> list:
+    try:
+        data = json.loads(raw or "[]")
+    except json.JSONDecodeError:
+        return []
+    return data if isinstance(data, list) else []
+
+
+def begin_turn(db: Session, project: Project, role: str, opening: str, title: str) -> Message:
+    row = Message(
+        project_id=project.id,
+        role=role,
+        content=opening[:4000],
+        activity_json=json.dumps(
+            [{"kind": "narration", "title": title, "detail": "", "status": "run"}],
+            ensure_ascii=False,
+        ),
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+def finish_turn(db: Session, row: Message, content: str, extra: list | None = None) -> None:
+    db.refresh(row)
+    steps = _load_steps(row.activity_json)
+    for step in steps:
+        if isinstance(step, dict) and step.get("status") == "run":
+            step["status"] = "done"
+    steps.extend(extra or [])
+    row.content = (content or row.content or "").strip()[:4000]
+    row.activity_json = json.dumps(steps, ensure_ascii=False)
+    db.commit()
+
+
+def watch_turn(message_id: str, *, show_text: bool = True):
+    state = {"at": 0.0}
+
+    def on_event(event: dict) -> None:
+        kind = event.get("event")
+        now = time.monotonic()
+        if kind in {"text", "thinking"} and now - state["at"] < 0.35:
+            return
+        state["at"] = now
+        with SessionLocal() as side:
+            row = side.get(Message, message_id)
+            if row is None:
+                return
+            steps = _load_steps(row.activity_json)
+            if kind == "text" and show_text:
+                row.content = str(event.get("text") or "")[:4000]
+            elif kind == "thinking":
+                thought = str(event.get("text") or "")[:500]
+                if steps and steps[-1].get("kind") == "thinking":
+                    steps[-1]["detail"] = thought
+                else:
+                    steps.append({"kind": "thinking", "title": "推理", "detail": thought, "status": "run"})
+                row.activity_json = json.dumps(steps, ensure_ascii=False)
+            elif kind == "tool":
+                name = str(event.get("name") or "tool")
+                steps.append(
+                    {
+                        "kind": "tool",
+                        "title": TOOL_TITLES.get(name, name),
+                        "detail": str(event.get("detail") or "")[:240],
+                        "status": "done" if event.get("status") != "start" else "run",
+                    }
+                )
+                row.activity_json = json.dumps(steps, ensure_ascii=False)
+            side.commit()
+
+    return on_event
 
 
 def replace_requirements(db: Session, project: Project, requirements: list[dict]) -> None:
@@ -109,7 +208,16 @@ def read_html(db: Session, project: Project) -> str:
     return current.content if current else ""
 
 
-async def _call(db: Session, user: User, project: Project, messages: list[dict], max_tokens: int) -> str:
+async def _call(
+    db: Session,
+    user: User,
+    project: Project,
+    messages: list[dict],
+    max_tokens: int,
+    on_event=None,
+    extra: dict | None = None,
+    timeout: int = 58,
+) -> tuple[str, dict]:
     assert_quota(db, user)
     base_url, api_key, model = resolve_gateway(db, user)
     text, usage = await complete(
@@ -118,9 +226,12 @@ async def _call(db: Session, user: User, project: Project, messages: list[dict],
         model=model,
         messages=messages,
         max_tokens=max_tokens,
+        on_event=on_event,
+        extra=extra,
+        timeout=timeout,
     )
     record_usage(db, user, project, usage)
-    return text
+    return text, usage
 
 
 def _touch(project: Project, status: str) -> None:
@@ -129,30 +240,89 @@ def _touch(project: Project, status: str) -> None:
     project.updated_at = utcnow()
 
 
+async def _speak(db: Session, user: User, project: Project, role: str, system: str, user_text: str, title: str, handoff: str) -> str:
+    row = begin_turn(db, project, role, "正在接过上一手。", title)
+    text, _usage = await _call(
+        db,
+        user,
+        project,
+        [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user_text},
+        ],
+        max_tokens=500,
+        on_event=watch_turn(row.id),
+    )
+    finish_turn(
+        db,
+        row,
+        text,
+        [{"kind": "narration", "title": handoff, "detail": "", "status": "done"}],
+    )
+    return text
+
+
 async def plan_project(db: Session, project: Project, user: User) -> None:
     _touch(project, "planning")
+    add_message(db, project, "system", "Pi agent 0.87.1 开始这一轮。下面每一步都会单独出现。")
     db.commit()
-    text = await _call(
+    idea = project.prompt
+    mike = await _speak(
+        db,
+        user,
+        project,
+        "mike",
+        MIKE_SYSTEM,
+        f"用户想做的产品：\n{idea}",
+        "读取这条需求",
+        "把简报交给 @Iris、@Bob、@Emma",
+    )
+    iris = await _speak(
+        db,
+        user,
+        project,
+        "iris",
+        IRIS_SYSTEM,
+        f"用户想做的产品：\n{idea}\n\nMike 的简报：\n{mike}",
+        "根据简报判断使用者和风险",
+        "把研究交给 @Bob",
+    )
+    bob = await _speak(
+        db,
+        user,
+        project,
+        "bob",
+        BOB_SYSTEM,
+        f"用户想做的产品：\n{idea}\n\nIris 的研究：\n{iris}",
+        "确定要记住的数据",
+        "把结构交给 @Emma，并通知 @Alex 等批准",
+    )
+    emma = begin_turn(db, project, "emma", "正在把需求写成可检查的契约。", "对照前面的交接写检查项")
+    text, _usage = await _call(
         db,
         user,
         project,
         [
             {"role": "system", "content": PLAN_SYSTEM},
-            {"role": "user", "content": f"用户想做的产品：\n{project.prompt}"},
+            {
+                "role": "user",
+                "content": f"用户想做的产品：\n{idea}\n\nMike：\n{mike}\n\nIris：\n{iris}\n\nBob：\n{bob}",
+            },
         ],
         max_tokens=900,
+        on_event=watch_turn(emma.id, show_text=False),
     )
     try:
         data = extract_json(text)
         requirements = normalize_requirements(data.get("requirements"))
     except ContractError:
-        text = await _call(
+        text, _usage = await _call(
             db,
             user,
             project,
             [
                 {"role": "system", "content": PLAN_SYSTEM},
-                {"role": "user", "content": f"用户想做的产品：\n{project.prompt}"},
+                {"role": "user", "content": f"用户想做的产品：\n{idea}"},
                 {"role": "assistant", "content": text[:6000]},
                 {"role": "user", "content": "上次的 JSON 不合格。请只返回修正后的 JSON。"},
             ],
@@ -162,18 +332,19 @@ async def plan_project(db: Session, project: Project, user: User) -> None:
         requirements = normalize_requirements(data.get("requirements"))
 
     project.name = str(data.get("name") or project.name).strip()[:40] or "未命名"
-    project.lead_note = str(data.get("lead") or "").strip()[:2000]
-    project.research_note = str(data.get("research") or "").strip()[:2000]
-    project.architecture_note = str(data.get("architecture") or "").strip()[:2000]
+    project.lead_note = mike.strip()[:2000]
+    project.research_note = iris.strip()[:2000]
+    project.architecture_note = bob.strip()[:2000]
     replace_requirements(db, project, requirements)
     project.contract_locked = False
     project.contract_version = 0
     project.pending_amendment = ""
-    add_message(db, project, "system", "这一轮由 Pi agent 0.87.1 执行。")
-    add_message(db, project, "mike", project.lead_note)
-    add_message(db, project, "iris", project.research_note)
-    add_message(db, project, "bob", project.architecture_note)
-    add_message(db, project, "emma", _contract_message(requirements))
+    finish_turn(
+        db,
+        emma,
+        _contract_message(requirements) + "\n@Alex 等用户批准后再写页面。",
+        [{"kind": "narration", "title": "契约已摆出来，等你批准", "detail": "", "status": "done"}],
+    )
     _touch(project, "awaiting_approval")
     db.commit()
 
@@ -202,8 +373,9 @@ async def build_project(db: Session, project: Project, user: User, instruction: 
         "architecture": project.architecture_note,
         "requirements": requirements,
     }
+    alex = begin_turn(db, project, "alex", "我接过交接，先读契约。", "读取契约")
     messages = [
-        {"role": "system", "content": BUILD_SYSTEM},
+        {"role": "system", "content": ALEX_SYSTEM},
         {"role": "user", "content": json.dumps(brief, ensure_ascii=False)},
     ]
     if instruction.strip():
@@ -217,18 +389,74 @@ async def build_project(db: Session, project: Project, user: User, instruction: 
             }
         )
 
-    text = await _call(db, user, project, messages, max_tokens=1800)
-    built = await _repair_if_needed(db, user, project, text, requirements)
+    text, usage = await _call(
+        db,
+        user,
+        project,
+        messages,
+        max_tokens=1800,
+        on_event=watch_turn(alex.id),
+        extra={"mode": "build", "requirements": requirements},
+        timeout=120,
+    )
+    built = _built_from_tools(text, usage) 
+    if built is None or static_failures(built["html"], requirements):
+        problem = "" if built is None else "；".join(static_failures(built["html"], requirements))
+        seed = text if built is None else _as_build_text(built)
+        if problem:
+            finish_turn(
+                db,
+                alex,
+                alex.content,
+                [{"kind": "narration", "title": "检查没过，再写一版", "detail": problem[:240], "status": "run"}],
+            )
+            db.refresh(alex)
+        built = await _repair_if_needed(db, user, project, seed, requirements, problem)
     write_html(db, project, built["html"])
     project.trace_json = json.dumps(built["trace"], ensure_ascii=False)
     project.pending_amendment = ""
-    add_message(db, project, "alex", built["notes"] or "页面已经按契约写好，可以预览。")
+    finish_turn(
+        db,
+        alex,
+        built["notes"] or "页面已经按契约写好，可以预览。",
+        [{"kind": "narration", "title": f"版本 {project.contract_version}：{project.name}", "detail": "可以预览", "status": "done"}],
+    )
     _touch(project, "ready")
     db.commit()
 
 
-async def _repair_if_needed(db: Session, user: User, project: Project, text: str, requirements: list[dict]) -> dict:
-    last_error = ""
+def _built_from_tools(text: str, usage: dict) -> dict | None:
+    html = str(usage.get("html") or "").strip()
+    if "<html" not in html.lower() or "</html>" not in html.lower():
+        return None
+    trace = []
+    for line in str(usage.get("trace") or "").splitlines():
+        if "|" not in line:
+            continue
+        key, evidence = line.split("|", 1)
+        if key.strip():
+            trace.append({"key": key.strip()[:16], "evidence": evidence.strip()[:240]})
+    notes = str(usage.get("notes") or text or "页面已经按契约写好，可以预览。").strip()
+    return {"html": html, "notes": notes[:2000], "trace": trace[:12]}
+
+
+def _as_build_text(built: dict) -> str:
+    lines = ["NOTES", built.get("notes") or "", "", "TRACE"]
+    for item in built.get("trace") or []:
+        lines.append(f"{item.get('key', '')} | {item.get('evidence', '')}")
+    lines.extend(["", "HTML", built.get("html") or ""])
+    return "\n".join(lines)
+
+
+async def _repair_if_needed(
+    db: Session,
+    user: User,
+    project: Project,
+    text: str,
+    requirements: list[dict],
+    known_error: str = "",
+) -> dict:
+    last_error = known_error
     current = text
     for attempt in range(2):
         try:
@@ -243,7 +471,7 @@ async def _repair_if_needed(db: Session, user: User, project: Project, text: str
             last_error = "；".join(failures)
         if attempt == 1:
             break
-        current = await _call(
+        current, _usage = await _call(
             db,
             user,
             project,
@@ -271,7 +499,8 @@ async def revise_project(db: Session, project: Project, user: User, instruction:
     if not project.contract_locked:
         raise ContractError("契约还没锁定。先确认契约，再提修改。")
     requirements = requirement_payload(db, project)
-    verdict_text = await _call(
+    reviewer = begin_turn(db, project, "mike", "正在看这句修改还在不在契约里。", "判断修改范围")
+    verdict_text, _usage = await _call(
         db,
         user,
         project,
@@ -296,12 +525,17 @@ async def revise_project(db: Session, project: Project, user: User, instruction:
             {"reason": reason, "requirements": proposed},
             ensure_ascii=False,
         )
+        finish_turn(db, reviewer, reason or "这句修改会改掉已锁定的契约。", [{"kind": "narration", "title": "交给 @Emma 确认修订", "detail": "", "status": "done"}])
         add_message(db, project, "emma", reason or "这句修改会改掉已锁定的契约，需要你确认修订。")
         project.updated_at = utcnow()
         db.commit()
         return "amend"
-    add_message(db, project, "mike", reason or "这处修改还在契约里面，交给工程师。")
-    db.commit()
+    finish_turn(
+        db,
+        reviewer,
+        reason or "这处修改还在契约里面，交给工程师。",
+        [{"kind": "narration", "title": "交给 @Alex", "detail": "", "status": "done"}],
+    )
     await build_project(db, project, user, instruction=text)
     return "built"
 
