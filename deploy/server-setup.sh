@@ -30,6 +30,46 @@ fi
 
 say() { printf '\n\033[1;34m==>\033[0m %s\n' "$*"; }
 
+# Every external dependency this build needs, measured up front.
+#
+# Networks differ wildly in which hosts they can reach quickly: on the box
+# this was written for, git over HTTPS was fine while raw.githubusercontent
+# hung outright and pythonhosted crawled at 3.5 kB/s. Discovering that one
+# Docker layer at a time costs a full rebuild per finding, so check first
+# and print a table.
+preflight() {
+  say "Checking network paths"
+  printf '    %-42s %10s %12s\n' TARGET STATUS SPEED
+  local failed=0
+  local target url
+  for target in \
+    "github.com|https://github.com/bujidaoei/atom.git/info/refs?service=git-upload-pack" \
+    "registry.npmjs.org|https://registry.npmjs.org/tsx" \
+    "docker registry|https://registry-1.docker.io/v2/"
+  do
+    url="${target#*|}"
+    if probe "${target%%|*}" "$url"; then :; else failed=1; fi
+  done
+  [[ -n "$APT_MIRROR"  ]] && probe "apt mirror"  "http://${APT_MIRROR}/debian/"
+  [[ -n "$PYPI_INDEX"  ]] && probe "pypi index"  "${PYPI_INDEX}/uvloop/"
+  if [[ $failed -eq 1 ]]; then
+    say "A required host is unreachable. Fix connectivity before building."
+    exit 1
+  fi
+}
+
+probe() {
+  local label=$1 url=$2 out code speed
+  out=$(curl -fsS --max-time 12 -o /dev/null \
+        -w '%{http_code} %{speed_download}' "$url" 2>/dev/null) || {
+    printf '    %-42s %10s %12s\n' "$label" UNREACHABLE -
+    return 1
+  }
+  code=${out%% *}; speed=${out##* }
+  printf '    %-42s %10s %10.0f B/s\n' "$label" "$code" "$speed"
+  return 0
+}
+
 # The default Debian mirror is unusably slow from some clouds. Prefer the
 # provider's internal mirror when one answers quickly.
 detect_apt_mirror() {
