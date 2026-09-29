@@ -1,8 +1,11 @@
 services:
   atom:
-    build: .
+    build:
+      context: .
+      args:
+        VITE_BASE: ${VITE_BASE:-/}
     ports:
-      - "80:80"
+      - "${ATOM_HTTP_PORT:-80}:80"
     env_file:
       - .env
     volumes:

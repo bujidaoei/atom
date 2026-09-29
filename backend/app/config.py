@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     llm_api_key: str = ""
     llm_model: str = "qwen3.7-plus"
     cookie_secure: bool = False
+    cookie_path: str = "/"
     daily_call_limit: int = 40
 
     model_config = SettingsConfigDict(env_prefix="ATOM_", env_file=".env", extra="ignore")

@@ -35,7 +35,9 @@ npm run dev
 docker compose up -d --build
 ```
 
-容器里由 Supervisor 同时拉起 nginx 和 API。页面走 80 端口，`/api` 转到本机的 uvicorn。SQLite 在名为 `atom-data` 的卷里。
+容器里由 Supervisor 同时拉起 nginx 和 API。页面默认走 80 端口，`/api` 转到本机的 uvicorn。SQLite 在名为 `atom-data` 的卷里。
+
+80 端口已被占用时，把 `ATOM_HTTP_PORT` 改成空闲端口。如果只能挂在现有站点的子路径下，构建时设置 `VITE_BASE=/atom/`，并让前面的反向代理把 `/atom/` 转到容器的 80 端口。这时 `.env` 里的 `ATOM_COOKIE_PATH` 也写成 `/atom`。
 
 ## 测试
 

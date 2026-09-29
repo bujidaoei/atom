@@ -18,12 +18,12 @@ def set_session_cookie(response: Response, user_id: str) -> None:
         samesite="lax",
         secure=settings.cookie_secure,
         max_age=14 * 24 * 3600,
-        path="/",
+        path=settings.cookie_path or "/",
     )
 
 
 def clear_session_cookie(response: Response) -> None:
-    response.delete_cookie(COOKIE, path="/")
+    response.delete_cookie(COOKIE, path=settings.cookie_path or "/")
 
 
 def current_user(request: Request, db: Session = Depends(get_db)) -> User:
