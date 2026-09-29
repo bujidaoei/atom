@@ -82,7 +82,8 @@ try {
         id: modelId,
         name: modelId,
         api: "openai-completions",
-        reasoning: false,
+        // Qwen only receives enable_thinking when reasoning is on. Off means the flag is false.
+        reasoning: true,
         input: ["text"],
         cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
         contextWindow: 128000,
