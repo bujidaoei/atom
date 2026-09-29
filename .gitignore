@@ -1,12 +1,27 @@
+# secrets
 .env
 backend/.env
+
+# dependencies
 backend/.venv
-backend/data
 frontend/node_modules
 runtime/node_modules
+
+# build output
 frontend/dist
 __pycache__/
 .pytest_cache/
 *.pyc
-_feishu_raw.txt
+
+# runtime state
+backend/data
+data/
+.logs/
+
+# The vendored Pi tree and the pinned gateway bundle are part of the product
+# and must stay in the repository; only the 157 MB per-generation build cache
+# used to recompile the bundle is excluded.
+runtime/.cache/pi-build-generation-*
+
 .DS_Store
+Thumbs.db

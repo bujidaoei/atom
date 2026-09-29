@@ -1,87 +1,85 @@
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
+from __future__ import annotations
 
-from app.config import settings
-from app.services.catalog import list_model_ids
-from app.db import get_db
-from app.deps import current_user
-from app.masking import mask_secret
-from app.models import User, UserSettings
-from app.schemas import SettingsIn
+from fastapi import APIRouter, HTTPException, status
+from pydantic import BaseModel, Field
+
+from ..config import get_settings
+from ..deps import CurrentUser, DbSession
+from ..masking import mask_secret
+from ..models import UserSettings
+from ..services.gateway import list_models
 
 router = APIRouter(prefix="/settings", tags=["settings"])
 
 
-def _row(db: Session, user: User) -> UserSettings:
-    row = db.get(UserSettings, user.id)
-    if row is None:
-        row = UserSettings(user_id=user.id, base_url="", api_key="", model="")
-        db.add(row)
-        db.commit()
-        db.refresh(row)
-    return row
+class SettingsPatch(BaseModel):
+    baseUrl: str | None = Field(default=None, max_length=500)
+    apiKey: str | None = Field(default=None, max_length=500)
+    model: str | None = Field(default=None, max_length=200)
 
 
-def _view(row: UserSettings) -> dict:
-    user_key = (row.api_key or "").strip()
-    server_key = (settings.llm_api_key or "").strip()
-    if user_key:
-        source = "user"
-        effective = user_key
-    elif server_key:
-        source = "server"
-        effective = server_key
-    else:
-        source = "none"
-        effective = ""
-    base_url = (row.base_url or "").strip() or (settings.llm_base_url or "").strip() or "https://ai-gateway.skg.com/v1"
-    model = (row.model or "").strip() or (settings.llm_model or "").strip() or "qwen3.7-plus"
+def _overrides(session, user_id: str) -> UserSettings:
+    overrides = session.get(UserSettings, user_id)
+    if overrides is None:
+        overrides = UserSettings(user_id=user_id)
+        session.add(overrides)
+        session.flush()
+    return overrides
+
+
+async def _payload(session, user_id: str) -> dict[str, object]:
+    defaults = get_settings()
+    overrides = _overrides(session, user_id)
+
+    base_url = overrides.base_url or defaults.llm_base_url
+    api_key = overrides.api_key or defaults.llm_api_key
+    model = overrides.model or defaults.llm_model
+
     return {
-        "base_url": base_url,
-        "base_url_source": "user" if (row.base_url or "").strip() else "server",
+        "baseUrl": base_url,
         "model": model,
-        "model_source": "user" if (row.model or "").strip() else "server",
-        "api_key_masked": mask_secret(effective),
-        "api_key_source": source,
-        "configured": bool(effective),
-        "models": [{"id": model_id, "label": model_id} for model_id in list_model_ids(base_url, effective)],
+        "apiKeyMasked": mask_secret(api_key),
+        "hasUserKey": bool(overrides.api_key),
+        "source": "user" if overrides.api_key else "server",
+        "models": [{"id": item} for item in await list_models(base_url, api_key)],
     }
 
 
 @router.get("")
-def read_settings(user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
-    return _view(_row(db, user))
+async def read(user: CurrentUser, session: DbSession) -> dict[str, object]:
+    payload = await _payload(session, user.id)
+    session.commit()
+    return payload
 
 
 @router.put("")
-def update_settings(
-    body: SettingsIn,
-    user: User = Depends(current_user),
-    db: Session = Depends(get_db),
-) -> dict:
-    row = _row(db, user)
-    if body.base_url is not None:
-        value = body.base_url.strip().rstrip("/")
-        if value and not value.startswith("https://"):
-            raise HTTPException(status_code=422, detail="模型地址需要以 https:// 开头")
-        row.base_url = value[:300]
-    if body.api_key is not None:
-        key = body.api_key.strip()
-        if key and (len(key) < 8 or len(key) > 200 or any(char.isspace() for char in key)):
-            raise HTTPException(status_code=422, detail="API Key 格式不对")
-        row.api_key = key
+async def update(body: SettingsPatch, user: CurrentUser, session: DbSession) -> dict[str, object]:
+    overrides = _overrides(session, user.id)
+
+    if body.baseUrl is not None:
+        candidate = body.baseUrl.strip().rstrip("/")
+        if candidate and not candidate.startswith(("http://", "https://")):
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Base URL 必须以 http:// 或 https:// 开头")
+        overrides.base_url = candidate or None
+
+    if body.apiKey is not None:
+        candidate = body.apiKey.strip()
+        # The UI shows a masked key; if it comes back unchanged, the user did
+        # not retype it and we must not overwrite the stored value.
+        if candidate and "*" not in candidate:
+            overrides.api_key = candidate
+        elif not candidate:
+            overrides.api_key = None
+
     if body.model is not None:
-        model = body.model.strip()
-        if model and (len(model) > 120 or any(char.isspace() for char in model)):
-            raise HTTPException(status_code=422, detail="模型名称不对")
-        row.model = model
-    db.commit()
-    return _view(row)
+        overrides.model = body.model.strip() or None
+
+    session.commit()
+    return await _payload(session, user.id)
 
 
 @router.delete("/api-key")
-def clear_api_key(user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
-    row = _row(db, user)
-    row.api_key = ""
-    db.commit()
-    return _view(row)
+async def clear_key(user: CurrentUser, session: DbSession) -> dict[str, object]:
+    _overrides(session, user.id).api_key = None
+    session.commit()
+    return await _payload(session, user.id)

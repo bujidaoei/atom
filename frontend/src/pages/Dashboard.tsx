@@ -1,141 +1,203 @@
-import { FormEvent, useEffect, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
-import { AgentFace, team } from "../agents";
-import { api, readError } from "../api";
-import { ComposerDock } from "../ModelSelect";
-import { AppShell } from "../Shell";
-import { useSession } from "../session";
-import type { ProjectSummary, Usage } from "../types";
-import { formatWhen, statusLabel } from "../ui";
-
-const starters = [
-  "给街角咖啡馆做一个今日烘焙看板，店员能把卖完的标出来，刷新后还在",
-  "给自由职业者做一个回款记录，能记下客户、金额和有没有到账",
-  "做一个小面试表，记下候选人、时间和一句备注",
-];
+import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
+import { AgentRow } from "../components/AgentRow";
+import { Composer } from "../components/Composer";
+import { Button, IconButton } from "../components/ui/Button";
+import { Icon } from "../components/ui/Icon";
+import { StatusBadge } from "../components/ui/Badge";
+import { EmptyState, ErrorState, Skeleton } from "../components/ui/States";
+import { takePendingPrompt, useAuth } from "../lib/auth";
+import { errorMessage } from "../lib/api";
+import { EXAMPLE_PROMPTS } from "../lib/examples";
+import { formatRelative } from "../lib/format";
+import { useProjects } from "../lib/projects";
+import type { ProjectSummary } from "../lib/types";
+import { useCreateProject } from "../lib/useCreateProject";
 
 export function DashboardPage() {
-  const { user } = useSession();
-  const navigate = useNavigate();
-  const [projects, setProjects] = useState<ProjectSummary[]>([]);
-  const [usage, setUsage] = useState<Usage | null>(null);
+  const { user } = useAuth();
+  const { projects, loading, error, refresh, removeProject } = useProjects();
   const [prompt, setPrompt] = useState("");
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [confirmId, setConfirmId] = useState("");
+  const [carriedOver, setCarriedOver] = useState(false);
+  const { create, submitting, error: createError } = useCreateProject(refresh);
 
+  // A prompt typed on the landing page while signed out lands here after auth.
   useEffect(() => {
-    document.title = "首页 · Atom";
-    api.projects().then(setProjects).catch((err) => setError(readError(err)));
-    api.usage().then(setUsage).catch(() => setUsage(null));
+    const pending = takePendingPrompt();
+    if (pending) {
+      setPrompt(pending);
+      setCarriedOver(true);
+    }
   }, []);
 
-  async function create(event: FormEvent) {
-    event.preventDefault();
-    if (prompt.trim().length < 4) {
-      setError("再多写一句，小队才知道要做什么");
-      return;
-    }
-    setBusy(true);
-    setError("");
-    try {
-      const project = await api.createProject(prompt.trim());
-      navigate(`/app/p/${project.id}`);
-    } catch (err) {
-      setError(readError(err));
-      setBusy(false);
-    }
-  }
-
-  async function remove(id: string) {
-    setError("");
-    try {
-      await api.deleteProject(id);
-      setProjects((current) => current.filter((item) => item.id !== id));
-      setConfirmId("");
-    } catch (err) {
-      setError(readError(err));
-    }
-  }
+  const outOfCredits = user !== null && user.credits <= 0;
 
   return (
-    <AppShell>
-      <div className="flex justify-end px-6 py-3 text-sm text-[#6b7280]">
-        {usage ? `已调用 ${usage.calls} 次` : "用量读取中"}
-      </div>
-      <div className="mx-auto flex w-full max-w-[720px] flex-col items-center bg-[#f3f4f6] px-5 pb-20">
-        <p className="mb-6 rounded-full bg-[#ececee] px-4 py-1.5 text-xs text-[#6b7280]">主对话 · 模型来自网关目录</p>
-        <ul className="flex items-end gap-2">
-          {team.map((person) => (
-            <li key={person.id}>
-              <AgentFace name={person.name} fill={person.fill} mouth={person.mouth} />
-            </li>
-          ))}
-        </ul>
-        <h1 className="mt-6 text-center text-[clamp(2rem,4vw,2.75rem)] font-semibold leading-tight tracking-[-0.03em] text-black">
-          你想创造什么{user?.name ? `，${user.name}` : ""}？
-        </h1>
-        <div className="mt-8 w-full">
-          <ComposerDock
-            value={prompt}
-            onChange={setPrompt}
-            onSubmit={create}
-            busy={busy}
-            disabled={busy}
-            placeholder="告知小队你的需求"
-            onError={setError}
-          />
-        </div>
-        {error ? <p className="mt-3 w-full text-sm text-clay">{error}</p> : null}
-        <div className="mt-4 flex w-full flex-wrap gap-2">
-          {starters.map((item) => (
+    <div className="mx-auto flex max-w-[1000px] flex-col px-l py-xxl">
+      <AgentRow size="lg" className="mb-l" />
+
+      <h1 className="text-center text-h1 font-medium tracking-[-0.01em] text-neutral-95">
+        你今天想创造什么？
+      </h1>
+
+      <div className="mx-auto mt-xl w-full max-w-[720px]">
+        <Composer
+          value={prompt}
+          onChange={(next) => {
+            setPrompt(next);
+            setCarriedOver(false);
+          }}
+          onSubmit={() => void create(prompt)}
+          submitting={submitting}
+          error={createError}
+          disabled={outOfCredits}
+          disabledReason="额度已用完，无法开始新的构建。"
+          submitLabel="开始构建"
+          meta={
+            carriedOver ? (
+              <span className="text-brand-text">已带回你在首页写的想法</span>
+            ) : undefined
+          }
+        />
+
+        <div className="mt-m flex flex-wrap items-center gap-xs">
+          <span className="text-sm text-neutral-40">试试：</span>
+          {EXAMPLE_PROMPTS.slice(0, 4).map((example) => (
             <button
-              key={item}
+              key={example.title}
               type="button"
-              onClick={() => setPrompt(item)}
-              className="rounded-full border border-line bg-raised px-3 py-1.5 text-left text-xs text-muted hover:border-ink/30 hover:text-ink"
+              onClick={() => {
+                setPrompt(example.prompt);
+                setCarriedOver(false);
+              }}
+              className="hairline rounded-full border-neutral-12 bg-base-tertiary px-m py-[3px] text-sm text-neutral-80 transition-colors duration-ui ease-ui hover:border-neutral-20 hover:text-neutral-95 active:bg-base-secondary-alt"
             >
-              {item.slice(0, 18)}…
+              {example.title}
             </button>
           ))}
         </div>
-
-        <section id="projects" className="mt-16 w-full scroll-mt-8">
-          <div className="flex items-baseline justify-between">
-            <h2 className="text-sm font-medium">我的项目</h2>
-            <span className="text-xs text-muted">{projects.length} 个</span>
-          </div>
-          {projects.length === 0 ? (
-            <p className="mt-4 text-sm text-muted">还没有项目。上面写下一句，就会从契约开始。</p>
-          ) : (
-            <ul className="mt-3 divide-y divide-line border-y border-line">
-              {projects.map((project) => (
-                <li key={project.id} className="grid items-center gap-2 py-3 sm:grid-cols-[minmax(0,1fr)_88px_auto]">
-                  <div className="min-w-0">
-                    <Link to={`/app/p/${project.id}`} className="hover:text-copper">
-                      {project.name || "未命名"}
-                    </Link>
-                    <p className="truncate text-sm text-muted">{project.prompt}</p>
-                  </div>
-                  <span className="text-sm text-muted">{statusLabel[project.status] || project.status}</span>
-                  <div className="flex items-center gap-3 text-sm">
-                    <span className="text-muted">{formatWhen(project.updated_at)}</span>
-                    {confirmId === project.id ? (
-                      <button type="button" className="text-clay" onClick={() => remove(project.id)}>
-                        确认删除
-                      </button>
-                    ) : (
-                      <button type="button" className="text-muted hover:text-ink" onClick={() => setConfirmId(project.id)}>
-                        删除
-                      </button>
-                    )}
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
       </div>
-    </AppShell>
+
+      <section className="mt-xxxl">
+        <div className="flex items-baseline justify-between gap-m">
+          <h2 className="text-lg font-medium text-neutral-95">你的项目</h2>
+          {projects.length > 0 ? (
+            <span className="text-sm text-neutral-60">{projects.length} 个</span>
+          ) : null}
+        </div>
+
+        <div className="mt-l">
+          {loading ? (
+            <div className="grid grid-cols-1 gap-m sm:grid-cols-2 lg:grid-cols-3">
+              {[0, 1, 2].map((index) => (
+                <Skeleton key={index} className="h-[124px] w-full" />
+              ))}
+            </div>
+          ) : error ? (
+            <ErrorState message={error} onRetry={() => void refresh()} />
+          ) : projects.length === 0 ? (
+            <div className="hairline rounded-xl border-dashed border-neutral-20 bg-base-tertiary">
+              <EmptyState
+                title="还没有项目"
+                description="在上面写一句想法，Mike 会先把它拆成计划，然后整个 squad 接力往下走。"
+              />
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 gap-m sm:grid-cols-2 lg:grid-cols-3">
+              {projects.map((project) => (
+                <ProjectCard
+                  key={project.id}
+                  project={project}
+                  onDelete={() => removeProject(project.id)}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function ProjectCard({
+  project,
+  onDelete,
+}: {
+  project: ProjectSummary;
+  onDelete: () => Promise<void>;
+}) {
+  const [confirming, setConfirming] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  return (
+    <div className="hairline group relative flex flex-col gap-s rounded-l border-neutral-12 bg-base-tertiary p-l transition-[border-color,box-shadow,transform] duration-ui ease-ui hover:-translate-y-[2px] hover:border-neutral-20 hover:shadow-flat focus-within:border-neutral-20">
+      <div className="flex items-start justify-between gap-s">
+        <Link
+          to={`/app/p/${project.id}`}
+          className="min-w-0 flex-1 rounded-m text-md font-medium leading-5 text-neutral-95 hover:text-brand-text"
+        >
+          <span className="line-clamp-2">{project.title}</span>
+        </Link>
+        <IconButton
+          label="删除项目"
+          onClick={() => setConfirming(true)}
+          className="opacity-0 transition-opacity duration-ui ease-ui group-hover:opacity-100 focus-visible:opacity-100"
+        >
+          <Icon name="trash" size={14} />
+        </IconButton>
+      </div>
+
+      <p className="line-clamp-2 min-h-[36px] text-sm leading-[18px] text-neutral-60">
+        {project.summary ?? "还没有摘要，规划完成后 Emma 会补上。"}
+      </p>
+
+      <div className="mt-auto flex flex-wrap items-center gap-xs pt-xxs">
+        <StatusBadge status={project.status} />
+        {project.kind ? (
+          <span className="rounded-full bg-neutral-8 px-s py-[2px] text-xs text-neutral-60">
+            {project.kind}
+          </span>
+        ) : null}
+        <span className="ml-auto text-xs text-neutral-40">{formatRelative(project.updatedAt)}</span>
+      </div>
+
+      {project.slug ? (
+        <a
+          href={`/p/${project.slug}/`}
+          target="_blank"
+          rel="noreferrer"
+          className="inline-flex items-center gap-xxs text-xs text-brand-text hover:underline"
+        >
+          <Icon name="external" size={12} />/p/{project.slug}
+        </a>
+      ) : null}
+
+      {confirming ? (
+        <div className="absolute inset-0 flex flex-col justify-center gap-s rounded-l bg-base-tertiary p-l backdrop-blur-[2px]">
+          <p className="text-base text-neutral-95">删除这个项目？工作区文件也会一起消失。</p>
+          {deleteError ? <p className="text-sm text-danger-strong">{deleteError}</p> : null}
+          <div className="flex gap-s">
+            <Button
+              variant="danger"
+              size="sm"
+              loading={deleting}
+              onClick={() => {
+                setDeleting(true);
+                setDeleteError(null);
+                onDelete()
+                  .catch((err: unknown) => setDeleteError(errorMessage(err)))
+                  .finally(() => setDeleting(false));
+              }}
+            >
+              删除
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => setConfirming(false)}>
+              取消
+            </Button>
+          </div>
+        </div>
+      ) : null}
+    </div>
   );
 }

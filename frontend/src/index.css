@@ -2,45 +2,285 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  color-scheme: light;
-}
+/*
+ * Raw scales + semantic layer, transcribed from docs/design-system.md.
+ * Components must only ever reference the semantic layer.
+ */
+@layer base {
+  :root {
+    --beige-50: #ffffff;
+    --beige-100: #f6f6f6;
+    --beige-150: #f1f1f1;
+    --beige-200: #ebebea;
 
-body {
-  margin: 0;
-  min-height: 100vh;
-  background: #f3efe6;
-  color: #1c1915;
-  font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
-  text-wrap: pretty;
-}
+    --grey-700: #353536;
+    --grey-750: #2c2c2d;
+    --grey-800: #232324;
+    --grey-900: #171717;
 
-h1,
-h2 {
-  text-wrap: balance;
-}
+    --blue-100: #dde7ff;
+    --blue-300: #9ab4ff;
+    --blue-400: #7d9aff;
+    --blue-500: #4267ff;
+    --blue-600: #425ce1;
+    --blue-700: #293a90;
+    --blue-800: #212675;
 
-:focus-visible {
-  outline: 2px solid #8f4318;
-  outline-offset: 2px;
-}
+    --red-400: #fb7274;
+    --red-500: #c9444a;
+    --red-600: #b72027;
 
-::selection {
-  background: #ead9c8;
-}
+    --green-400: #57c675;
+    --green-600: #25813c;
 
-@keyframes pulse-dot {
-  50% {
-    opacity: 0.3;
+    --alpha-black-2: rgba(12, 12, 12, 0.02);
+    --alpha-black-4: rgba(12, 12, 12, 0.04);
+    --alpha-black-6: rgba(12, 12, 12, 0.06);
+    --alpha-black-8: rgba(12, 12, 12, 0.08);
+    --alpha-black-12: rgba(12, 12, 12, 0.12);
+    --alpha-black-30: rgba(12, 12, 12, 0.3);
+    --alpha-black-40: rgba(12, 12, 12, 0.4);
+    --alpha-black-55: rgba(12, 12, 12, 0.55);
+    --alpha-black-80: rgba(12, 12, 12, 0.8);
+    --alpha-black-95: rgba(12, 12, 12, 0.95);
+    --alpha-black-100: #0c0c0c;
+
+    --alpha-white-4: hsla(0, 0%, 100%, 0.04);
+    --alpha-white-8: hsla(0, 0%, 100%, 0.08);
+    --alpha-white-12: hsla(0, 0%, 100%, 0.12);
+    --alpha-white-16: hsla(0, 0%, 100%, 0.16);
+    --alpha-white-20: hsla(0, 0%, 100%, 0.2);
+    --alpha-white-40: hsla(0, 0%, 100%, 0.4);
+    --alpha-white-60: hsla(0, 0%, 100%, 0.6);
+    --alpha-white-80: hsla(0, 0%, 100%, 0.8);
+    --alpha-white-95: hsla(0, 0%, 100%, 0.95);
+
+    --alpha-blue-8: rgba(61, 99, 255, 0.08);
+    --alpha-blue-12: rgba(61, 99, 255, 0.12);
+    --alpha-blue-16: rgba(61, 99, 255, 0.16);
+    --alpha-blue-25: rgba(61, 99, 255, 0.25);
+    --alpha-blue-30: rgba(61, 99, 255, 0.3);
+    --alpha-blue-40: rgba(61, 99, 255, 0.4);
+
+    /* semantic — light */
+    --color-bg-base-default: var(--beige-200);
+    --color-bg-base-default-low: var(--beige-50);
+    --color-bg-base-secondary: var(--beige-100);
+    --color-bg-base-secondary-alt: var(--beige-150);
+    --color-bg-base-tertiary: var(--beige-50);
+
+    --color-bg-brand-default: var(--blue-500);
+    --color-bg-brand-secondary: var(--blue-400);
+    --color-bg-brand-tertiary: var(--blue-300);
+    --color-bg-alpha-brand-secondary: var(--alpha-blue-12);
+    --color-bg-alpha-brand-tertiary: var(--alpha-blue-8);
+
+    --color-bg-neutral-4: var(--alpha-black-2);
+    --color-bg-neutral-8: var(--alpha-black-4);
+    --color-bg-neutral-12: var(--alpha-black-6);
+    --color-bg-neutral-16: var(--alpha-black-8);
+    --color-bg-neutral-20: var(--alpha-black-12);
+
+    --color-border-brand-default: var(--blue-600);
+    --color-border-danger-default: var(--red-600);
+
+    --color-text-neutral-95: var(--alpha-black-95);
+    --color-text-neutral-80: var(--alpha-black-80);
+    --color-text-neutral-60: var(--alpha-black-55);
+    --color-text-neutral-40: var(--alpha-black-30);
+    --color-text-neutral-inverse-95: var(--alpha-white-95);
+    --color-text-brand-default: var(--blue-600);
+
+    --color-danger-default: var(--red-500);
+    --color-danger-strong: var(--red-600);
+    --color-danger-soft: var(--red-400);
+    --color-success-default: var(--green-400);
+    --color-success-strong: var(--green-600);
+
+    /* Alpha derivations of the two status hues — needed because Tailwind
+       cannot apply `/opacity` to a var()-backed color. */
+    --color-bg-danger-surface: rgba(201, 68, 74, 0.07);
+    --color-bg-danger-chip: rgba(201, 68, 74, 0.16);
+    --color-border-danger-soft: rgba(201, 68, 74, 0.35);
+    --color-bg-success-surface: rgba(87, 198, 117, 0.12);
+    --color-bg-success-chip: rgba(87, 198, 117, 0.22);
+    --color-border-success-soft: rgba(87, 198, 117, 0.4);
+    --color-ring-brand: var(--alpha-blue-40);
+
+    --color-bg-utilities-header: hsla(0, 0%, 90%, 0.7);
+    --color-bg-utilities-footer: #232324;
+    --color-bg-utilities-tab: hsla(0, 0%, 100%, 0.95);
+
+    --color-agent-mike: var(--blue-500);
+    --color-agent-iris: #8b5cf6;
+    --color-agent-emma: var(--green-400);
+    --color-agent-bob: #f59e0b;
+    --color-agent-alex: var(--grey-700);
+    --color-agent-idle: var(--alpha-black-12);
+
+    --shadow-flat: 0 1px 4px rgba(12, 12, 12, 0.08);
+
+    --sidebar-motion-duration-expand: 0.82s;
+    --sidebar-motion-ease-expand: cubic-bezier(0.01, 0.99, 0.49, 1.01);
+    --sidebar-motion-duration-collapse: 0.46s;
+    --sidebar-motion-ease-collapse: cubic-bezier(0.08, 0.57, 0.02, 1);
+
+    color-scheme: light;
+  }
+
+  .dark {
+    --color-bg-base-default: var(--grey-800);
+    --color-bg-base-default-low: var(--grey-900);
+    --color-bg-base-secondary: var(--grey-750);
+    --color-bg-base-secondary-alt: var(--grey-700);
+    --color-bg-base-tertiary: var(--grey-750);
+
+    --color-bg-brand-default: var(--blue-500);
+    --color-bg-brand-secondary: var(--blue-400);
+    --color-bg-brand-tertiary: var(--blue-700);
+    --color-bg-alpha-brand-secondary: var(--alpha-blue-25);
+    --color-bg-alpha-brand-tertiary: var(--alpha-blue-16);
+
+    --color-bg-neutral-4: var(--alpha-white-4);
+    --color-bg-neutral-8: var(--alpha-white-8);
+    --color-bg-neutral-12: var(--alpha-white-12);
+    --color-bg-neutral-16: var(--alpha-white-16);
+    --color-bg-neutral-20: var(--alpha-white-20);
+
+    --color-border-brand-default: var(--blue-400);
+    --color-border-danger-default: var(--red-400);
+
+    --color-text-neutral-95: var(--alpha-white-95);
+    --color-text-neutral-80: var(--alpha-white-80);
+    --color-text-neutral-60: var(--alpha-white-60);
+    --color-text-neutral-40: var(--alpha-white-40);
+    --color-text-neutral-inverse-95: var(--alpha-black-95);
+    --color-text-brand-default: var(--blue-400);
+
+    --color-danger-default: var(--red-400);
+    --color-danger-strong: var(--red-400);
+    --color-danger-soft: var(--red-400);
+    --color-success-default: var(--green-400);
+    --color-success-strong: var(--green-400);
+
+    --color-bg-danger-surface: rgba(251, 114, 116, 0.1);
+    --color-bg-danger-chip: rgba(251, 114, 116, 0.2);
+    --color-border-danger-soft: rgba(251, 114, 116, 0.35);
+    --color-bg-success-surface: rgba(87, 198, 117, 0.12);
+    --color-bg-success-chip: rgba(87, 198, 117, 0.22);
+    --color-border-success-soft: rgba(87, 198, 117, 0.45);
+
+    --color-bg-utilities-header: hsla(240, 2%, 14%, 0.7);
+    --color-bg-utilities-footer: var(--grey-900);
+    --color-bg-utilities-tab: hsla(240, 2%, 17%, 0.95);
+
+    /* Alex stays grey, lifted just enough to read on the dark surface. */
+    --color-agent-alex: #6f6f72;
+    --color-agent-idle: var(--alpha-white-16);
+
+    color-scheme: dark;
+  }
+
+  html {
+    font-size: 14px;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    @apply bg-base-default text-neutral-95 font-sans text-base antialiased;
+    text-wrap: pretty;
+  }
+
+  * {
+    @apply border-neutral-12;
+  }
+
+  :focus-visible {
+    @apply outline-none ring-2 ring-brand-ring ring-offset-2 ring-offset-base-default;
+  }
+
+  ::selection {
+    background: var(--color-bg-alpha-brand-secondary);
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--color-bg-neutral-20);
+    border-radius: 999px;
+    border: 3px solid transparent;
+    background-clip: content-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--color-text-neutral-40);
+    background-clip: content-box;
   }
 }
 
-.pulse-dot {
-  animation: pulse-dot 1.2s ease-in-out infinite;
+@layer components {
+  /* The composer is the one component with its own geometry (design-system §4). */
+  .composer-shell {
+    border-radius: 24px;
+    padding: 16px;
+    border-width: 0.667px;
+    box-shadow: var(--shadow-flat);
+    @apply border-neutral-20 bg-base-tertiary transition-shadow duration-ui ease-ui;
+  }
+
+  .composer-shell:focus-within {
+    box-shadow:
+      var(--shadow-flat),
+      0 0 0 3px var(--color-bg-alpha-brand-tertiary);
+    @apply border-brand-line;
+  }
+
+  .sidebar-motion {
+    transition-property: width, transform, opacity;
+    transition-duration: var(--sidebar-motion-duration-expand);
+    transition-timing-function: var(--sidebar-motion-ease-expand);
+  }
+
+  .sidebar-motion--collapsing {
+    transition-duration: var(--sidebar-motion-duration-collapse);
+    transition-timing-function: var(--sidebar-motion-ease-collapse);
+  }
+
+  .shimmer-text {
+    background-image: linear-gradient(
+      100deg,
+      var(--color-text-neutral-40) 20%,
+      var(--color-text-neutral-95) 40%,
+      var(--color-text-neutral-40) 60%
+    );
+    background-size: 200% 100%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    @apply animate-shimmer;
+  }
+
+  .hairline {
+    border-width: 0.667px;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .pulse-dot {
-    animation: none;
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+  .shimmer-text {
+    color: var(--color-text-neutral-80);
+    background-image: none;
+    -webkit-background-clip: border-box;
+    background-clip: border-box;
   }
 }

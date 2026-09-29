@@ -1,206 +1,244 @@
-import { FormEvent, useEffect, useState } from "react";
-import { api, readError } from "../api";
-import { AppShell } from "../Shell";
-import type { SettingsView } from "../types";
-import { Button, inputClass } from "../ui";
+import { useEffect, useState } from "react";
+import { Button } from "../components/ui/Button";
+import { Badge } from "../components/ui/Badge";
+import { Icon } from "../components/ui/Icon";
+import { SelectField, TextField } from "../components/ui/Field";
+import { ErrorState, LoadingState, Panel } from "../components/ui/States";
+import { api, errorMessage } from "../lib/api";
+import type { Settings } from "../lib/types";
 
 export function SettingsPage() {
-  const [view, setView] = useState<SettingsView | null>(null);
-  const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
-  const [editingKey, setEditingKey] = useState(false);
-  const [keyDraft, setKeyDraft] = useState("");
-  const [showKey, setShowKey] = useState(false);
-  const [baseUrl, setBaseUrl] = useState("");
-  const [busy, setBusy] = useState("");
+  const [settings, setSettings] = useState<Settings | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  const [baseUrl, setBaseUrl] = useState("");
+  const [model, setModel] = useState("");
+  const [editingKey, setEditingKey] = useState(false);
+  const [newKey, setNewKey] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [clearing, setClearing] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+
+  function adopt(next: Settings) {
+    setSettings(next);
+    setBaseUrl(next.baseUrl);
+    setModel(next.model);
+    setEditingKey(false);
+    setNewKey("");
+  }
+
+  async function load() {
+    setLoading(true);
+    setLoadError(null);
+    try {
+      adopt(await api.getSettings());
+    } catch (err) {
+      setLoadError(errorMessage(err));
+    } finally {
+      setLoading(false);
+    }
+  }
 
   useEffect(() => {
-    document.title = "网关设置 · Atom";
-    api
-      .settings()
-      .then((next) => {
-        setView(next);
-        setBaseUrl(next.base_url);
-      })
-      .catch((err) => setError(readError(err)))
-      .finally(() => setLoading(false));
+    void load();
   }, []);
 
-  async function saveKey(event: FormEvent) {
-    event.preventDefault();
-    setBusy("key");
-    setError("");
-    setNotice("");
+  const dirty =
+    settings !== null &&
+    (baseUrl.trim() !== settings.baseUrl ||
+      model !== settings.model ||
+      (editingKey && newKey.trim().length > 0));
+
+  async function save() {
+    if (!settings) return;
+    setSaving(true);
+    setSaveError(null);
+    setSaved(false);
     try {
-      const next = await api.saveSettings({ api_key: keyDraft.trim() });
-      setView(next);
-      setEditingKey(false);
-      setKeyDraft("");
-      setShowKey(false);
-      setNotice("密钥已更新");
+      const patch: { baseUrl?: string; model?: string; apiKey?: string } = {};
+      if (baseUrl.trim() !== settings.baseUrl) patch.baseUrl = baseUrl.trim();
+      if (model !== settings.model) patch.model = model;
+      if (editingKey && newKey.trim()) patch.apiKey = newKey.trim();
+      adopt(await api.updateSettings(patch));
+      setSaved(true);
     } catch (err) {
-      setError(readError(err));
+      setSaveError(errorMessage(err));
     } finally {
-      setBusy("");
+      setSaving(false);
     }
   }
 
-  async function clearKey() {
-    setBusy("clear");
-    setError("");
+  async function restoreDefault() {
+    setClearing(true);
+    setSaveError(null);
+    setSaved(false);
     try {
-      setView(await api.clearKey());
-      setNotice("已改回服务器默认密钥");
+      adopt(await api.clearApiKey());
     } catch (err) {
-      setError(readError(err));
+      setSaveError(errorMessage(err));
     } finally {
-      setBusy("");
-    }
-  }
-
-  async function saveBase(event: FormEvent) {
-    event.preventDefault();
-    setBusy("url");
-    setError("");
-    try {
-      const next = await api.saveSettings({ base_url: baseUrl.trim() });
-      setView(next);
-      setBaseUrl(next.base_url);
-      setNotice("地址已保存");
-    } catch (err) {
-      setError(readError(err));
-    } finally {
-      setBusy("");
-    }
-  }
-
-  async function saveModel(model: string) {
-    setError("");
-    try {
-      setView(await api.saveSettings({ model }));
-      setNotice("模型已切换");
-    } catch (err) {
-      setError(readError(err));
+      setClearing(false);
     }
   }
 
   return (
-    <AppShell>
-      <main className="mx-auto max-w-4xl px-5 py-10 md:px-10">
-        <h1 className="font-display text-5xl font-medium tracking-[-0.03em]">网关</h1>
-        <p className="mt-3 max-w-xl text-sm leading-6 text-muted">
-          模型请求走你配置的 OpenAI 兼容网关。密钥只在服务器上保存，页面上只显示前两位和后两位。
+    <div className="mx-auto flex max-w-[640px] flex-col gap-xl px-l py-xxl">
+      <header className="flex flex-col gap-xxs">
+        <h1 className="text-2xl font-medium text-neutral-95">设置</h1>
+        <p className="text-base text-neutral-60">
+          配置 AI 网关。留空则使用服务端默认凭据，不会把你的 key 回显到页面上。
         </p>
-        {loading ? <p className="mt-4 text-sm text-muted">正在读取网关配置</p> : null}
-        {error ? <p className="mt-4 text-sm text-clay">{error}</p> : null}
-        {notice ? <p className="mt-4 text-sm text-sage">{notice}</p> : null}
+      </header>
 
-        <section className="mt-10 border-t border-line py-6">
-          <div className="grid items-start gap-6 md:grid-cols-[minmax(0,1fr)_auto]">
-            <div>
-              <h2 className="text-base font-medium">AI 网关 API Key</h2>
-              <p className="mt-2 max-w-xl text-sm leading-6 text-muted">
-                可选。模型请求将优先使用你为本账号配置的网关 API Key；未配置时使用受保护的服务器默认密钥。
-              </p>
+      {loading ? (
+        <LoadingState label="读取设置" />
+      ) : loadError ? (
+        <ErrorState message={loadError} onRetry={() => void load()} />
+      ) : settings ? (
+        <>
+          <Panel className="flex flex-col gap-l p-xl">
+            <div className="flex items-center justify-between gap-m">
+              <h2 className="text-md font-medium text-neutral-95">网关</h2>
+              <Badge
+                tone={
+                  settings.source === "user"
+                    ? "bg-brand-alpha-strong text-brand-text"
+                    : "bg-neutral-12 text-neutral-60"
+                }
+              >
+                {settings.source === "user" ? "使用你的 key" : "服务端默认"}
+              </Badge>
             </div>
-            <div className="md:text-right">
-              <p className={`text-xs ${view?.configured ? "text-sage" : "text-muted"}`}>
-                {view?.configured ? "已配置" : "未配置"}
-                {view?.api_key_source === "server" ? " · 服务器默认" : ""}
-                {view?.api_key_source === "user" ? " · 本账号" : ""}
-              </p>
-              {editingKey ? (
-                <form className="mt-3 flex flex-wrap items-center gap-2 md:justify-end" onSubmit={saveKey}>
-                  <input
-                    className={`${inputClass} w-64 font-mono`}
-                    type={showKey ? "text" : "password"}
-                    value={keyDraft}
-                    onChange={(event) => setKeyDraft(event.target.value)}
-                    autoComplete="off"
-                    aria-label="新的 API Key"
-                    required
-                  />
-                  <button type="button" className="text-sm text-muted" onClick={() => setShowKey((value) => !value)}>
-                    {showKey ? "隐藏" : "显示"}
-                  </button>
-                  <Button type="submit" disabled={busy === "key"}>
-                    保存
-                  </Button>
-                  <Button
-                    variant="line"
+
+            <TextField
+              label="Base URL"
+              value={baseUrl}
+              mono
+              placeholder="https://ai-gateway.example.com/v1"
+              onChange={(event) => setBaseUrl(event.target.value)}
+              hint="OpenAI 兼容端点，模型列表从它的 /models 读取。"
+            />
+
+            {editingKey ? (
+              <TextField
+                label="API Key"
+                type="password"
+                mono
+                autoFocus
+                autoComplete="off"
+                spellCheck={false}
+                value={newKey}
+                placeholder="粘贴新的 key"
+                onChange={(event) => setNewKey(event.target.value)}
+                hint="保存后只会以打码形式回显，原文不会再离开服务端。"
+                action={
+                  <button
+                    type="button"
                     onClick={() => {
                       setEditingKey(false);
-                      setKeyDraft("");
+                      setNewKey("");
                     }}
+                    className="rounded-full px-xs py-[1px] text-sm text-neutral-60 transition-colors duration-ui ease-ui hover:bg-neutral-8 hover:text-neutral-95"
                   >
                     取消
-                  </Button>
-                </form>
-              ) : (
-                <div className="mt-3 flex flex-wrap items-center gap-2 md:justify-end">
-                  <code className="rounded-lg border border-line bg-raised px-3 py-2 font-mono text-sm">
-                    {view?.api_key_masked || "未配置"}
-                  </code>
-                  <Button variant="line" onClick={() => setEditingKey(true)}>
-                    更换
-                  </Button>
-                  <Button variant="line" onClick={clearKey} disabled={view?.api_key_source !== "user" || busy === "clear"}>
-                    清除
-                  </Button>
-                </div>
-              )}
-            </div>
-          </div>
-        </section>
-
-        <section className="border-t border-line py-6">
-          <form className="grid items-end gap-4 md:grid-cols-[minmax(0,1fr)_auto]" onSubmit={saveBase}>
-            <label>
-              <span className="text-base font-medium">API 请求地址</span>
-              <span className="mt-2 block text-sm text-muted">
-                {view?.base_url_source === "user" ? "使用本账号地址" : "使用服务器默认地址"}
-              </span>
-              <input
-                className={`${inputClass} mt-3 font-mono text-[#1c1915]`}
-                value={baseUrl}
-                onChange={(event) => setBaseUrl(event.target.value)}
-                placeholder={loading ? "正在读取" : "https://"}
-                aria-label="API 请求地址"
+                  </button>
+                }
               />
-            </label>
-            <Button type="submit" variant="line" disabled={busy === "url"}>
-              保存地址
-            </Button>
-          </form>
-        </section>
+            ) : (
+              <TextField
+                label="API Key"
+                value={settings.apiKeyMasked}
+                mono
+                readOnly
+                disabled
+                onChange={() => undefined}
+                hint={
+                  settings.hasUserKey
+                    ? "这是你保存的 key（已打码）。"
+                    : "当前使用服务端默认 key（已打码）。"
+                }
+                action={
+                  <button
+                    type="button"
+                    onClick={() => setEditingKey(true)}
+                    className="inline-flex items-center gap-xxs rounded-full px-xs py-[1px] text-sm text-brand-text transition-colors duration-ui ease-ui hover:bg-brand-alpha-soft active:bg-brand-alpha-strong"
+                  >
+                    <Icon name="eye" size={12} />
+                    换一个 key
+                  </button>
+                }
+              />
+            )}
 
-        <section className="border-y border-line py-6">
-          <label className="block">
-            <span className="text-base font-medium">模型</span>
-            <span className="mt-2 block max-w-xl text-sm leading-6 text-muted">
-              默认用较快的模型，方便把契约、页面和验收走完。换成更强的模型，页面通常更好，等待也更长。
-            </span>
-            <p className="mt-3 text-sm text-[#1c1915]">{loading ? "正在读取模型" : view?.model || "还没有模型"}</p>
-            <select
-              className={`${inputClass} mt-2 max-w-md text-[#1c1915]`}
-              value={view?.model || ""}
-              disabled={!view}
-              onChange={(event) => saveModel(event.target.value)}
-              aria-label="模型"
+            <SelectField
+              label="默认模型"
+              value={model}
+              onChange={(event) => setModel(event.target.value)}
+              hint={
+                settings.models.length === 0
+                  ? "网关没有返回模型列表，保留当前值即可。"
+                  : `网关返回了 ${settings.models.length} 个模型。`
+              }
             >
-              {(view?.models || []).map((model) => (
-                <option key={model.id} value={model.id}>
-                  {model.id}
+              {settings.models.some((option) => option.id === model) ? null : (
+                <option value={model}>{model}（当前）</option>
+              )}
+              {settings.models.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.id}
                 </option>
               ))}
-              {view && !(view.models || []).some((model) => model.id === view.model) ? (
-                <option value={view.model}>{view.model}</option>
-              ) : null}
-            </select>
-          </label>
-        </section>
-      </main>
-    </AppShell>
+            </SelectField>
+
+            {saveError ? <ErrorState title="保存失败" message={saveError} compact /> : null}
+            {saved && !dirty ? (
+              <p className="flex items-center gap-xxs text-sm text-success-strong">
+                <Icon name="check" size={13} />
+                已保存
+              </p>
+            ) : null}
+
+            <div className="flex flex-wrap items-center gap-s">
+              <Button onClick={() => void save()} loading={saving} disabled={!dirty}>
+                保存更改
+              </Button>
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  adopt(settings);
+                  setSaved(false);
+                  setSaveError(null);
+                }}
+                disabled={!dirty}
+              >
+                放弃修改
+              </Button>
+            </div>
+          </Panel>
+
+          <Panel className="flex flex-col gap-m p-xl">
+            <h2 className="text-md font-medium text-neutral-95">恢复默认</h2>
+            <p className="text-base text-neutral-60">
+              清掉你保存的 key，回落到服务端默认凭据。Base URL 与模型选择不受影响。
+            </p>
+            <div>
+              <Button
+                variant="danger"
+                onClick={() => void restoreDefault()}
+                loading={clearing}
+                disabled={!settings.hasUserKey}
+              >
+                恢复服务端默认
+              </Button>
+            </div>
+            {!settings.hasUserKey ? (
+              <p className="text-sm text-neutral-40">你还没有自定义 key，无需恢复。</p>
+            ) : null}
+          </Panel>
+        </>
+      ) : null}
+    </div>
   );
 }

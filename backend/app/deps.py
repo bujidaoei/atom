@@ -1,44 +1,54 @@
-from fastapi import Depends, HTTPException, Request, Response
-from sqlalchemy import select
+from __future__ import annotations
+
+from typing import Annotated
+
+from fastapi import Cookie, Depends, HTTPException, Path, status
 from sqlalchemy.orm import Session
 
-from app.config import settings
-from app.db import get_db
-from app.models import User
-from app.security import create_token, read_token
+from .db import get_db
+from .models import Project, User
+from .security import read_session
 
-COOKIE = "atom_session"
-
-
-def set_session_cookie(response: Response, user_id: str) -> None:
-    response.set_cookie(
-        COOKIE,
-        create_token(user_id),
-        httponly=True,
-        samesite="lax",
-        secure=settings.cookie_secure,
-        max_age=14 * 24 * 3600,
-        path=settings.cookie_path or "/",
-    )
+SESSION_COOKIE = "atom_session"
 
 
-def clear_session_cookie(response: Response) -> None:
-    response.delete_cookie(COOKIE, path=settings.cookie_path or "/")
-
-
-def current_user(request: Request, db: Session = Depends(get_db)) -> User:
-    token = request.cookies.get(COOKIE)
-    user_id = read_token(token) if token else None
-    user = db.get(User, user_id) if user_id else None
+def current_user(
+    session: Annotated[Session, Depends(get_db)],
+    atom_session: Annotated[str | None, Cookie(alias=SESSION_COOKIE)] = None,
+) -> User:
+    if not atom_session:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "请先登录")
+    user_id = read_session(atom_session)
+    if not user_id:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "登录状态已失效")
+    user = session.get(User, user_id)
     if user is None:
-        raise HTTPException(status_code=401, detail="请先登录")
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "登录状态已失效")
     return user
 
 
-def owned_project(db: Session, user: User, project_id: str):
-    from app.models import Project
+def optional_user(
+    session: Annotated[Session, Depends(get_db)],
+    atom_session: Annotated[str | None, Cookie(alias=SESSION_COOKIE)] = None,
+) -> User | None:
+    if not atom_session:
+        return None
+    user_id = read_session(atom_session)
+    return session.get(User, user_id) if user_id else None
 
-    project = db.scalar(select(Project).where(Project.id == project_id, Project.user_id == user.id))
-    if project is None:
-        raise HTTPException(status_code=404, detail="没有这个项目")
+
+def owned_project(
+    project_id: Annotated[str, Path(alias="project_id")],
+    session: Annotated[Session, Depends(get_db)],
+    user: Annotated[User, Depends(current_user)],
+) -> Project:
+    project = session.get(Project, project_id)
+    if project is None or project.user_id != user.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "项目不存在")
     return project
+
+
+CurrentUser = Annotated[User, Depends(current_user)]
+OptionalUser = Annotated[User | None, Depends(optional_user)]
+DbSession = Annotated[Session, Depends(get_db)]
+OwnedProject = Annotated[Project, Depends(owned_project)]

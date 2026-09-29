@@ -1,220 +1,297 @@
+from __future__ import annotations
+
+import asyncio
 import json
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from fastapi import APIRouter, HTTPException, Query, Request, status
+from fastapi.responses import PlainTextResponse, StreamingResponse
+from pydantic import BaseModel, Field
+from sqlalchemy import select
 
-from app.db import get_db
-from app.deps import current_user, owned_project
-from app.errors import ContractError, GatewayError
-from app.models import AcceptanceRun, Project, Usage, User, utcnow
-from app.schemas import AcceptanceIn, PreviewStateIn, ProjectIn, ReviseIn
-from app.serialize import project_detail, project_summary
-from app.services.acceptance import evaluate_static, merge_acceptance
-from app.services.pipeline import (
-    apply_amendment,
-    build_project,
-    plan_project,
-    read_html,
-    requirement_payload,
-    revise_project,
-)
+from .. import storage
+from ..config import get_settings
+from ..deps import CurrentUser, DbSession, OwnedProject
+from ..errors import AtomError
+from ..events import bus
+from ..models import AcceptanceRun, Message, Project, Race, RaceHeat, Requirement
+from ..serialize import acceptance_json, project_detail, project_summary, race_json
+from ..services.orchestrator import orchestrator
+from ..services.parsing import fallback_title
 
-router = APIRouter(tags=["projects"])
+router = APIRouter(prefix="/projects", tags=["projects"])
 
-
-def _fail(db: Session, project: Project, exc: Exception, status: int) -> None:
-    db.rollback()
-    fresh = db.get(Project, project.id)
-    if fresh is None:
-        raise HTTPException(status_code=status, detail=str(exc)) from exc
-    fresh.status = "error"
-    fresh.error_message = str(exc)[:500]
-    fresh.updated_at = utcnow()
-    db.commit()
-    raise HTTPException(status_code=status, detail=str(exc)) from exc
+HEARTBEAT_SECONDS = 15
+# Anything the agent writes that a browser should never be handed back.
+_TEXT_SUFFIXES = {
+    ".html", ".htm", ".css", ".js", ".mjs", ".json", ".md", ".txt",
+    ".svg", ".ts", ".jsx", ".tsx", ".yml", ".yaml", ".csv",
+}
 
 
-async def _run(db: Session, project: Project, action):
-    try:
-        return await action()
-    except GatewayError as exc:
-        _fail(db, project, exc, 502)
-    except ContractError as exc:
-        _fail(db, project, exc, 422)
-    except json.JSONDecodeError as exc:
-        _fail(db, project, ContractError("模型返回的结构无法读取"), 422)
+class CreateProject(BaseModel):
+    prompt: str = Field(min_length=2, max_length=4000)
 
 
-@router.get("/projects")
-def list_projects(user: User = Depends(current_user), db: Session = Depends(get_db)) -> list[dict]:
-    rows = db.scalars(
+class ApproveBody(BaseModel):
+    note: str | None = Field(default=None, max_length=2000)
+
+
+class ReviseBody(BaseModel):
+    message: str = Field(min_length=1, max_length=4000)
+
+
+class AcceptanceResult(BaseModel):
+    key: str
+    checkIndex: int
+    passed: bool
+    note: str = ""
+
+
+class AcceptanceBody(BaseModel):
+    results: list[AcceptanceResult]
+
+
+class RaceBody(BaseModel):
+    models: list[str] = Field(min_length=2, max_length=4)
+
+
+@router.get("")
+def list_projects(user: CurrentUser, session: DbSession) -> dict[str, object]:
+    projects = session.scalars(
         select(Project).where(Project.user_id == user.id).order_by(Project.updated_at.desc())
     ).all()
-    return [project_summary(row) for row in rows]
+    return {"projects": [project_summary(project) for project in projects]}
 
 
-@router.post("/projects")
+@router.post("", status_code=status.HTTP_201_CREATED)
 def create_project(
-    body: ProjectIn,
-    user: User = Depends(current_user),
-    db: Session = Depends(get_db),
-) -> dict:
-    project = Project(user_id=user.id, prompt=body.prompt.strip(), name="未命名", status="draft")
-    db.add(project)
-    db.commit()
-    db.refresh(project)
-    return project_detail(db, project)
+    body: CreateProject, user: CurrentUser, session: DbSession
+) -> dict[str, object]:
+    prompt = body.prompt.strip()
+    project = Project(user_id=user.id, prompt=prompt, title=fallback_title(prompt))
+    session.add(project)
+    session.flush()
+    session.add(Message(project_id=project.id, role="user", content=prompt))
+    session.commit()
+    storage.ensure_project_dirs(project.id)
+    return {"project": project_detail(session, project)}
 
 
-@router.get("/projects/{project_id}")
-def get_project(
-    project_id: str,
-    user: User = Depends(current_user),
-    db: Session = Depends(get_db),
-) -> dict:
-    return project_detail(db, owned_project(db, user, project_id))
+@router.get("/{project_id}")
+def read_project(project: OwnedProject, session: DbSession) -> dict[str, object]:
+    return {"project": project_detail(session, project)}
 
 
-@router.delete("/projects/{project_id}")
-def delete_project(
-    project_id: str,
-    user: User = Depends(current_user),
-    db: Session = Depends(get_db),
-) -> dict:
-    project = owned_project(db, user, project_id)
-    db.delete(project)
-    db.commit()
+@router.delete("/{project_id}")
+async def delete_project(project: OwnedProject, session: DbSession) -> dict[str, bool]:
+    await orchestrator.cancel(project.id)
+    project_id = project.id
+    session.delete(project)
+    session.commit()
+    storage.remove_project_dirs(project_id)
     return {"ok": True}
 
 
-@router.post("/projects/{project_id}/plan")
-async def plan(
-    project_id: str,
-    user: User = Depends(current_user),
-    db: Session = Depends(get_db),
-) -> dict:
-    project = owned_project(db, user, project_id)
-    if project.contract_locked:
-        raise HTTPException(status_code=409, detail="契约已锁定。要改范围，请在对话里提出修订。")
-    await _run(db, project, lambda: plan_project(db, project, user))
-    db.refresh(project)
-    return project_detail(db, project)
+@router.get("/{project_id}/files/{path:path}", response_class=PlainTextResponse)
+def read_file(project: OwnedProject, path: str) -> PlainTextResponse:
+    target = storage.resolve_within(storage.workspace_dir(project.id), path)
+    if target is None or not target.is_file():
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "文件不存在")
+    if target.suffix.lower() not in _TEXT_SUFFIXES:
+        raise HTTPException(status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, "该文件不是文本")
+    try:
+        return PlainTextResponse(target.read_text("utf-8"))
+    except (UnicodeDecodeError, OSError):
+        raise HTTPException(status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, "该文件不是文本") from None
 
 
-@router.post("/projects/{project_id}/build")
-async def build(
-    project_id: str,
-    user: User = Depends(current_user),
-    db: Session = Depends(get_db),
-) -> dict:
-    project = owned_project(db, user, project_id)
-    if not project.requirements:
-        raise HTTPException(status_code=409, detail="还没有契约，不能构建。")
-    await _run(db, project, lambda: build_project(db, project, user))
-    db.refresh(project)
-    return project_detail(db, project)
+# ------------------------------------------------------------------ actions
 
 
-@router.post("/projects/{project_id}/revise")
-async def revise(
-    project_id: str,
-    body: ReviseIn,
-    user: User = Depends(current_user),
-    db: Session = Depends(get_db),
-) -> dict:
-    project = owned_project(db, user, project_id)
-    await _run(db, project, lambda: revise_project(db, project, user, body.instruction))
-    db.refresh(project)
-    return project_detail(db, project)
+def _guard(project: Project, allowed: set[str]) -> None:
+    if orchestrator.active(project.id):
+        raise HTTPException(status.HTTP_409_CONFLICT, "该项目已有任务在运行")
+    if project.status not in allowed:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, f"当前状态 {project.status} 不允许这个操作"
+        )
 
 
-@router.post("/projects/{project_id}/amendments/apply")
-async def apply(
-    project_id: str,
-    user: User = Depends(current_user),
-    db: Session = Depends(get_db),
-) -> dict:
-    project = owned_project(db, user, project_id)
-    await _run(db, project, lambda: apply_amendment(db, project, user))
-    db.refresh(project)
-    return project_detail(db, project)
+@router.post("/{project_id}/plan")
+async def plan(project: OwnedProject, user: CurrentUser) -> dict[str, str]:
+    _guard(project, {"draft", "error"})
+    try:
+        job = await orchestrator.start_plan(project.id, user.id)
+    except AtomError as error:
+        raise HTTPException(error.status_code, error.detail) from error
+    return {"runId": job}
 
 
-@router.post("/projects/{project_id}/amendments/discard")
-def discard(
-    project_id: str,
-    user: User = Depends(current_user),
-    db: Session = Depends(get_db),
-) -> dict:
-    project = owned_project(db, user, project_id)
-    project.pending_amendment = ""
-    project.updated_at = utcnow()
-    db.commit()
-    db.refresh(project)
-    return project_detail(db, project)
+@router.post("/{project_id}/approve")
+async def approve(
+    body: ApproveBody, project: OwnedProject, user: CurrentUser
+) -> dict[str, str]:
+    _guard(project, {"awaiting_approval"})
+    try:
+        job = await orchestrator.start_build(project.id, user.id, body.note)
+    except AtomError as error:
+        raise HTTPException(error.status_code, error.detail) from error
+    return {"runId": job}
 
 
-@router.put("/projects/{project_id}/preview-state")
-def save_preview_state(
-    project_id: str,
-    body: PreviewStateIn,
-    user: User = Depends(current_user),
-    db: Session = Depends(get_db),
-) -> dict:
-    project = owned_project(db, user, project_id)
-    snapshot = {}
-    for key, value in list(body.snapshot.items())[:40]:
-        if not isinstance(key, str) or len(key) > 80:
-            continue
-        snapshot[key] = str(value)[:20000]
-    project.preview_state = json.dumps(snapshot, ensure_ascii=False)
-    project.updated_at = utcnow()
-    db.commit()
+@router.post("/{project_id}/revise")
+async def revise(body: ReviseBody, project: OwnedProject, user: CurrentUser) -> dict[str, str]:
+    _guard(project, {"ready", "error"})
+    try:
+        job = await orchestrator.start_revise(project.id, user.id, body.message.strip())
+    except AtomError as error:
+        raise HTTPException(error.status_code, error.detail) from error
+    return {"runId": job}
+
+
+@router.post("/{project_id}/cancel")
+async def cancel(project: OwnedProject) -> dict[str, bool]:
+    await orchestrator.cancel(project.id)
     return {"ok": True}
 
 
-@router.post("/projects/{project_id}/acceptance")
-def accept(
-    project_id: str,
-    body: AcceptanceIn,
-    user: User = Depends(current_user),
-    db: Session = Depends(get_db),
-) -> dict:
-    project = owned_project(db, user, project_id)
-    html = read_html(db, project)
-    if not html:
-        raise HTTPException(status_code=409, detail="还没有页面可以验收。")
-    requirements = requirement_payload(db, project)
-    merged = merge_acceptance(
-        evaluate_static(html, requirements),
-        [item.model_dump() for item in body.runtime],
-        requirements,
+# ------------------------------------------------------------------- stream
+
+
+@router.get("/{project_id}/events")
+async def events(
+    project: OwnedProject,
+    request: Request,
+    after: Annotated[int, Query(ge=0)] = 0,
+) -> StreamingResponse:
+    """Server-sent events for one project.
+
+    Replays everything after ``after`` before switching to live delivery, so a
+    reconnecting browser never misses a token. Subscription happens before the
+    replay read to close the gap where an event could land in between.
+    """
+    project_id = project.id
+    queue = await bus.subscribe(project_id)
+
+    async def stream():
+        try:
+            highest = after
+            for event in bus.replay(project_id, after):
+                highest = max(highest, event.seq)
+                yield f"event: run\ndata: {event.to_json()}\n\n"
+
+            while True:
+                if await request.is_disconnected():
+                    return
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=HEARTBEAT_SECONDS)
+                except asyncio.TimeoutError:
+                    yield ": ping\n\n"
+                    continue
+                if event.seq <= highest:
+                    continue  # already delivered by the replay
+                highest = event.seq
+                yield f"event: run\ndata: {event.to_json()}\n\n"
+        finally:
+            await bus.unsubscribe(project_id, queue)
+
+    return StreamingResponse(
+        stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
     )
+
+
+# --------------------------------------------------------------- acceptance
+
+
+@router.post("/{project_id}/acceptance")
+def record_acceptance(
+    body: AcceptanceBody, project: OwnedProject, session: DbSession
+) -> dict[str, object]:
+    """Store results the browser produced by running Emma's checks for real.
+
+    Reported keys are intersected with the stored contract so a client cannot
+    invent passing checks that were never specified.
+    """
+    valid: dict[str, int] = {}
+    for requirement in session.scalars(
+        select(Requirement).where(Requirement.project_id == project.id)
+    ):
+        valid[requirement.key] = len(json.loads(requirement.checks_json))
+
+    results = [
+        result.model_dump()
+        for result in body.results
+        if result.key in valid and 0 <= result.checkIndex < valid[result.key]
+    ]
+    total = sum(valid.values())
+    passed = sum(1 for result in results if result["passed"])
+
     run = AcceptanceRun(
         project_id=project.id,
-        passed=merged["passed"],
-        total=merged["total"],
-        results_json=json.dumps(merged, ensure_ascii=False),
+        passed=passed,
+        total=total,
+        results_json=json.dumps(results, ensure_ascii=False),
     )
-    db.add(run)
-    project.updated_at = utcnow()
-    db.commit()
-    db.refresh(project)
-    return project_detail(db, project)
+    session.add(run)
+    session.commit()
+    return {"acceptance": acceptance_json(session, project.id)}
 
 
-@router.get("/usage")
-def usage(user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
-    row = db.execute(
-        select(
-            func.count(Usage.id),
-            func.coalesce(func.sum(Usage.prompt_tokens), 0),
-            func.coalesce(func.sum(Usage.completion_tokens), 0),
-        ).where(Usage.user_id == user.id)
-    ).one()
-    return {
-        "calls": int(row[0] or 0),
-        "prompt_tokens": int(row[1] or 0),
-        "completion_tokens": int(row[2] or 0),
-    }
+# --------------------------------------------------------------- race mode
+
+
+@router.post("/{project_id}/race")
+async def start_race(
+    body: RaceBody, project: OwnedProject, user: CurrentUser, session: DbSession
+) -> dict[str, object]:
+    _guard(project, {"awaiting_approval", "ready", "error"})
+    models = list(dict.fromkeys(m.strip() for m in body.models if m.strip()))
+    if len(models) < 2:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "至少选择两个不同的模型")
+    if len(models) > get_settings().race_max_models:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "最多同时比拼 4 个模型")
+    if user.credits < len(models):
+        raise HTTPException(status.HTTP_402_PAYMENT_REQUIRED, "额度不足以发起这场比拼")
+
+    try:
+        race_id = orchestrator.create_race(project.id, models)
+        await orchestrator.start_race(project.id, user.id, race_id)
+    except AtomError as error:
+        raise HTTPException(error.status_code, error.detail) from error
+
+    session.expire_all()
+    race = race_json(session, project.id)
+    return {"raceId": race_id, "heats": race["heats"] if race else []}
+
+
+@router.get("/{project_id}/race")
+def read_race(project: OwnedProject, session: DbSession) -> dict[str, object]:
+    session.expire_all()
+    return {"race": race_json(session, project.id)}
+
+
+@router.post("/{project_id}/race/{heat_id}/adopt")
+def adopt_heat(project: OwnedProject, heat_id: str, session: DbSession) -> dict[str, bool]:
+    heat = session.get(RaceHeat, heat_id)
+    race = session.get(Race, heat.race_id) if heat else None
+    if heat is None or race is None or race.project_id != project.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "该赛道不存在")
+    if heat.status != "done":
+        raise HTTPException(status.HTTP_409_CONFLICT, "该赛道还没有完成")
+
+    source = storage.workspace_dir(project.id, heat_id)
+    if not source.is_dir():
+        raise HTTPException(status.HTTP_409_CONFLICT, "该赛道没有产出文件")
+
+    storage.copy_tree(source, storage.workspace_dir(project.id))
+    race.winner_heat_id = heat_id
+    project.status = "ready"
+    session.commit()
+    return {"ok": True}

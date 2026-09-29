@@ -4,13 +4,22 @@ services:
       context: .
       args:
         VITE_BASE: ${VITE_BASE:-/}
+    image: atom-demo:latest
+    restart: unless-stopped
+    env_file: .env
     ports:
       - "${ATOM_HTTP_PORT:-80}:80"
-    env_file:
-      - .env
     volumes:
       - atom-data:/data
-    restart: unless-stopped
+    # The agent writes files and runs shell commands inside per-project
+    # workspaces, so give it a writable /data and a bounded tmp.
+    tmpfs:
+      - /tmp:size=512m
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 volumes:
   atom-data:

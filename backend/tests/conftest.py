@@ -1,25 +1,45 @@
+from __future__ import annotations
+
 import os
 import tempfile
+from collections.abc import Iterator
 from pathlib import Path
 
-_dir = Path(tempfile.mkdtemp())
-os.environ["ATOM_DB_PATH"] = str(_dir / "test.db")
-os.environ["ATOM_SECRET"] = "test-secret"
-os.environ["ATOM_LLM_API_KEY"] = "sk-testkeyAB"
-os.environ["ATOM_LLM_BASE_URL"] = "https://example.test/v1"
-os.environ["ATOM_LLM_MODEL"] = "claude-haiku-4-5"
-os.environ["ATOM_DAILY_CALL_LIMIT"] = "40"
-
 import pytest
-from fastapi.testclient import TestClient
 
-from app.db import Base, engine
-from app.main import app
+_TMP = tempfile.mkdtemp(prefix="atom-tests-")
+os.environ.update(
+    {
+        "ATOM_SECRET": "test-secret",
+        "ATOM_DATA_DIR": _TMP,
+        "ATOM_DB_PATH": str(Path(_TMP) / "test.db"),
+        "ATOM_LLM_API_KEY": "sk-testtesttesttest12",
+        "ATOM_LLM_BASE_URL": "https://gateway.invalid/v1",
+        "ATOM_LLM_MODEL": "test-model",
+        "ATOM_RUNTIME_URL": "http://127.0.0.1:1",
+        "ATOM_STARTING_CREDITS": "10",
+    }
+)
+
+from fastapi.testclient import TestClient  # noqa: E402
+
+from app.db import engine  # noqa: E402
+from app.main import app  # noqa: E402
+from app.models import Base  # noqa: E402
 
 
-@pytest.fixture()
-def client():
-    Base.metadata.drop_all(bind=engine)
-    Base.metadata.create_all(bind=engine)
+@pytest.fixture
+def client() -> Iterator[TestClient]:
+    Base.metadata.drop_all(engine)
+    Base.metadata.create_all(engine)
     with TestClient(app) as test_client:
         yield test_client
+
+
+@pytest.fixture
+def signed_in(client: TestClient) -> TestClient:
+    response = client.post(
+        "/api/auth/register", json={"email": "builder@example.com", "password": "s3cretpass"}
+    )
+    assert response.status_code == 200, response.text
+    return client

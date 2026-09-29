@@ -7,13 +7,17 @@ function publicBase(): string {
   return `/${raw.replace(/^\/+|\/+$/g, "")}/`;
 }
 
+const backend = process.env.VITE_BACKEND?.trim() || "http://127.0.0.1:8000";
+
 export default defineConfig({
   base: publicBase(),
   plugins: [react()],
   server: {
     port: 5173,
     proxy: {
-      "/api": "http://127.0.0.1:8000",
+      "/api": { target: backend, changeOrigin: false },
+      "/preview": { target: backend, changeOrigin: false },
+      "/p": { target: backend, changeOrigin: false },
     },
   },
 });

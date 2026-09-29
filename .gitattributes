@@ -1,0 +1,13 @@
+# Everything is LF. This is not a style preference: the vendored Pi tree is
+# verified byte-for-byte against pi-source.lock.json, so a CRLF working copy
+# would fail `verify:pi-source` and break the runtime build.
+* text=auto eol=lf
+
+# The pinned gateway bundle and its manifest are hashed artefacts.
+runtime/.cache/** -text
+runtime/pi-source.lock.json text eol=lf
+
+*.png binary
+*.jpg binary
+*.ico binary
+*.woff2 binary

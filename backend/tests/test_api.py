@@ -1,184 +1,152 @@
-import json
+from __future__ import annotations
 
-from app.services import pipeline
-
-
-PLAN = {
-    "name": "今日烘焙",
-    "lead": "第一版只做售罄看板，不做收银。",
-    "research": "店员在柜台边用，最大的风险是刷新后把状态弄丢。",
-    "architecture": "单页。数据存在 localStorage 键 bake-board。",
-    "requirements": [
-        {
-            "key": "R1",
-            "title": "记下售罄",
-            "detail": "输入名称后点记下，列表出现该名称",
-            "priority": "must",
-            "checks": [
-                {"op": "exists", "selector": "#item-title"},
-                {
-                    "op": "flow",
-                    "steps": [
-                        {"do": "fill", "selector": "#item-title", "value": "可颂"},
-                        {"do": "click", "selector": "#add-item"},
-                        {"do": "see", "contains": "可颂"},
-                    ],
-                },
-            ],
-        },
-        {
-            "key": "R2",
-            "title": "看到店名",
-            "detail": "页头写着今日烘焙",
-            "priority": "must",
-            "checks": [{"op": "text", "contains": "今日烘焙"}, {"op": "exists", "selector": "#page-title"}],
-        },
-        {
-            "key": "R3",
-            "title": "可以记下",
-            "detail": "有一个记下按钮",
-            "priority": "must",
-            "checks": [{"op": "exists", "selector": "#add-item"}],
-        },
-    ],
-}
-
-PAGE = """<!DOCTYPE html>
-<html><head><title>今日烘焙</title></head>
-<body>
-  <h1 id="page-title">今日烘焙</h1>
-  <input id="item-title" />
-  <button id="add-item">记下</button>
-  <ul id="item-list"></ul>
-</body></html>
-"""
-
-BUILD = f"""NOTES
-按契约做了售罄看板。
-
-TRACE
-R1 | #item-title 写入列表
-R2 | #page-title
-R3 | #add-item
-
-HTML
-{PAGE}
-"""
+from fastapi.testclient import TestClient
 
 
-async def _fake_complete(**kwargs):
-    system = kwargs["messages"][0]["content"]
-    if system.startswith("你是 Mike"):
-        return "第一版只做售罄看板，不做收银。\n@Iris 先看风险。\n@Bob 定键。\n@Emma 写契约。", {
-            "prompt_tokens": 4,
-            "completion_tokens": 8,
-            "model": "test",
-        }
-    if system.startswith("你是 Iris"):
-        return "店员在柜台边用。最大的风险是刷新后把状态弄丢。\n@Bob 按这个定结构。", {
-            "prompt_tokens": 4,
-            "completion_tokens": 8,
-            "model": "test",
-        }
-    if system.startswith("你是 Bob"):
-        return "单页。数据存在 localStorage 键 bake-board。\n@Emma 按这个写契约。", {
-            "prompt_tokens": 4,
-            "completion_tokens": 8,
-            "model": "test",
-        }
-    if "requirements" in system and "localStorage" in system and "NOTES" not in system:
-        return json.dumps(PLAN, ensure_ascii=False), {"prompt_tokens": 10, "completion_tokens": 20, "model": "test"}
-    if "compatible" in system or "amend" in system:
-        return json.dumps({"kind": "compatible", "reason": "只是措辞，契约还在。"}), {
-            "prompt_tokens": 3,
-            "completion_tokens": 4,
-            "model": "test",
-        }
-    return BUILD, {"prompt_tokens": 30, "completion_tokens": 40, "model": "test"}
+def test_health_reports_runtime_state(client: TestClient) -> None:
+    body = client.get("/api/health").json()
+    assert body["ok"] is True
+    # The test config points at a dead port, so the sidecar must read as down
+    # rather than the endpoint failing.
+    assert body["runtime"] is False
 
 
-def _register(client):
-    response = client.post(
-        "/api/auth/register",
-        json={"name": "林深", "email": "lin@example.com", "password": "correct-horse"},
+def test_lookup_distinguishes_known_and_unknown_emails(client: TestClient) -> None:
+    assert client.post("/api/auth/lookup", json={"email": "nobody@example.com"}).json() == {
+        "email": "nobody@example.com",
+        "exists": False,
+    }
+    client.post(
+        "/api/auth/register", json={"email": "Someone@Example.com", "password": "s3cretpass"}
     )
-    assert response.status_code == 200, response.text
-    return response.json()
+    assert client.post("/api/auth/lookup", json={"email": "someone@example.com"}).json()[
+        "exists"
+    ] is True
 
 
-def test_register_login_and_settings_mask(client, monkeypatch):
-    monkeypatch.setattr(pipeline, "complete", _fake_complete)
-    user = _register(client)
-    assert user["email"] == "lin@example.com"
-    me = client.get("/api/auth/me")
-    assert me.status_code == 200
+def test_register_rejects_weak_and_duplicate_credentials(client: TestClient) -> None:
+    assert (
+        client.post(
+            "/api/auth/register", json={"email": "a@b.com", "password": "12345678"}
+        ).status_code
+        == 400
+    )
+    assert (
+        client.post("/api/auth/register", json={"email": "a@b.com", "password": "short"}).status_code
+        == 422
+    )
+    client.post("/api/auth/register", json={"email": "a@b.com", "password": "s3cretpass"})
+    assert (
+        client.post(
+            "/api/auth/register", json={"email": "A@B.com", "password": "s3cretpass"}
+        ).status_code
+        == 409
+    )
 
-    settings = client.get("/api/settings")
-    body = settings.json()
-    assert body["api_key_source"] == "server"
-    assert body["api_key_masked"].startswith("sk")
-    assert body["api_key_masked"].endswith("AB")
-    assert "sk-testkeyAB" not in settings.text
 
-    updated = client.put("/api/settings", json={"api_key": "sk-personalKEY"})
-    assert updated.json()["api_key_source"] == "user"
-    assert "sk-personalKEY" not in updated.text
-    cleared = client.delete("/api/settings/api-key")
-    assert cleared.json()["api_key_source"] == "server"
-
+def test_login_round_trip(client: TestClient) -> None:
+    client.post("/api/auth/register", json={"email": "a@b.com", "password": "s3cretpass"})
     client.post("/api/auth/logout")
     assert client.get("/api/auth/me").status_code == 401
-    login = client.post("/api/auth/login", json={"email": "lin@example.com", "password": "wrong-password"})
-    assert login.status_code == 401
-    login = client.post("/api/auth/login", json={"email": "lin@example.com", "password": "correct-horse"})
-    assert login.status_code == 200
-
-
-def test_plan_build_and_acceptance(client, monkeypatch):
-    monkeypatch.setattr(pipeline, "complete", _fake_complete)
-    _register(client)
-    created = client.post("/api/projects", json={"prompt": "给咖啡馆做一个今日烘焙售罄看板"})
-    assert created.status_code == 200, created.text
-    project_id = created.json()["id"]
-
-    planned = client.post(f"/api/projects/{project_id}/plan")
-    assert planned.status_code == 200, planned.text
-    body = planned.json()
-    assert body["status"] == "awaiting_approval"
-    assert body["name"] == "今日烘焙"
-    assert len(body["requirements"]) == 3
-    roles = [message["role"] for message in body["messages"]]
-    assert roles[:5] == ["system", "mike", "iris", "bob", "emma"]
-    assert body["messages"][1]["activity"][0]["title"] == "读取这条需求"
-    assert any(message["role"] == "emma" for message in body["messages"])
-
-    built = client.post(f"/api/projects/{project_id}/build")
-    assert built.status_code == 200, built.text
-    built_body = built.json()
-    assert built_body["status"] == "ready"
-    assert built_body["contract_locked"] is True
-    assert "今日烘焙" in built_body["html"]
-
-    accepted = client.post(
-        f"/api/projects/{project_id}/acceptance",
-        json={"runtime": [{"key": "R1", "index": 1, "ok": True, "detail": "看到了可颂"}]},
+    assert (
+        client.post("/api/auth/login", json={"email": "a@b.com", "password": "wrongpass1"}).status_code
+        == 401
     )
-    report = accepted.json()["latest_acceptance"]
-    assert report["passed"] == 3
-    assert report["total"] == 3
+    assert client.post("/api/auth/login", json={"email": "a@b.com", "password": "s3cretpass"}).status_code == 200
+    assert client.get("/api/auth/me").json()["email"] == "a@b.com"
 
-    state = client.put(
-        f"/api/projects/{project_id}/preview-state",
-        json={"snapshot": {"bake-board": "[\"可颂\"]"}},
+
+def test_settings_mask_and_preserve_stored_key(signed_in: TestClient) -> None:
+    body = signed_in.get("/api/settings").json()
+    # "sk-testtesttesttest12" is 21 characters: two shown, 17 hidden, two shown.
+    assert body["apiKeyMasked"] == "sk" + "*" * 17 + "12"
+    assert body["source"] == "server"
+
+    signed_in.put("/api/settings", json={"apiKey": "sk-userkey-abcdef99"})
+    body = signed_in.get("/api/settings").json()
+    assert body["source"] == "user"
+    assert body["apiKeyMasked"] == "sk" + "*" * 15 + "99"
+
+    # Echoing the masked value back must not clobber the real key.
+    signed_in.put("/api/settings", json={"apiKey": body["apiKeyMasked"]})
+    assert signed_in.get("/api/settings").json()["apiKeyMasked"] == body["apiKeyMasked"]
+
+    signed_in.delete("/api/settings/api-key")
+    assert signed_in.get("/api/settings").json()["source"] == "server"
+
+
+def test_settings_reject_bad_base_url(signed_in: TestClient) -> None:
+    assert signed_in.put("/api/settings", json={"baseUrl": "ftp://nope"}).status_code == 400
+
+
+def test_project_lifecycle(signed_in: TestClient) -> None:
+    created = signed_in.post("/api/projects", json={"prompt": "做一个极简待办清单"})
+    assert created.status_code == 201, created.text
+    project = created.json()["project"]
+    assert project["status"] == "draft"
+    assert project["title"] == "做一个极简待办清单"
+    assert [m["role"] for m in project["messages"]] == ["user"]
+
+    listed = signed_in.get("/api/projects").json()["projects"]
+    assert [p["id"] for p in listed] == [project["id"]]
+
+    assert signed_in.get(f"/api/projects/{project['id']}").status_code == 200
+    assert signed_in.delete(f"/api/projects/{project['id']}").json() == {"ok": True}
+    assert signed_in.get(f"/api/projects/{project['id']}").status_code == 404
+
+
+def test_projects_are_scoped_to_their_owner(client: TestClient) -> None:
+    client.post("/api/auth/register", json={"email": "one@b.com", "password": "s3cretpass"})
+    project_id = client.post("/api/projects", json={"prompt": "第一个人的项目"}).json()["project"]["id"]
+    client.post("/api/auth/logout")
+
+    client.post("/api/auth/register", json={"email": "two@b.com", "password": "s3cretpass"})
+    assert client.get(f"/api/projects/{project_id}").status_code == 404
+    assert client.get("/api/projects").json()["projects"] == []
+
+
+def test_actions_rejected_in_the_wrong_state(signed_in: TestClient) -> None:
+    project_id = signed_in.post("/api/projects", json={"prompt": "记账工具"}).json()["project"]["id"]
+    # A draft has no contract to approve and nothing built to revise.
+    assert signed_in.post(f"/api/projects/{project_id}/approve", json={}).status_code == 409
+    assert (
+        signed_in.post(f"/api/projects/{project_id}/revise", json={"message": "改改"}).status_code
+        == 409
     )
-    assert state.status_code == 200
-    again = client.get(f"/api/projects/{project_id}")
-    assert again.json()["preview_state"]["bake-board"] == '["可颂"]'
 
-    usage = client.get("/api/usage")
-    assert usage.json()["calls"] >= 2
 
-    listed = client.get("/api/projects")
-    assert len(listed.json()) == 1
-    assert client.delete(f"/api/projects/{project_id}").status_code == 200
-    assert client.get("/api/projects").json() == []
+def test_publish_requires_a_built_page(signed_in: TestClient) -> None:
+    project_id = signed_in.post("/api/projects", json={"prompt": "作品集"}).json()["project"]["id"]
+    assert signed_in.post(f"/api/projects/{project_id}/publish").status_code == 409
+
+
+def test_race_validates_model_selection(signed_in: TestClient) -> None:
+    project_id = signed_in.post("/api/projects", json={"prompt": "落地页"}).json()["project"]["id"]
+    # Fewer than two models never reaches the handler.
+    assert (
+        signed_in.post(f"/api/projects/{project_id}/race", json={"models": ["a"]}).status_code
+        == 422
+    )
+    # A race needs a contract to build against, so a draft is refused.
+    assert (
+        signed_in.post(f"/api/projects/{project_id}/race", json={"models": ["a", "b"]}).status_code
+        == 409
+    )
+
+
+def test_usage_starts_empty(signed_in: TestClient) -> None:
+    body = signed_in.get("/api/usage").json()
+    assert body == {
+        "credits": 10,
+        "spent": 0,
+        "runs": 0,
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "ledger": [],
+    }
+
+
+def test_unknown_api_path_returns_json_404(client: TestClient) -> None:
+    response = client.get("/api/definitely-not-a-route")
+    assert response.status_code == 404
+    assert "未知接口" in response.json()["detail"]

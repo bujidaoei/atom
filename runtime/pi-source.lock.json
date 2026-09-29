@@ -1,0 +1,10 @@
+{
+  "version": "0.87.1",
+  "releaseTag": "v0.87.1",
+  "upstreamRepository": "https://github.com/earendil-works/pi",
+  "upstreamCommit": "f07218c4d4bbc12bef056a7058c3dd49dfe41abe",
+  "sourceArchive": "pi-0.87.1-source.tar.gz",
+  "sourceArchiveSha256": "793949d8d9e56629346e4bb9a6bf5fc17952ef746a1bf4f3185f8e960e806fcf",
+  "fileCount": 1905,
+  "manifestSha256": "07a0eeed50de78acb5edb765b203b8c35bc77433c0944463843559973def53b2"
+}

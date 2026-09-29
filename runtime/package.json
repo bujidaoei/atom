@@ -1,9 +1,27 @@
 {
-  "name": "atom-pi-runtime",
+  "name": "@atom/runtime",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=24",
+    "npm": ">=11"
+  },
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "start": "node --import tsx src/server.ts",
+    "verify:pi-source": "node scripts/verify-pi-source.mjs",
+    "build:gateway": "node scripts/pi-gateway-runtime.mjs"
+  },
   "dependencies": {
-    "@earendil-works/pi-agent-core": "0.87.1",
-    "@earendil-works/pi-coding-agent": "0.87.1"
+    "cron-parser": "5.8.1",
+    "typebox": "1.3.7",
+    "undici": "8.10.0"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2",
+    "tsx": "4.20.3"
   }
 }

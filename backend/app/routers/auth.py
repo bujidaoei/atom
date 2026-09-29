@@ -1,48 +1,96 @@
-from fastapi import APIRouter, Depends, HTTPException, Response
-from sqlalchemy import select
-from sqlalchemy.orm import Session
+from __future__ import annotations
 
-from app.db import get_db
-from app.deps import clear_session_cookie, current_user, set_session_cookie
-from app.models import User
-from app.schemas import LoginIn, RegisterIn, UserOut
-from app.security import hash_password, verify_password
+from fastapi import APIRouter, HTTPException, Response, status
+from pydantic import BaseModel, EmailStr, Field
+from sqlalchemy import func, select
+
+from ..config import get_settings
+from ..deps import CurrentUser, DbSession, SESSION_COOKIE
+from ..models import User, UserSettings
+from ..security import hash_password, issue_session, verify_password
+from ..serialize import user_json
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
-def _out(user: User) -> UserOut:
-    return UserOut(id=user.id, name=user.name, email=user.email)
+class LookupRequest(BaseModel):
+    email: EmailStr
 
 
-@router.post("/register", response_model=UserOut)
-def register(body: RegisterIn, response: Response, db: Session = Depends(get_db)) -> UserOut:
-    email = body.email.lower()
-    exists = db.scalar(select(User).where(User.email == email))
-    if exists is not None:
-        raise HTTPException(status_code=409, detail="这个邮箱已经注册过")
-    user = User(email=email, name=body.name.strip(), password_hash=hash_password(body.password))
-    db.add(user)
-    db.commit()
-    set_session_cookie(response, user.id)
-    return _out(user)
+class Credentials(BaseModel):
+    email: EmailStr
+    password: str = Field(min_length=8, max_length=200)
+    name: str | None = Field(default=None, max_length=120)
 
 
-@router.post("/login", response_model=UserOut)
-def login(body: LoginIn, response: Response, db: Session = Depends(get_db)) -> UserOut:
-    user = db.scalar(select(User).where(User.email == body.email.lower()))
+def _find(session, email: str) -> User | None:
+    return session.scalars(
+        select(User).where(func.lower(User.email) == email.strip().lower())
+    ).first()
+
+
+def _set_cookie(response: Response, user_id: str) -> None:
+    settings = get_settings()
+    response.set_cookie(
+        SESSION_COOKIE,
+        issue_session(user_id),
+        max_age=settings.session_days * 86400,
+        httponly=True,
+        secure=settings.cookie_secure,
+        samesite="lax",
+        path=settings.cookie_path,
+    )
+
+
+@router.post("/lookup")
+def lookup(body: LookupRequest, session: DbSession) -> dict[str, object]:
+    """Atoms asks for the email first and branches on whether it exists.
+
+    This deliberately reveals registration status, matching the product being
+    cloned. A real deployment would rate-limit this endpoint.
+    """
+    email = body.email.strip().lower()
+    return {"email": email, "exists": _find(session, email) is not None}
+
+
+@router.post("/register")
+def register(body: Credentials, response: Response, session: DbSession) -> dict[str, object]:
+    if body.password.isdigit():
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "密码不能是纯数字")
+    email = body.email.strip().lower()
+    if _find(session, email) is not None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "该邮箱已注册")
+
+    user = User(
+        email=email,
+        name=(body.name or email.split("@")[0])[:120],
+        password_hash=hash_password(body.password),
+        credits=get_settings().starting_credits,
+    )
+    session.add(user)
+    session.flush()
+    session.add(UserSettings(user_id=user.id))
+    session.commit()
+
+    _set_cookie(response, user.id)
+    return user_json(user)
+
+
+@router.post("/login")
+def login(body: Credentials, response: Response, session: DbSession) -> dict[str, object]:
+    user = _find(session, body.email)
     if user is None or not verify_password(body.password, user.password_hash):
-        raise HTTPException(status_code=401, detail="邮箱或密码不对")
-    set_session_cookie(response, user.id)
-    return _out(user)
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "邮箱或密码不正确")
+    _set_cookie(response, user.id)
+    return user_json(user)
 
 
 @router.post("/logout")
-def logout(response: Response) -> dict:
-    clear_session_cookie(response)
+def logout(response: Response) -> dict[str, bool]:
+    response.delete_cookie(SESSION_COOKIE, path=get_settings().cookie_path)
     return {"ok": True}
 
 
-@router.get("/me", response_model=UserOut)
-def me(user: User = Depends(current_user)) -> UserOut:
-    return _out(user)
+@router.get("/me")
+def me(user: CurrentUser) -> dict[str, object]:
+    return user_json(user)

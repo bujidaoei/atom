@@ -1,43 +1,51 @@
+from __future__ import annotations
+
 import hashlib
 import hmac
-import secrets
+import os
 from datetime import datetime, timedelta, timezone
 
 import jwt
 
-from app.config import settings
+from .config import get_settings
 
 _ITERATIONS = 200_000
+_ALGORITHM = "HS256"
 
 
 def hash_password(password: str) -> str:
-    salt = secrets.token_hex(16)
-    digest = hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), _ITERATIONS).hex()
-    return f"pbkdf2_sha256${_ITERATIONS}${salt}${digest}"
+    salt = os.urandom(16)
+    digest = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, _ITERATIONS)
+    return f"pbkdf2_sha256${_ITERATIONS}${salt.hex()}${digest.hex()}"
 
 
-def verify_password(password: str, stored: str) -> bool:
+def verify_password(password: str, encoded: str) -> bool:
     try:
-        algorithm, rounds, salt, digest = stored.split("$", 3)
+        algorithm, iterations, salt_hex, digest_hex = encoded.split("$")
     except ValueError:
         return False
     if algorithm != "pbkdf2_sha256":
         return False
-    check = hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), int(rounds)).hex()
-    return hmac.compare_digest(check, digest)
+    digest = hashlib.pbkdf2_hmac(
+        "sha256", password.encode(), bytes.fromhex(salt_hex), int(iterations)
+    )
+    return hmac.compare_digest(digest.hex(), digest_hex)
 
 
-def create_token(user_id: str) -> str:
+def issue_session(user_id: str) -> str:
+    settings = get_settings()
+    now = datetime.now(timezone.utc)
     payload = {
         "sub": user_id,
-        "exp": datetime.now(timezone.utc) + timedelta(days=14),
+        "iat": int(now.timestamp()),
+        "exp": int((now + timedelta(days=settings.session_days)).timestamp()),
     }
-    return jwt.encode(payload, settings.secret, algorithm="HS256")
+    return jwt.encode(payload, settings.secret, algorithm=_ALGORITHM)
 
 
-def read_token(token: str) -> str | None:
+def read_session(token: str) -> str | None:
     try:
-        payload = jwt.decode(token, settings.secret, algorithms=["HS256"])
+        payload = jwt.decode(token, get_settings().secret, algorithms=[_ALGORITHM])
     except jwt.PyJWTError:
         return None
     subject = payload.get("sub")
