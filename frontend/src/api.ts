@@ -9,7 +9,7 @@ export class ApiError extends Error {
   }
 }
 
-function apiUrl(path: string): string {
+export function apiUrl(path: string): string {
   const prefix = import.meta.env.BASE_URL.replace(/\/$/, "");
   return `${prefix}${path}`;
 }

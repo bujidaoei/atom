@@ -25,7 +25,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <div className="min-h-screen md:grid md:grid-cols-[240px_minmax(0,1fr)]">
-      <aside className="border-b border-line bg-[#ebe4d8] md:sticky md:top-0 md:flex md:h-screen md:flex-col md:border-b-0 md:border-r">
+      <aside className="border-b border-[#e7e7e7] bg-[#f7f7f8] md:sticky md:top-0 md:flex md:h-screen md:flex-col md:border-b-0 md:border-r">
         <div className="px-4 pb-2 pt-4">
           <Wordmark to="/app" />
           <p className="mt-4 truncate text-sm">{user?.name ? `${user.name} 的 Atom` : "Atom"}</p>
@@ -57,7 +57,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           退出
         </button>
       </aside>
-      <div className="min-w-0">{children}</div>
+      <div className="min-w-0 bg-[#f3f4f6]">{children}</div>
     </div>
   );
 }

@@ -166,6 +166,7 @@ async def plan_project(db: Session, project: Project, user: User) -> None:
     project.contract_locked = False
     project.contract_version = 0
     project.pending_amendment = ""
+    add_message(db, project, "system", "这一轮由 Pi agent 0.87.1 执行。")
     add_message(db, project, "mike", project.lead_note)
     add_message(db, project, "iris", project.research_note)
     add_message(db, project, "bob", project.architecture_note)

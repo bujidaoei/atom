@@ -1,7 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from app.config import CURATED_MODELS, settings
+from app.config import settings
+from app.services.catalog import list_model_ids
 from app.db import get_db
 from app.deps import current_user
 from app.masking import mask_secret
@@ -41,7 +42,10 @@ def _view(row: UserSettings) -> dict:
         "api_key_masked": mask_secret(effective),
         "api_key_source": source,
         "configured": bool(effective),
-        "models": CURATED_MODELS,
+        "models": [{"id": model_id, "label": model_id} for model_id in list_model_ids(
+            (row.base_url or "").strip() or settings.llm_base_url,
+            effective,
+        )],
     }
 
 
@@ -69,7 +73,7 @@ def update_settings(
         row.api_key = key
     if body.model is not None:
         model = body.model.strip()
-        if model and (len(model) > 80 or any(char.isspace() for char in model)):
+        if model and (len(model) > 120 or any(char.isspace() for char in model)):
             raise HTTPException(status_code=422, detail="模型名称不对")
         row.model = model
     db.commit()

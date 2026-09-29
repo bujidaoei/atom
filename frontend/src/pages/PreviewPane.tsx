@@ -1,6 +1,21 @@
 import { useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import type { Requirement, RuntimeResult } from "../types";
+import { apiUrl } from "../api";
 import { instrumentHtml, probeFrame } from "../preview";
+
+function pageNonce(): string {
+  try {
+    if (typeof crypto.randomUUID === "function") return crypto.randomUUID();
+  } catch {
+    // Public HTTP is not a secure context, and randomUUID throws there.
+  }
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  bytes[6] = (bytes[6] & 15) | 64;
+  bytes[8] = (bytes[8] & 63) | 128;
+  const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
 
 export function PreviewPane({
   projectId,
@@ -19,7 +34,7 @@ export function PreviewPane({
 }) {
   const frameRef = useRef<HTMLIFrameElement>(null);
   const boot = useMemo(
-    () => ({ html, state: previewState, nonce: crypto.randomUUID() }),
+    () => ({ html, state: previewState, nonce: pageNonce() }),
     // Preview state is captured when the page HTML changes. Later saves must not reload the frame.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [html],
@@ -53,7 +68,7 @@ export function PreviewPane({
       window.clearTimeout(timer);
       const snapshot = data.snapshot;
       timer = window.setTimeout(() => {
-        fetch(`/api/projects/${projectId}/preview-state`, {
+        fetch(apiUrl(`/api/projects/${projectId}/preview-state`), {
           method: "PUT",
           credentials: "include",
           headers: { "Content-Type": "application/json" },

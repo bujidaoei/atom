@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import { api, readError } from "../api";
 import type { Project, RuntimeResult } from "../types";
 import { AgentFace, team } from "../agents";
+import { ComposerDock } from "../ModelSelect";
 import { Button, StatusDot, Wordmark, roleLabel, statusLabel } from "../ui";
 import { PreviewPane } from "./PreviewPane";
 
@@ -95,7 +96,7 @@ export function WorkspacePage() {
   async function send(event: FormEvent) {
     event.preventDefault();
     const text = instruction.trim();
-    if (!text) return;
+    if (!text || !project?.contract_locked) return;
     setInstruction("");
     await run("revise", () => api.revise(id, text));
   }
@@ -130,164 +131,105 @@ export function WorkspacePage() {
   const acceptance = new Map(project.latest_acceptance?.items.map((item) => [item.key, item]) || []);
   const working = busy === "plan" || project.status === "planning" || busy === "build" || project.status === "building";
   const activeFile = project.files.find((file) => file.path === filePath) || project.files[0];
+  const stepText =
+    busy === "build" || project.status === "building"
+      ? "正在生成页面"
+      : project.status === "awaiting_approval"
+        ? "契约写好了，等你批准"
+        : project.status === "ready"
+          ? "页面可以预览"
+          : working
+            ? "正在把想法写成契约"
+            : statusLabel[project.status] || project.status;
+  const consoleLines = [
+    error,
+    ...(project.latest_acceptance?.items.filter((item) => !item.ok).map((item) => item.checks.find((check) => !check.ok)?.detail || item.title) ||
+      []),
+  ].filter(Boolean);
+
+  const personByRole = new Map<string, (typeof team)[number]>(team.map((person) => [person.id, person]));
 
   return (
-    <div className="flex min-h-screen flex-col lg:h-screen">
-      <header className="flex h-14 shrink-0 items-center gap-4 border-b border-line px-4">
+    <div className="flex h-screen min-h-0 flex-col bg-[#f3f4f6]">
+      <header className="flex h-12 shrink-0 items-center gap-3 border-b border-[#e7e7e7] bg-white px-3">
         <Wordmark to="/app" />
-        <h1 className="truncate text-sm font-medium">{project.name}</h1>
-        <span className="hidden items-center gap-2 text-sm text-muted sm:inline-flex">
-          <StatusDot tone={project.status === "error" ? "bad" : working ? "work" : project.status === "ready" ? "ok" : "wait"} />
-          {statusLabel[project.status] || project.status}
-        </span>
-        {project.contract_locked ? (
-          <span className="hidden font-mono text-xs text-muted md:inline">契约 v{project.contract_version} 已锁定</span>
-        ) : null}
-        <div className="ml-auto flex items-center gap-2">
-          <button
-            type="button"
-            className={`h-8 rounded-lg px-3 text-sm ${pane === "preview" ? "bg-ink text-paper" : "text-muted"}`}
-            onClick={() => setPane("preview")}
-          >
-            预览
-          </button>
-          <button
-            type="button"
-            className={`h-8 rounded-lg px-3 text-sm ${pane === "code" ? "bg-ink text-paper" : "text-muted"}`}
-            onClick={() => setPane("code")}
-          >
-            代码
-          </button>
-          <Link to="/app/settings" className="px-2 text-sm text-muted hover:text-ink">
-            网关
-          </Link>
-        </div>
+        <h1 className="min-w-0 truncate text-sm font-medium">{project.name}</h1>
+        <Link to="/app/settings" className="ml-auto px-2 text-xs text-[#6b7280] hover:text-ink">
+          网关
+        </Link>
       </header>
 
-      <div className="grid lg:min-h-0 lg:flex-1 lg:grid-cols-[280px_minmax(0,1fr)_minmax(320px,0.95fr)]">
-        <aside className="flex flex-col border-b border-line lg:min-h-0 lg:border-b-0 lg:border-r">
-          <div className="border-b border-line px-4 py-4">
-            <p className="text-xs text-muted">小队</p>
-            <ul className="mt-3 space-y-3">
-              {team.map((person) => {
-                const note =
-                  person.id === "mike"
-                    ? project.lead_note
-                    : person.id === "iris"
-                      ? project.research_note
-                      : person.id === "bob"
-                        ? project.architecture_note
-                        : person.id === "alex"
-                          ? project.html
-                            ? "页面已经写进项目"
-                            : ""
-                          : project.requirements.length
-                            ? `${project.requirements.length} 条，${project.contract_locked ? "已锁定" : "等你确认"}`
-                            : "";
-                return (
-                  <li key={person.id}>
-                    <div className="flex items-center justify-between gap-3">
-                      <span className="flex items-center gap-2 text-sm">
-                        <AgentFace name={person.name} fill={person.fill} mouth={person.mouth} className="h-7 w-7" />
-                        {person.name}
-                        <span className="text-xs text-muted">{person.job}</span>
-                      </span>
-                      <StatusDot tone={note ? "ok" : working ? "work" : "wait"} />
-                    </div>
-                    {note ? <p className="mt-1 line-clamp-3 text-xs leading-5 text-muted">{note}</p> : null}
-                  </li>
-                );
-              })}
-            </ul>
-          </div>
-          <div className="px-4 py-4 lg:min-h-0 lg:flex-1 lg:overflow-auto">
-            <div className="flex items-baseline justify-between">
-              <p className="text-xs text-muted">契约</p>
-              {project.latest_acceptance ? (
-                <p className="font-mono text-xs text-muted">
-                  {project.latest_acceptance.passed}/{project.latest_acceptance.total}
-                </p>
-              ) : null}
-            </div>
-            {project.requirements.length === 0 ? (
-              <p className="mt-3 text-sm text-muted">{working ? "正在写" : "还没有"}</p>
-            ) : (
-              <ul className="mt-3 divide-y divide-line border-y border-line">
-                {project.requirements.map((item) => {
-                  const result = acceptance.get(item.key);
-                  return (
-                    <li key={item.key} className="py-3">
-                      <div className="flex items-start gap-2">
-                        <span className="mt-1">
-                          <StatusDot tone={result ? (result.ok ? "ok" : "bad") : "wait"} />
-                        </span>
-                        <div>
-                          <p className="text-sm">
-                            <span className="mr-2 font-mono text-xs text-muted">{item.key}</span>
-                            {item.title}
-                          </p>
-                          <p className="mt-1 text-xs leading-5 text-muted">
-                            {item.priority === "must" ? "必须" : "可以稍后"}
-                            {item.detail ? ` · ${item.detail}` : ""}
-                          </p>
-                          {result && !result.ok ? (
-                            <p className="mt-1 text-xs leading-5 text-clay">
-                              {result.checks.find((check) => !check.ok)?.detail}
-                            </p>
-                          ) : null}
-                        </div>
-                      </div>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </div>
-          <div className="border-t border-line p-4">
-            <Button onClick={accept} disabled={!project.html || busy !== ""} className="w-full">
-              {busy === "accept" ? "正在验收" : "跑验收"}
-            </Button>
-            <p className="mt-2 text-xs leading-5 text-muted">对照契约检查首屏，并在预览里真正点一次。</p>
-          </div>
-        </aside>
-
-        <section className="flex min-h-[360px] flex-col border-b border-line lg:min-h-0 lg:border-b-0 lg:border-r">
-          <div ref={logRef} className="px-5 lg:min-h-0 lg:flex-1 lg:overflow-auto">
-            <p className="border-b border-line py-4 text-sm leading-6 text-muted">{project.prompt}</p>
+      <div className="grid min-h-0 flex-1 lg:grid-cols-[minmax(320px,420px)_minmax(0,1fr)]">
+        <aside className="flex min-h-[520px] flex-col border-b border-[#e7e7e7] bg-white lg:min-h-0 lg:border-b-0 lg:border-r">
+          <div ref={logRef} className="min-h-0 flex-1 overflow-auto px-4 py-4">
+            <p className="text-sm leading-6 text-[#1a1a1a]">{project.prompt}</p>
             {project.messages.length === 0 && working ? (
-              <p className="flex items-center gap-2 py-4 text-sm text-muted">
+              <p className="mt-4 flex items-center gap-2 text-sm text-[#6b7280]">
                 <StatusDot tone="work" />
                 正在把想法写成契约
               </p>
             ) : null}
-            {project.messages.map((message) => (
-              <article key={message.id} className="border-b border-line py-4">
-                <p className="text-xs text-muted">{roleLabel[message.role] || message.role}</p>
-                <p className="mt-1 whitespace-pre-wrap text-sm leading-6">{message.content}</p>
-              </article>
-            ))}
+            <ul className="mt-4 space-y-4">
+              {project.messages.map((message) => {
+                const person = personByRole.get(message.role);
+                return (
+                  <li key={message.id} className="flex gap-2">
+                    {person ? <AgentFace name={person.name} fill={person.fill} mouth={person.mouth} className="h-7 w-7 shrink-0" /> : <span className="w-7 shrink-0" />}
+                    <div className="min-w-0">
+                      <p className="text-xs text-[#6b7280]">{roleLabel[message.role] || message.role}</p>
+                      <p className="mt-1 whitespace-pre-wrap text-sm leading-6">{message.content}</p>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
             {project.status === "building" || busy === "build" || busy === "revise" ? (
-              <p className="flex items-center gap-2 py-4 text-sm text-muted">
+              <p className="mt-4 flex items-center gap-2 text-sm text-[#6b7280]">
                 <StatusDot tone="work" />
                 工程师正在改页面
               </p>
             ) : null}
-          </div>
 
-          <div className="border-t border-line p-4">
-            {error ? <p className="mb-3 text-sm text-clay">{error}</p> : null}
-            {project.pending_amendment ? (
-              <div className="mb-3 rounded-lg border border-line bg-raised p-3">
-                <p className="text-sm">这会改掉已锁定的契约</p>
-                <p className="mt-1 text-sm leading-6 text-muted">{project.pending_amendment.reason}</p>
-                <ul className="mt-2 space-y-1 text-sm">
-                  {(project.pending_amendment.requirements || []).map((item) => (
-                    <li key={item.key}>
-                      <span className="mr-2 font-mono text-xs text-muted">{item.key}</span>
-                      {item.title}
-                    </li>
-                  ))}
+            <div className="mt-6">
+              <div className="flex items-baseline justify-between">
+                <p className="text-xs text-[#6b7280]">契约</p>
+                {project.latest_acceptance ? (
+                  <p className="font-mono text-xs text-[#6b7280]">
+                    {project.latest_acceptance.passed}/{project.latest_acceptance.total}
+                  </p>
+                ) : null}
+              </div>
+              {project.requirements.length === 0 ? (
+                <p className="mt-3 text-sm text-[#6b7280]">{working ? "正在写" : "还没有"}</p>
+              ) : (
+                <ul className="mt-2">
+                  {project.requirements.map((item) => {
+                    const result = acceptance.get(item.key);
+                    return (
+                      <li key={item.key} className="flex items-start gap-2 py-2">
+                        <span className="mt-1">
+                          <StatusDot tone={result ? (result.ok ? "ok" : "bad") : "wait"} />
+                        </span>
+                        <div>
+                          <p className="text-sm">{item.title}</p>
+                          {result && !result.ok ? (
+                            <p className="mt-1 text-xs leading-5 text-clay">{result.checks.find((check) => !check.ok)?.detail}</p>
+                          ) : null}
+                        </div>
+                      </li>
+                    );
+                  })}
                 </ul>
+              )}
+              <Button onClick={accept} disabled={!project.html || busy !== ""} className="mt-3">
+                {busy === "accept" ? "正在验收" : "跑验收"}
+              </Button>
+            </div>
+
+            {project.pending_amendment ? (
+              <div className="mt-4 rounded-xl border border-[#e7e7e7] p-3">
+                <p className="text-sm">这会改掉已锁定的契约</p>
+                <p className="mt-1 text-sm leading-6 text-[#6b7280]">{project.pending_amendment.reason}</p>
                 <div className="mt-3 flex gap-2">
                   <Button onClick={() => run("build", () => api.applyAmendment(id))} disabled={busy !== ""}>
                     修订并重建
@@ -300,6 +242,7 @@ export function WorkspacePage() {
             ) : null}
             {project.status === "error" ? (
               <Button
+                className="mt-4"
                 onClick={() =>
                   run(project.requirements.length ? "build" : "plan", () =>
                     project.requirements.length ? api.build(id) : api.plan(id),
@@ -311,70 +254,77 @@ export function WorkspacePage() {
               </Button>
             ) : null}
             {project.status === "awaiting_approval" && !project.contract_locked ? (
-              <div className="flex flex-wrap gap-2">
+              <div className="mt-4 flex flex-wrap gap-2">
                 <Button onClick={() => run("build", () => api.build(id))} disabled={busy !== ""}>
-                  {busy === "build" ? "正在构建" : "锁定并构建"}
+                  {busy === "build" ? "正在构建" : "批准并构建"}
                 </Button>
                 <Button variant="line" onClick={() => run("plan", () => api.plan(id))} disabled={busy !== ""}>
                   重写契约
                 </Button>
               </div>
             ) : null}
-            {project.contract_locked ? (
-              <form onSubmit={send} className="flex items-end gap-2">
-                <label className="min-w-0 flex-1">
-                  <span className="sr-only">修改意见</span>
-                  <textarea
-                    value={instruction}
-                    onChange={(event) => setInstruction(event.target.value)}
-                    rows={2}
-                    placeholder="想改哪里。推翻已锁定的条目时，会先请你确认。"
-                    className="w-full resize-none rounded-lg border border-line bg-raised px-3 py-2 text-sm leading-6"
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
-                        event.preventDefault();
-                        event.currentTarget.form?.requestSubmit();
-                      }
-                    }}
-                  />
-                </label>
-                <Button type="submit" disabled={busy !== "" || !instruction.trim()}>
-                  发送
-                </Button>
-              </form>
-            ) : null}
           </div>
-        </section>
 
-        <section className="min-h-[480px] bg-raised lg:min-h-0">
-          {pane === "preview" ? (
-            <PreviewPane
-              projectId={project.id}
-              html={project.html}
-              previewState={project.preview_state}
-              requirements={project.requirements}
-              probeRef={probeRef}
-              onStateError={setError}
+          <div className="border-t border-[#e7e7e7] p-3">
+            {error ? <p className="mb-2 text-sm text-clay">{error}</p> : null}
+            <ComposerDock
+              value={instruction}
+              onChange={setInstruction}
+              onSubmit={send}
+              busy={busy !== ""}
+              disabled={!project.contract_locked || busy !== "" || !instruction.trim()}
+              placeholder="让智能体团队实现你的想法"
+              onError={setError}
             />
-          ) : (
-            <div className="flex h-full min-h-[480px] flex-col lg:min-h-0">
-              <div className="flex gap-4 border-b border-line px-4">
-                {project.files.map((file) => (
-                  <button
-                    key={file.path}
-                    type="button"
-                    onClick={() => setFilePath(file.path)}
-                    className={`h-10 text-sm ${file.path === activeFile?.path ? "border-b-2 border-ink" : "text-muted"}`}
-                  >
-                    {file.path}
-                  </button>
-                ))}
-              </div>
-              <pre className="min-h-0 flex-1 overflow-auto bg-[#241f1b] p-4 font-mono text-[13px] leading-6 text-[#f4efe6]">
-                {activeFile?.content || "还没有文件"}
-              </pre>
+          </div>
+        </aside>
+
+        <section className="flex min-h-[480px] flex-col bg-[#f3f4f6] lg:min-h-0">
+          <div className="flex h-10 shrink-0 items-center gap-3 border-b border-[#e7e7e7] bg-white px-4 text-xs text-[#6b7280]">
+            <StatusDot tone={project.status === "error" ? "bad" : working ? "work" : project.status === "ready" ? "ok" : "wait"} />
+            <span>{stepText}</span>
+            <div className="ml-auto flex gap-3">
+              <button type="button" className={pane === "preview" ? "text-ink" : ""} onClick={() => setPane("preview")}>
+                预览
+              </button>
+              <button type="button" className={pane === "code" ? "text-ink" : ""} onClick={() => setPane("code")}>
+                代码
+              </button>
             </div>
-          )}
+          </div>
+          <div className="min-h-0 flex-1">
+            {pane === "preview" ? (
+              <PreviewPane
+                projectId={project.id}
+                html={project.html}
+                previewState={project.preview_state}
+                requirements={project.requirements}
+                probeRef={probeRef}
+                onStateError={setError}
+              />
+            ) : (
+              <div className="flex h-full min-h-[320px] flex-col">
+                <div className="flex gap-4 border-b border-[#e7e7e7] bg-white px-4">
+                  {project.files.map((file) => (
+                    <button
+                      key={file.path}
+                      type="button"
+                      onClick={() => setFilePath(file.path)}
+                      className={`h-10 text-sm ${file.path === activeFile?.path ? "border-b-2 border-ink" : "text-[#6b7280]"}`}
+                    >
+                      {file.path}
+                    </button>
+                  ))}
+                </div>
+                <pre className="min-h-0 flex-1 overflow-auto bg-[#1e1e1e] p-4 font-mono text-[13px] leading-6 text-[#f4efe6]">
+                  {activeFile?.content || "还没有文件"}
+                </pre>
+              </div>
+            )}
+          </div>
+          <div className="h-28 shrink-0 overflow-auto border-t border-[#111] bg-[#1e1e1e] px-3 py-2 font-mono text-xs leading-5 text-[#d4d4d4]">
+            {consoleLines.length ? consoleLines.map((line) => <p key={line}>{line}</p>) : <p className="text-[#9ca3af]">控制台</p>}
+          </div>
         </section>
       </div>
     </div>

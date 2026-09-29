@@ -2,10 +2,11 @@ import { FormEvent, useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { AgentFace, team } from "../agents";
 import { api, readError } from "../api";
+import { ComposerDock } from "../ModelSelect";
 import { AppShell } from "../Shell";
 import { useSession } from "../session";
 import type { ProjectSummary, Usage } from "../types";
-import { Button, formatWhen, statusLabel } from "../ui";
+import { formatWhen, statusLabel } from "../ui";
 
 const starters = [
   "给街角咖啡馆做一个今日烘焙看板，店员能把卖完的标出来，刷新后还在",
@@ -59,40 +60,32 @@ export function DashboardPage() {
 
   return (
     <AppShell>
-      <div className="flex justify-end px-6 py-3 text-sm text-muted">
+      <div className="flex justify-end px-6 py-3 text-sm text-[#6b7280]">
         {usage ? `已调用 ${usage.calls} 次` : "用量读取中"}
       </div>
-      <div className="mx-auto flex w-full max-w-2xl flex-col items-center px-5 pb-20">
+      <div className="mx-auto flex w-full max-w-[720px] flex-col items-center bg-[#f3f4f6] px-5 pb-20">
+        <p className="mb-6 rounded-full bg-[#ececee] px-4 py-1.5 text-xs text-[#6b7280]">主对话 · 模型来自网关目录</p>
         <ul className="flex items-end gap-2">
           {team.map((person) => (
-            <li key={person.id} className="text-center">
+            <li key={person.id}>
               <AgentFace name={person.name} fill={person.fill} mouth={person.mouth} />
-              <span className="mt-1 block text-[11px] text-muted">{person.name}</span>
             </li>
           ))}
         </ul>
-        <h1 className="mt-6 text-center font-display text-[clamp(2.1rem,4vw,3.25rem)] font-medium leading-tight tracking-[-0.03em]">
+        <h1 className="mt-6 text-center text-[clamp(2rem,4vw,2.75rem)] font-semibold leading-tight tracking-[-0.03em] text-black">
           你想创造什么{user?.name ? `，${user.name}` : ""}？
         </h1>
-        <form onSubmit={create} className="mt-8 w-full rounded-2xl border border-line bg-raised p-4 shadow-sheet">
-          <label htmlFor="idea" className="sr-only">
-            想做什么
-          </label>
-          <textarea
-            id="idea"
+        <div className="mt-8 w-full">
+          <ComposerDock
             value={prompt}
-            onChange={(event) => setPrompt(event.target.value)}
-            rows={3}
-            placeholder="请 Alex 做一个能用的小页面。写清谁在用、第一版要完成什么。"
-            className="w-full resize-none bg-transparent text-base leading-7 outline-none placeholder:text-muted/70"
+            onChange={setPrompt}
+            onSubmit={create}
+            busy={busy}
+            disabled={busy}
+            placeholder="告知小队你的需求"
+            onError={setError}
           />
-          <div className="mt-2 flex items-center justify-between gap-3">
-            <p className="text-xs leading-5 text-muted">小队先写契约。你点头之后，页面才会出现在右边。</p>
-            <Button type="submit" disabled={busy}>
-              {busy ? "正在交给小队" : "构建"}
-            </Button>
-          </div>
-        </form>
+        </div>
         {error ? <p className="mt-3 w-full text-sm text-clay">{error}</p> : null}
         <div className="mt-4 flex w-full flex-wrap gap-2">
           {starters.map((item) => (

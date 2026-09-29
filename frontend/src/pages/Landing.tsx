@@ -2,7 +2,7 @@ import { FormEvent, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { PROMPT_KEY, api } from "../api";
 import { useSession } from "../session";
-import { Button, Wordmark } from "../ui";
+import { Wordmark } from "../ui";
 
 const examples = [
   "给街角咖啡馆做一个今日烘焙看板，店员能把卖完的标出来，刷新后还在",
@@ -79,35 +79,49 @@ export function LandingPage() {
           <p className="mt-8 max-w-md text-[17px] leading-7 text-muted">
             描述一个小产品。研究员、产品经理和架构师先写一份能锁定的契约。你点头之后，工程师才动手。验收台按契约把页面点一遍。
           </p>
-          <form className="mt-10 max-w-xl" onSubmit={start}>
-            <label htmlFor="idea" className="text-sm">
+          <form className="mt-10 max-w-xl rounded-[24px] bg-white px-4 pb-3 pt-3 shadow-[0_10px_40px_rgba(15,23,42,0.08)]" onSubmit={start}>
+            <label htmlFor="idea" className="sr-only">
               想做什么
             </label>
             <textarea
               id="idea"
               value={prompt}
               onChange={(event) => setPrompt(event.target.value)}
-              rows={4}
-              placeholder="谁在用，要完成哪件事，刷新之后数据还要不要在。"
-              className="mt-2 w-full resize-y rounded-lg border border-line bg-raised px-3 py-3 text-base leading-7 outline-none"
+              rows={3}
+              placeholder="告知小队你的需求"
+              className="w-full resize-none bg-transparent text-[15px] leading-7 outline-none placeholder:text-[#9aa0a6]"
             />
-            <div className="mt-3 flex flex-wrap gap-2">
-              {examples.map((example) => (
-                <button
-                  key={example}
-                  type="button"
-                  onClick={() => setPrompt(example)}
-                  className="rounded-lg border border-line px-2.5 py-1.5 text-left text-xs leading-5 text-muted hover:border-ink/30 hover:text-ink"
-                >
-                  {example.slice(0, 18)}…
-                </button>
-              ))}
+            <div className="mt-2 flex items-center justify-between gap-3">
+              <button
+                type="button"
+                aria-label="聚焦输入"
+                onClick={(event) => event.currentTarget.closest("form")?.querySelector("textarea")?.focus()}
+                className="flex h-8 w-8 items-center justify-center rounded-full border border-[#e5e7eb] text-lg leading-none text-[#6b7280]"
+              >
+                +
+              </button>
+              <button
+                type="submit"
+                disabled={busy}
+                className="inline-flex h-10 items-center rounded-full bg-[#3b6cff] px-5 text-sm text-white disabled:opacity-50"
+              >
+                {busy ? "正在创建" : "开始 →"}
+              </button>
             </div>
             {error ? <p className="mt-3 text-sm text-clay">{error}</p> : null}
-            <Button type="submit" className="mt-4 px-4" disabled={busy}>
-              {busy ? "正在创建" : "开始做"}
-            </Button>
           </form>
+          <div className="mt-3 flex max-w-xl flex-wrap gap-2">
+            {examples.map((example) => (
+              <button
+                key={example}
+                type="button"
+                onClick={() => setPrompt(example)}
+                className="rounded-full border border-line bg-white px-3 py-1.5 text-left text-xs text-muted hover:border-ink/30 hover:text-ink"
+              >
+                {example.slice(0, 18)}…
+              </button>
+            ))}
+          </div>
         </div>
 
         <aside className="rounded-xl border border-line bg-raised p-5 shadow-sheet md:mt-6" aria-label="契约界面示例">
