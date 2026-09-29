@@ -4,6 +4,8 @@ services:
       context: .
       args:
         VITE_BASE: ${VITE_BASE:-/}
+        APT_MIRROR: ${APT_MIRROR:-}
+        PYPI_INDEX: ${PYPI_INDEX:-}
     image: atom-demo:latest
     restart: unless-stopped
     env_file: .env

@@ -30,6 +30,31 @@ fi
 
 say() { printf '\n\033[1;34m==>\033[0m %s\n' "$*"; }
 
+# The default Debian mirror is unusably slow from some clouds. Prefer the
+# provider's internal mirror when one answers quickly.
+detect_apt_mirror() {
+  for candidate in mirrors.tencentyun.com mirrors.cloud.aliyuncs.com; do
+    if curl -fsS --max-time 3 -o /dev/null "http://${candidate}/debian/" 2>/dev/null; then
+      echo "$candidate"
+      return
+    fi
+  done
+  echo ""
+}
+
+detect_pypi_index() {
+  for candidate in \
+    http://mirrors.tencentyun.com/pypi/simple \
+    https://mirrors.cloud.aliyuncs.com/pypi/simple
+  do
+    if curl -fsS --max-time 3 -o /dev/null "$candidate/" 2>/dev/null; then
+      echo "$candidate"
+      return
+    fi
+  done
+  echo ""
+}
+
 # ---------------------------------------------------------------- docker
 if ! command -v docker >/dev/null 2>&1; then
   say "Installing Docker"
@@ -89,6 +114,8 @@ ATOM_RUNTIME_TOKEN=$(openssl rand -hex 16)
 ATOM_COOKIE_SECURE=false
 ATOM_STARTING_CREDITS=200
 ATOM_HTTP_PORT=${HTTP_PORT}
+APT_MIRROR=${APT_MIRROR:-$(detect_apt_mirror)}
+PYPI_INDEX=${PYPI_INDEX:-$(detect_pypi_index)}
 EOF
 
 COMPOSE_ARGS=(-f docker-compose.yml)

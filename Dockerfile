@@ -27,7 +27,15 @@ RUN node scripts/verify-pi-source.mjs \
 # ------------------------------------------------------------------ server
 FROM python:3.12-slim-bookworm
 
-RUN printf '#!/bin/sh\nexit 101\n' > /usr/sbin/policy-rc.d && chmod +x /usr/sbin/policy-rc.d \
+# deb.debian.org can crawl from some networks; on the deployment box it ran at
+# 16 kB/s and dominated the build. Point APT_MIRROR at a closer host, e.g.
+# mirrors.tencentyun.com on Tencent Cloud or mirrors.aliyun.com elsewhere.
+ARG APT_MIRROR=""
+RUN if [ -n "$APT_MIRROR" ]; then \
+      sed -i "s|deb.debian.org|${APT_MIRROR}|g; s|security.debian.org|${APT_MIRROR}|g" \
+        /etc/apt/sources.list.d/debian.sources 2>/dev/null || true; \
+    fi \
+    && printf '#!/bin/sh\nexit 101\n' > /usr/sbin/policy-rc.d && chmod +x /usr/sbin/policy-rc.d \
     && apt-get update \
     && apt-get install -y --no-install-recommends nginx supervisor ca-certificates curl \
     && rm -rf /var/lib/apt/lists/* \
@@ -40,6 +48,11 @@ COPY --from=runtime /usr/local/lib/node_modules /opt/node/lib/node_modules
 ENV PATH="/opt/node/bin:${PATH}"
 
 COPY --from=ghcr.io/astral-sh/uv:0.11.14 /uv /uvx /bin/
+
+# Same reasoning as APT_MIRROR. The lock file pins hashes, so a mirror can
+# only serve the same artefacts or fail the install.
+ARG PYPI_INDEX=""
+ENV UV_DEFAULT_INDEX=${PYPI_INDEX}
 
 WORKDIR /app/backend
 COPY backend/pyproject.toml backend/uv.lock ./
