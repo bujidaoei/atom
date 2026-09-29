@@ -9,25 +9,20 @@ import { PreviewPane } from "./PreviewPane";
 
 const planJobs = new Map<string, Promise<Project>>();
 
-function ActivityCard({ steps, open }: { steps: ActivityStep[]; open: boolean }) {
-  const [expanded, setExpanded] = useState(open);
+function ActivityCard({ steps }: { steps: ActivityStep[] }) {
   if (!steps.length) return null;
   return (
-    <div className="mt-2">
-      <button type="button" className="text-xs text-[#6b7280]" onClick={() => setExpanded((value) => !value)}>
-        已处理 {steps.length} 个步骤
-      </button>
-      {expanded ? (
-        <ol className="mt-2 space-y-2 border-l border-[#e7e7e7] pl-3">
-          {steps.map((step, index) => (
-            <li key={`${step.title}-${index}`} className="text-xs leading-5 text-[#4b5563]">
-              <span>{step.kind === "tool" ? `工具 · ${step.title}` : step.kind === "thinking" ? "推理" : step.title}</span>
-              {step.status === "run" ? <span className="ml-2 text-[#8f4318]">进行中</span> : null}
-              {step.detail ? <span className="mt-0.5 block whitespace-pre-wrap text-[#6b7280]">{step.detail}</span> : null}
-            </li>
-          ))}
-        </ol>
-      ) : null}
+    <div className="mt-2 rounded-lg bg-[#f3f4f6] px-3 py-2">
+      <p className="text-xs font-medium text-[#374151]">已处理 {steps.length} 个步骤</p>
+      <ol className="mt-2 space-y-2 border-l border-[#d1d5db] pl-3">
+        {steps.map((step, index) => (
+          <li key={`${step.title}-${index}`} className="text-xs leading-5 text-[#1f2937]">
+            <span>{step.kind === "tool" ? `工具 · ${step.title}` : step.kind === "thinking" ? "推理" : step.title}</span>
+            {step.status === "run" ? <span className="ml-2 text-[#8f4318]">进行中</span> : null}
+            {step.detail ? <span className="mt-0.5 block whitespace-pre-wrap text-[#4b5563]">{step.detail}</span> : null}
+          </li>
+        ))}
+      </ol>
     </div>
   );
 }
@@ -206,13 +201,12 @@ export function WorkspacePage() {
               {project.messages.map((message) => {
                 const person = personByRole.get(message.role);
                 const steps = message.activity || [];
-                const live = working && message.id === latestAgent?.id;
                 return (
                   <li key={message.id} className="flex gap-2">
                     {person ? <AgentFace name={person.name} fill={person.fill} mouth={person.mouth} className="h-7 w-7 shrink-0" /> : <span className="w-7 shrink-0" />}
                     <div className="min-w-0">
                       <p className="text-xs text-[#6b7280]">{roleLabel[message.role] || message.role}</p>
-                      <ActivityCard steps={steps} open={live || steps.some((step) => step.status === "run")} />
+                      <ActivityCard steps={steps} />
                       <p className="mt-1 whitespace-pre-wrap text-sm leading-6">{message.content}</p>
                       {message.role === "alex" && project.html && !working ? (
                         <p className="mt-2 rounded-lg border border-[#e7e7e7] px-3 py-2 text-sm">
