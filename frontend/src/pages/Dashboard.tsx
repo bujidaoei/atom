@@ -7,7 +7,7 @@ import { Icon } from "../components/ui/Icon";
 import { StatusBadge } from "../components/ui/Badge";
 import { EmptyState, ErrorState, Skeleton } from "../components/ui/States";
 import { takePendingPrompt, useAuth } from "../lib/auth";
-import { errorMessage } from "../lib/api";
+import { errorMessage, publishedUrl } from "../lib/api";
 import { EXAMPLE_PROMPTS } from "../lib/examples";
 import { formatRelative } from "../lib/format";
 import { useProjects } from "../lib/projects";
@@ -164,7 +164,7 @@ function ProjectCard({
 
       {project.slug ? (
         <a
-          href={`/p/${project.slug}/`}
+          href={publishedUrl(project.slug)}
           target="_blank"
           rel="noreferrer"
           className="inline-flex items-center gap-xxs text-xs text-brand-text hover:underline"

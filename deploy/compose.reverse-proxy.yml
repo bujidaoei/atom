@@ -1,0 +1,34 @@
+# Overlay for hosts where another reverse proxy already owns port 80 and
+# mounts this app on a subpath.
+#
+#   docker compose -f docker-compose.yml -f deploy/compose.reverse-proxy.yml up -d --build
+#
+# The proxy is expected to strip the prefix, e.g.
+#
+#   location /atom/ { proxy_pass http://atom:80/; }
+#
+# so the container still serves from its own root. The frontend is built with
+# VITE_BASE so its asset, API, preview and publish URLs carry the prefix, and
+# the session cookie is scoped to it.
+
+services:
+  atom:
+    container_name: atom
+    build:
+      args:
+        VITE_BASE: ${VITE_BASE:-/atom/}
+    # The proxy reaches the container over the shared network, so nothing is
+    # published to the host.
+    ports: !reset []
+    environment:
+      ATOM_COOKIE_PATH: ${ATOM_COOKIE_PATH:-/atom}
+    networks:
+      default: {}
+      proxy:
+        aliases:
+          - atom
+
+networks:
+  proxy:
+    external: true
+    name: ${ATOM_PROXY_NETWORK:-new-api_new-api-network}

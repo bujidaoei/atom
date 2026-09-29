@@ -18,6 +18,11 @@ HTTP_PORT="${ATOM_HTTP_PORT:-8080}"
 REPO="${ATOM_REPO:-https://github.com/bujidaoei/atom.git}"
 TARGET="${ATOM_DIR:-$HOME/atom}"
 
+# Set ATOM_PROXY_NETWORK to sit behind an existing reverse proxy on a subpath
+# instead of publishing a host port. See deploy/compose.reverse-proxy.yml.
+PROXY_NETWORK="${ATOM_PROXY_NETWORK:-}"
+BASE_PATH="${ATOM_BASE_PATH:-/atom}"
+
 if [[ -z "$API_KEY" ]]; then
   echo "usage: bash deploy/server-setup.sh <AI_GATEWAY_API_KEY>" >&2
   exit 1
@@ -46,7 +51,15 @@ if [[ -d "$TARGET/.git" ]]; then
   say "Updating $TARGET"
   git -C "$TARGET" fetch --depth 1 origin main
   git -C "$TARGET" reset --hard origin/main
+  git -C "$TARGET" clean -fd -e .env
 else
+  if [[ -e "$TARGET" ]]; then
+    # An earlier deployment may have left a bare compose directory here.
+    # Keep it rather than deleting someone's .env by surprise.
+    backup="${TARGET}.backup-$(date +%Y%m%d%H%M%S)"
+    say "Moving the existing $TARGET aside to $backup"
+    mv "$TARGET" "$backup"
+  fi
   say "Cloning into $TARGET"
   git clone --depth 1 "$REPO" "$TARGET"
 fi
@@ -77,22 +90,39 @@ ATOM_COOKIE_SECURE=false
 ATOM_STARTING_CREDITS=200
 ATOM_HTTP_PORT=${HTTP_PORT}
 EOF
+
+COMPOSE_ARGS=(-f docker-compose.yml)
+if [[ -n "$PROXY_NETWORK" ]]; then
+  COMPOSE_ARGS+=(-f deploy/compose.reverse-proxy.yml)
+  cat >> .env <<EOF
+ATOM_PROXY_NETWORK=${PROXY_NETWORK}
+ATOM_COOKIE_PATH=${BASE_PATH}
+VITE_BASE=${BASE_PATH}/
+EOF
+  HEALTH_URL="http://127.0.0.1${BASE_PATH}/api/health"
+else
+  HEALTH_URL="http://127.0.0.1:${HTTP_PORT}/api/health"
+fi
 chmod 600 .env
 
 # ----------------------------------------------------------------- build
 say "Building and starting (first build pulls Node 24 and Python 3.12, give it a few minutes)"
-$DOCKER compose up -d --build
+$DOCKER compose "${COMPOSE_ARGS[@]}" up -d --build
 
 # ---------------------------------------------------------------- verify
-say "Waiting for the health check"
-for attempt in $(seq 1 60); do
-  if curl -fsS "http://127.0.0.1:${HTTP_PORT}/api/health" >/dev/null 2>&1; then
-    health=$(curl -fsS "http://127.0.0.1:${HTTP_PORT}/api/health")
+say "Waiting for the health check at ${HEALTH_URL}"
+for _ in $(seq 1 60); do
+  health=$(curl -fsS --max-time 5 "$HEALTH_URL" 2>/dev/null || true)
+  if [[ -n "$health" ]]; then
     echo "    $health"
     case "$health" in
       *'"runtime":true'*)
         ip=$(curl -fsS --max-time 5 ifconfig.me 2>/dev/null || echo "<server-ip>")
-        say "Up at http://${ip}:${HTTP_PORT}"
+        if [[ -n "$PROXY_NETWORK" ]]; then
+          say "Up at http://${ip}${BASE_PATH}/"
+        else
+          say "Up at http://${ip}:${HTTP_PORT}/"
+        fi
         exit 0
         ;;
     esac
@@ -101,5 +131,5 @@ for attempt in $(seq 1 60); do
 done
 
 say "Did not come up cleanly. Recent logs:"
-$DOCKER compose logs --tail 60
+$DOCKER compose "${COMPOSE_ARGS[@]}" logs --tail 60
 exit 1

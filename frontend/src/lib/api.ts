@@ -12,6 +12,19 @@ import type {
   User,
 } from "./types";
 
+/**
+ * Deployment prefix, e.g. "" at the root or "/atom" behind a reverse proxy
+ * that mounts the app on a subpath. Vite bakes this in from `VITE_BASE`.
+ *
+ * Every absolute path the app requests has to carry it, otherwise the proxy
+ * routes /api and /preview to whatever else lives at the root.
+ */
+const BASE = import.meta.env.BASE_URL.replace(/\/+$/, "");
+
+export function withBase(path: string): string {
+  return `${BASE}${path}`;
+}
+
 export class ApiError extends Error {
   readonly status: number;
 
@@ -42,7 +55,7 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
 
   let response: Response;
   try {
-    response = await fetch(path, {
+    response = await fetch(withBase(path), {
       method,
       credentials: "include",
       headers: {
@@ -161,7 +174,15 @@ export function encodeFilePath(path: string): string {
 }
 
 export function previewUrl(projectId: string): string {
-  return `/preview/${projectId}/`;
+  return withBase(`/preview/${projectId}/`);
+}
+
+export function racePreviewUrl(projectId: string, heatId: string): string {
+  return withBase(`/preview/${projectId}/race/${heatId}/`);
+}
+
+export function publishedUrl(slug: string): string {
+  return withBase(`/p/${slug}/`);
 }
 
 export function errorMessage(err: unknown): string {

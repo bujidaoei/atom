@@ -6,7 +6,7 @@ import { Badge, StatusBadge } from "../components/ui/Badge";
 import { Icon } from "../components/ui/Icon";
 import type { IconName } from "../components/ui/Icon";
 import { ErrorState, LoadingState } from "../components/ui/States";
-import { api, errorMessage } from "../lib/api";
+import { api, errorMessage, publishedUrl } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { agentMeta } from "../lib/agents";
 import { isRunningStatus } from "../lib/format";
@@ -252,7 +252,7 @@ export function WorkspacePage() {
 
           {project.slug ? (
             <a
-              href={`/p/${project.slug}/`}
+              href={publishedUrl(project.slug)}
               target="_blank"
               rel="noreferrer"
               className="inline-flex items-center gap-xxs rounded-full px-m py-[3px] text-xs text-brand-text transition-colors duration-ui ease-ui hover:bg-brand-alpha-soft"

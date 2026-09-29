@@ -4,7 +4,7 @@ import { Badge } from "../components/ui/Badge";
 import { Icon } from "../components/ui/Icon";
 import { EmptyState, ErrorState, LoadingState } from "../components/ui/States";
 import { Spinner } from "../components/ui/Spinner";
-import { api, errorMessage } from "../lib/api";
+import { api, errorMessage, withBase } from "../lib/api";
 import { formatBytes, formatElapsed, formatNumber } from "../lib/format";
 import type { RaceHeat, RaceSummary } from "../lib/types";
 import type { HeatActivity } from "./useProjectStream";
@@ -285,7 +285,7 @@ function HeatCard({
       <div className="relative aspect-[16/10] bg-base-secondary-alt">
         {heat.previewUrl && (heat.status === "done" || heat.fileCount > 0) ? (
           <iframe
-            src={heat.previewUrl}
+            src={withBase(heat.previewUrl)}
             title={`${heat.model} 的预览`}
             sandbox="allow-scripts allow-same-origin"
             tabIndex={-1}
@@ -341,7 +341,7 @@ function HeatCard({
         </Button>
         {heat.previewUrl ? (
           <a
-            href={heat.previewUrl}
+            href={withBase(heat.previewUrl)}
             target="_blank"
             rel="noreferrer"
             className="inline-flex items-center gap-xxs rounded-m px-s py-[2px] text-xs text-neutral-60 transition-colors duration-ui ease-ui hover:bg-neutral-8 hover:text-neutral-95"

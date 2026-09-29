@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { withBase } from "../lib/api";
 import type { MessageRole, RunEvent, RunEventPayload } from "../lib/types";
 
 export type ToolStatus = "running" | "ok" | "failed";
@@ -415,7 +416,7 @@ export function useProjectStream({ projectId, enabled, onProjectUpdated }: UsePr
 
     setConnection((current) => (current === "retrying" ? current : "connecting"));
     const source = new EventSource(
-      `/api/projects/${projectId}/events?after=${lastSeq.current}`,
+      withBase(`/api/projects/${projectId}/events?after=${lastSeq.current}`),
       { withCredentials: true },
     );
 
