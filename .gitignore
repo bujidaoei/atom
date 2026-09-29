@@ -13,10 +13,12 @@ __pycache__/
 .pytest_cache/
 *.pyc
 
-# runtime state
-backend/data
-data/
-.logs/
+# Runtime state. These are anchored to the repository root on purpose: an
+# unanchored `data/` also matched runtime/pi/packages/ai/src/providers/data,
+# which silently dropped 43 vendored Pi files and broke the integrity check.
+/backend/data/
+/data/
+/.logs/
 
 # The vendored Pi tree and the pinned gateway bundle are part of the product
 # and must stay in the repository; only the 157 MB per-generation build cache
