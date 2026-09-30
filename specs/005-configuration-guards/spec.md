@@ -1,5 +1,5 @@
 # Feature: Explicit configuration and runtime authentication
-Branch: codex/005-configuration-guards | Date: 2026-09-30 | Status: implemented, scoped automated/startup/HTTP verification passed; commit reconciliation pending
+Branch: codex/005-configuration-guards | Date: 2026-09-30 | Status: scoped implementation and automated/startup/HTTP acceptance complete; enterprise delivery remains open
 Parent: 003-enterprise-foundation FR-002/003/012, SEC-06. This is one security boundary, not enterprise production certification.
 
 ## User scenarios and acceptance

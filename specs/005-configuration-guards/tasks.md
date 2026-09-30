@@ -5,5 +5,5 @@
 - [x] T004 Implement runtime/src/config.ts and wire runtime/src/server.ts without Pi changes.
 - [x] T005 Update .env.example, docker-compose.yml, scripts/dev.ps1 and deploy/server-setup.sh configuration flow; document intentional migration in docs/configuration.md. Syntax/Compose validation passed; not production execution.
 - [x] T006 Execute backend/runtime regressions, production-negative subprocess checks and Pi verifier; actual results recorded in evidence.md. No production rollout or live-model claim.
-- [ ] T007 Reconcile spec/plan/tasks/parent evidence, inspect exact diff and commit only authorized files. No production delivery closure.
+- [x] T007 Reconcile spec/plan/tasks/parent evidence, inspect exact diff and commit only authorized files. Implementation committed as 050faba; no production delivery closure.
 Order T001/T002 → T003/T004 → T005 → T006 → T007. Every checkbox requires its stated evidence.
