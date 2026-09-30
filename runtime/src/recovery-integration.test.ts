@@ -35,7 +35,7 @@ test('real Pi session recovers length stop without replaying successful tool', a
       agentDir: join(root, 'agent'), sandbox: {
         async create(runId, workspaceId) { acquisitions++; return local.create(runId, workspaceId); },
         async destroy(id) { releases++; await local.destroy(id); },
-        exec: local.exec.bind(local), writeFile: local.writeFile.bind(local),
+        exec: local.exec.bind(local), fileOperation: local.fileOperation.bind(local),
       },
       approvals: { request: async () => 'approved' },
       workspaceToolNames: ['write', 'edit', 'read_file', 'glob', 'grep'],

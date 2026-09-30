@@ -787,9 +787,9 @@ export function createV3GroupMessagingSandbox(options: {
         });
       }
     },
-    ...(options.sandbox.writeFile
+    ...(options.sandbox.fileOperation
       ? {
-          writeFile: (sandboxId, request, signal) => options.sandbox.writeFile!(sandboxId, request, signal),
+          fileOperation: (sandboxId, request, signal) => options.sandbox.fileOperation!(sandboxId, request, signal),
         }
       : {}),
     destroy: (sandboxId) => options.sandbox.destroy(sandboxId),

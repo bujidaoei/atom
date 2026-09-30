@@ -20,3 +20,5 @@ Grant validation → registry/reconciliation → Docker/file helpers → HTTP an
 
 ## Validation
 Unit negative JWTs with actual cryptographic verification; real SQLite concurrency/restart tests; actual Docker limits/cancel/restart; actual Pi and file tools through service; stale fence and failed registration tests; lock verification and product suites. Tests use synthetic data, isolated roots and no paid operations unless authorized.
+
+Runtime continuation: file wrappers now require the structured capability and never synthesize shell scripts. Read/write results verify tool-call correlation, byte bounds and SHA-256; Pi Edit reuses one validated read and conditionally writes its hash. Explicit local development retains fixed text/search scripts in its own adapter, not the product wrapper or broker protocol. Per-workspace local queues serialize cooperating file operations; they do not supply broker isolation. HTTP adapter/lifecycle receipts/cancellation and snapshot integration remain required before production selection. Development verification adds patched pinned Vitest, while own runtime Undici is patched independently of immutable Pi source.

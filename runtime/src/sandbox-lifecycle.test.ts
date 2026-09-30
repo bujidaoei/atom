@@ -102,7 +102,7 @@ test('actual runtime releases acquired sandbox when model initialization throws'
       sandbox: {
         async create(runId, workspaceId) { created++; return local.create(runId, workspaceId); },
         async destroy(id) { destroyed++; await local.destroy(id); },
-        exec: local.exec.bind(local), writeFile: local.writeFile.bind(local),
+        exec: local.exec.bind(local), fileOperation: local.fileOperation.bind(local),
       },
       approvals: { request: async () => 'approved' }, events: { async emit() {} },
     });
@@ -127,7 +127,7 @@ test('actual Pi session setup failure retains release failure and calls destroy 
       agentDir: join(root, 'agent'),
       aiGateway: { baseUrl: 'http://127.0.0.1:1/v1', masterKey: 'synthetic-key', model: 'synthetic-model', requestTimeoutMs: 5000 },
       sandbox: {
-        create: local.create.bind(local), exec: local.exec.bind(local), writeFile: local.writeFile.bind(local),
+        create: local.create.bind(local), exec: local.exec.bind(local), fileOperation: local.fileOperation.bind(local),
         async destroy(id) { releases++; await local.destroy(id); throw releaseFailure; },
       },
       approvals: { request: async () => 'approved' },

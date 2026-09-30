@@ -48,26 +48,22 @@ function harness(
   resourceRead?: ReturnType<PiReadToolDefinitionFactory>,
 ) {
   const request = vi.fn<ApprovalAdapter['request']>(async () => 'approved');
-  const exec = vi.fn<SandboxClient['exec']>(async (_sandboxId, input) => ({
+  const files = vi.fn<NonNullable<SandboxClient['fileOperation']>>(async (_sandboxId, input) => ({
     toolCallId: input.toolCallId,
-    exitCode: 0,
-    stdout: 'README.md\npackage.json\n',
-    stderr: '',
-    timedOut: false,
-    truncated: false,
+    data: { text: 'README.md\npackage.json' },
   }));
   const tools = createWorkspaceTools(
     {
       runId: '11111111-1111-4111-8111-111111111111',
       sandboxId: 'sandbox',
       workspacePath,
-      sandbox: { create: vi.fn(), exec, destroy: vi.fn() },
+      sandbox: { create: vi.fn(), exec: vi.fn(), fileOperation: files, destroy: vi.fn() },
       approvals: { request },
       policy: { evaluate: () => decision },
     },
     resourceRead,
   );
-  return { tools, request, exec };
+  return { tools, request, files };
 }
 
 describe('V3 semantic workspace tools', () => {
@@ -91,12 +87,12 @@ describe('V3 semantic workspace tools', () => {
       },
       readFactory,
     );
-    const { tools, exec } = harness('deny', resourceRead);
+    const { tools, files } = harness('deny', resourceRead);
     const read = tools.find((tool) => tool.name === 'read_file')!;
     expect(
       JSON.stringify(await read.execute('proof', { path }, undefined, undefined, {} as never)),
     ).toContain('VERIFIED-COMPANION');
-    expect(exec).not.toHaveBeenCalled();
+    expect(files).not.toHaveBeenCalled();
     await expect(
       read.execute('foreign', { path: join(root, 'other.txt') }, undefined, undefined, {} as never),
     ).rejects.toThrow('not an authorized');
@@ -105,14 +101,14 @@ describe('V3 semantic workspace tools', () => {
     await expect(
       read.execute('workspace', { path: 'secret.txt' }, undefined, undefined, {} as never),
     ).resolves.toMatchObject({ terminate: true, details: { policyDecision: 'deny' } });
-    expect(exec).not.toHaveBeenCalled();
+    expect(files).not.toHaveBeenCalled();
   });
   it('exposes the same distinct tool categories shown by the official response chain', () => {
     expect(harness().tools.map((tool) => tool.name)).toEqual(['sandbox_exec', 'glob', 'grep', 'read_file']);
   });
 
   it('runs Glob in the sandbox with its real pattern and returns the real response', async () => {
-    const { tools, exec, request } = harness();
+    const { tools, files, request } = harness();
     const glob = tools.find((tool) => tool.name === 'glob')!;
     const result = await glob.execute(
       'glob-call',
@@ -124,29 +120,29 @@ describe('V3 semantic workspace tools', () => {
 
     expect(result.content).toEqual([{ type: 'text', text: 'README.md\npackage.json' }]);
     expect(request).not.toHaveBeenCalled();
-    expect(exec).toHaveBeenCalledWith(
+    expect(files).toHaveBeenCalledWith(
       'sandbox',
       expect.objectContaining({
         toolCallId: 'glob-call',
-        command: expect.stringContaining("'*'"),
+        operation: { op: 'glob', pattern: '*', limit: 10 },
       }),
       undefined,
     );
   });
 
   it('rejects traversal before Read reaches approval or Docker', async () => {
-    const { tools, exec, request } = harness('ask');
+    const { tools, files, request } = harness('ask');
     const read = tools.find((tool) => tool.name === 'read_file')!;
 
     await expect(
       read.execute('read-call', { path: '../outside.txt' }, undefined, undefined, {} as never),
     ).rejects.toThrow(/relative workspace path/iu);
     expect(request).not.toHaveBeenCalled();
-    expect(exec).not.toHaveBeenCalled();
+    expect(files).not.toHaveBeenCalled();
   });
 
   it('applies Read policy and approval to the resolved workspace target', async () => {
-    const { tools, exec, request } = harness('ask');
+    const { tools, files, request } = harness('ask');
     const read = tools.find((tool) => tool.name === 'read_file')!;
     await read.execute('read-call', { path: 'docs/PRD.md' }, undefined, undefined, {} as never);
 
@@ -157,11 +153,11 @@ describe('V3 semantic workspace tools', () => {
         risk: 'read',
       }),
     );
-    expect(exec).toHaveBeenCalledOnce();
+    expect(files).toHaveBeenCalledOnce();
   });
 
   it('fails closed when policy denies Grep', async () => {
-    const { tools, exec, request } = harness('deny');
+    const { tools, files, request } = harness('deny');
     const grep = tools.find((tool) => tool.name === 'grep')!;
     const result = await grep.execute(
       'grep-call',
@@ -173,7 +169,7 @@ describe('V3 semantic workspace tools', () => {
 
     expect(result).toMatchObject({ terminate: true, details: { policyDecision: 'deny' } });
     expect(request).not.toHaveBeenCalled();
-    expect(exec).not.toHaveBeenCalled();
+    expect(files).not.toHaveBeenCalled();
   });
 
   it('reuses Pi Read for one exact integrity-bound conversation image and rejects other paths', async () => {

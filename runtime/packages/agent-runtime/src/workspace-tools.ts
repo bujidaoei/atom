@@ -9,10 +9,10 @@ import type { AgentRunReadableAttachment } from '../../product-contracts/src/ind
 import type { ToolDefinition } from './pi-runtime-types.ts';
 import {
   createSandboxExecTool,
-  executeGuardedSandboxCommand,
   guardSandboxOperation,
   type SandboxExecToolOptions,
 } from './sandbox-tool.ts';
+import { executeGuardedWorkspaceFile, runWorkspaceFileOperation } from './workspace-file-operation.ts';
 
 const GlobParameters = Type.Object(
   {
@@ -43,125 +43,6 @@ const ReadFileParameters = Type.Object(
   },
   { additionalProperties: false },
 );
-
-const GLOB_SCRIPT = String.raw`
-import glob
-import os
-import sys
-from pathlib import Path
-
-root = Path(os.environ.get('ATOM_WORKSPACE_ROOT', '/workspace')).resolve()
-pattern = sys.argv[1]
-limit = int(sys.argv[2])
-matches = set()
-for raw in glob.iglob(pattern, root_dir=str(root), recursive=True, include_hidden=True):
-    candidate = (root / raw).resolve()
-    if candidate.is_relative_to(root):
-        matches.add(Path(raw).as_posix())
-    if len(matches) >= limit:
-        break
-print('\n'.join(sorted(matches)) if matches else '(no matches)')
-`.trim();
-
-const GREP_SCRIPT = String.raw`
-import os
-import re
-import sys
-from pathlib import Path, PurePosixPath
-
-root = Path(os.environ.get('ATOM_WORKSPACE_ROOT', '/workspace')).resolve()
-expression = sys.argv[1]
-relative_base = sys.argv[2]
-include = sys.argv[3] or None
-case_sensitive = sys.argv[4] == '1'
-limit = int(sys.argv[5])
-base = (root / relative_base).resolve()
-if not base.is_relative_to(root):
-    raise SystemExit('path escapes the workspace')
-if not base.exists():
-    raise SystemExit(f'path not found: {relative_base}')
-matcher = re.compile(expression, 0 if case_sensitive else re.IGNORECASE)
-
-def candidates():
-    if base.is_file():
-        yield base
-        return
-    for directory, directories, files in os.walk(base, followlinks=False):
-        directories[:] = [
-            name for name in directories
-            if name not in {'.git', 'node_modules'} and not (Path(directory) / name).is_symlink()
-        ]
-        for name in files:
-            yield Path(directory) / name
-
-matches = []
-for candidate in candidates():
-    resolved = candidate.resolve()
-    if not resolved.is_relative_to(root) or not resolved.is_file():
-        continue
-    relative = resolved.relative_to(root).as_posix()
-    if include and not PurePosixPath(relative).match(include):
-        continue
-    try:
-        if resolved.stat().st_size > 1_048_576:
-            continue
-        text = resolved.read_text(encoding='utf-8', errors='replace')
-    except OSError:
-        continue
-    for line_number, line in enumerate(text.splitlines(), 1):
-        if matcher.search(line):
-            matches.append(f'{relative}:{line_number}:{line}')
-            if len(matches) >= limit:
-                break
-    if len(matches) >= limit:
-        break
-print('\n'.join(matches) if matches else '(no matches)')
-`.trim();
-
-const READ_FILE_SCRIPT = String.raw`
-import os
-import sys
-from pathlib import Path
-
-root = Path(os.environ.get('ATOM_WORKSPACE_ROOT', '/workspace')).resolve()
-relative = sys.argv[1]
-start = int(sys.argv[2])
-limit = int(sys.argv[3])
-target = (root / relative).resolve()
-if not target.is_relative_to(root):
-    raise SystemExit('path escapes the workspace')
-if not target.is_file():
-    raise SystemExit(f'file not found: {relative}')
-lines = target.read_text(encoding='utf-8', errors='replace').splitlines()
-selected = lines[start - 1:start - 1 + limit]
-print('\n'.join(selected) if selected else '(empty range)')
-`.trim();
-
-function shellQuote(value: string): string {
-  return `'${value.replaceAll("'", `'"'"'`)}'`;
-}
-
-const BINARY_READ_SCRIPT = String.raw`
-import base64
-import os
-import sys
-from pathlib import Path
-
-root = Path(os.environ.get('ATOM_WORKSPACE_ROOT', '/workspace')).resolve()
-relative = sys.argv[1]
-target = (root / relative).resolve()
-if not target.is_relative_to(root):
-    raise SystemExit('path escapes the workspace')
-if not target.is_file():
-    raise SystemExit(f'file not found: {relative}')
-if not os.access(target, os.R_OK | (os.W_OK if sys.argv[2] == '1' else 0)):
-    raise SystemExit(f'file access denied: {relative}')
-sys.stdout.write(base64.b64encode(target.read_bytes()).decode('ascii'))
-`;
-
-function pythonCommand(script: string, args: Array<string | number>): string {
-  return ['"${ATOM_PYTHON_EXECUTABLE:-python3}"', '-c', shellQuote(script), ...args.map((value) => shellQuote(String(value)))].join(' ');
-}
 
 function normalizeRelativeWorkspacePath(value: string, kind: string): string {
   if (!value || value.includes('\0')) {
@@ -390,7 +271,7 @@ export function createProductPiReadTool(
           signal,
         );
         if (blocked) return blocked;
-        readBytes = () => readSandboxFile(workspace, toolCallId, target, signal, false);
+        readBytes = () => readSandboxFile(workspace, toolCallId, target, signal);
       }
       let verifiedBytes: Promise<Buffer> | undefined;
       const read = () => (verifiedBytes ??= readBytes());
@@ -464,18 +345,8 @@ export function createPolicyBoundPiWriteTool(
         operations: {
           mkdir: async () => undefined,
           writeFile: async (absolutePath, content) => {
-            if (!options.sandbox.writeFile) {
-              throw new Error('Sandbox Write capability is unavailable.');
-            }
             const sandboxPath = sandboxRelativeFile(options.workspacePath, absolutePath);
-            const result = await options.sandbox.writeFile(
-              options.sandboxId,
-              { toolCallId, path: sandboxPath, content },
-              signal,
-            );
-            if (result.bytesWritten !== Buffer.byteLength(content)) {
-              throw new Error('Sandbox Write returned an invalid byte count.');
-            }
+            await runWorkspaceFileOperation(options, toolCallId, { op: 'write', path: sandboxPath, content }, signal);
           },
         },
       });
@@ -500,23 +371,12 @@ async function readSandboxFile(
   toolCallId: string,
   absolutePath: string,
   signal: AbortSignal | undefined,
-  writable = true,
 ): Promise<Buffer> {
   signal?.throwIfAborted();
   const relativePath = sandboxRelativeFile(options.workspacePath, absolutePath);
-  const result = await options.sandbox.exec(
-    options.sandboxId,
-    {
-      toolCallId,
-      command: pythonCommand(BINARY_READ_SCRIPT, [relativePath, writable ? 1 : 0]),
-      timeoutMs: 30_000,
-    },
-    signal,
-  );
-  if (result.timedOut) throw new Error(`Reading ${relativePath} timed out.`);
-  if (result.exitCode !== 0) throw new Error(result.stderr.trim() || `Could not read ${relativePath}.`);
-  if (result.truncated) throw new Error(`${relativePath} exceeds the sandbox read response limit.`);
-  return Buffer.from(result.stdout.trim(), 'base64');
+  const data = await runWorkspaceFileOperation(options, toolCallId, { op: 'read_bytes', path: relativePath }, signal);
+  if (!('base64' in data)) throw new Error('Workspace read returned non-binary data.');
+  return Buffer.from(data.base64, 'base64');
 }
 
 export function createPolicyBoundPiEditTool(
@@ -551,25 +411,26 @@ export function createPolicyBoundPiEditTool(
         signal,
       );
       if (blocked) return blocked;
+      const reads = new Map<string, Promise<Buffer>>();
+      const readForEdit = (absolutePath: string) => {
+        const key = sandboxRelativeFile(options.workspacePath, absolutePath);
+        let reading = reads.get(key);
+        if (!reading) {
+          reading = readSandboxFile(options, toolCallId, absolutePath, signal);
+          reads.set(key, reading);
+        }
+        return reading;
+      };
       const definition = createEditToolDefinition(options.workspacePath, {
         operations: {
           access: async (absolutePath) => {
-            await readSandboxFile(options, toolCallId, absolutePath, signal);
+            await readForEdit(absolutePath);
           },
-          readFile: (absolutePath) => readSandboxFile(options, toolCallId, absolutePath, signal),
+          readFile: readForEdit,
           writeFile: async (absolutePath, content) => {
-            if (!options.sandbox.writeFile) {
-              throw new Error('Sandbox Write capability is unavailable.');
-            }
             const sandboxPath = sandboxRelativeFile(options.workspacePath, absolutePath);
-            const result = await options.sandbox.writeFile(
-              options.sandboxId,
-              { toolCallId, path: sandboxPath, content },
-              signal,
-            );
-            if (result.bytesWritten !== Buffer.byteLength(content)) {
-              throw new Error('Sandbox Write returned an invalid byte count.');
-            }
+            const expected_sha256 = createHash('sha256').update(await readForEdit(absolutePath)).digest('hex');
+            await runWorkspaceFileOperation(options, toolCallId, { op: 'write', path: sandboxPath, content, expected_sha256 }, signal);
           },
         },
       });
@@ -582,15 +443,16 @@ function createGlobTool(options: SandboxExecToolOptions): ToolDefinition<typeof 
   return {
     name: 'glob',
     label: 'Glob',
-    description: '按路径模式查找工作区中的真实文件和目录，结果来自隔离 Docker 工作区。',
+    description: '按路径模式查找分配工作区中的真实文件和目录。',
     promptSnippet: '用 Glob 模式查找工作区文件和目录',
     promptGuidelines: ['查找文件时优先使用 glob，不要通过猜测声称文件存在。'],
     parameters: GlobParameters,
     executionMode: 'parallel',
     async execute(toolCallId, params, signal) {
       const pattern = workspacePathInput(options.workspacePath, params.pattern, 'Glob pattern');
-      const command = pythonCommand(GLOB_SCRIPT, [pattern, params.maxResults ?? 200]);
-      return executeGuardedSandboxCommand(
+      const operation = { op: 'glob' as const, pattern, limit: params.maxResults ?? 200 };
+      const command = `glob ${pattern}`;
+      return executeGuardedWorkspaceFile(
         options,
         toolCallId,
         {
@@ -602,6 +464,7 @@ function createGlobTool(options: SandboxExecToolOptions): ToolDefinition<typeof 
           deniedMessage: '权限策略禁止搜索工作区文件。',
           rejectedMessage: '用户拒绝了工作区文件搜索。',
         },
+        operation,
         signal,
       );
     },
@@ -620,14 +483,10 @@ function createGrepTool(options: SandboxExecToolOptions): ToolDefinition<typeof 
     async execute(toolCallId, params, signal) {
       const relativePath = workspacePathInput(options.workspacePath, params.path ?? '.', 'Grep path');
       const include = params.glob ? normalizeRelativeWorkspacePath(params.glob, 'Grep glob') : '';
-      const command = pythonCommand(GREP_SCRIPT, [
-        params.pattern,
-        relativePath,
-        include,
-        params.caseSensitive === true ? 1 : 0,
-        params.maxResults ?? 200,
-      ]);
-      return executeGuardedSandboxCommand(
+      const operation = { op: 'grep' as const, pattern: params.pattern, path: relativePath,
+        glob: include, case_sensitive: params.caseSensitive === true, limit: params.maxResults ?? 200 };
+      const command = `grep ${params.pattern} ${relativePath}`;
+      return executeGuardedWorkspaceFile(
         options,
         toolCallId,
         {
@@ -639,6 +498,7 @@ function createGrepTool(options: SandboxExecToolOptions): ToolDefinition<typeof 
           deniedMessage: '权限策略禁止搜索工作区内容。',
           rejectedMessage: '用户拒绝了工作区内容搜索。',
         },
+        operation,
         signal,
       );
     },
@@ -682,12 +542,9 @@ function createReadFileTool(
         );
       }
       const relativePath = workspacePathInput(options.workspacePath, params.path, 'Read path');
-      const command = pythonCommand(READ_FILE_SCRIPT, [
-        relativePath,
-        offset ?? 1,
-        limit ?? 2_000,
-      ]);
-      return executeGuardedSandboxCommand(
+      const operation = { op: 'read_lines' as const, path: relativePath, start: offset ?? 1, limit: limit ?? 2_000 };
+      const command = `read ${relativePath}`;
+      return executeGuardedWorkspaceFile(
         options,
         toolCallId,
         {
@@ -699,6 +556,7 @@ function createReadFileTool(
           deniedMessage: '权限策略禁止读取该工作区文件。',
           rejectedMessage: '用户拒绝了工作区文件读取。',
         },
+        operation,
         signal,
       );
     },

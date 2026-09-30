@@ -209,25 +209,36 @@ export interface SandboxExecResult {
   truncated: boolean;
 }
 
-export interface SandboxWriteFileRequest {
+export type WorkspaceFileOperation =
+  | { op: 'read_bytes'; path: string }
+  | { op: 'read_lines'; path: string; start: number; limit: number }
+  | { op: 'glob'; pattern: string; limit: number }
+  | { op: 'grep'; pattern: string; path: string; glob: string; case_sensitive: boolean; limit: number }
+  | { op: 'write'; path: string; content: string; expected_sha256?: string };
+
+export interface SandboxFileRequest {
   toolCallId: string;
-  path: string;
-  content: string;
+  operation: WorkspaceFileOperation;
 }
 
-export interface SandboxWriteFileResult {
+export type WorkspaceFileData =
+  | { text: string }
+  | { base64: string; sha256: string }
+  | { bytes_written: number; sha256: string };
+
+export interface SandboxFileResult {
   toolCallId: string;
-  bytesWritten: number;
+  data: WorkspaceFileData;
 }
 
 export interface SandboxClient {
   create(runId: string, workspaceId: string): Promise<string>;
   exec(sandboxId: string, request: SandboxExecRequest, signal?: AbortSignal): Promise<SandboxExecResult>;
-  writeFile?(
+  fileOperation?(
     sandboxId: string,
-    request: SandboxWriteFileRequest,
+    request: SandboxFileRequest,
     signal?: AbortSignal,
-  ): Promise<SandboxWriteFileResult>;
+  ): Promise<SandboxFileResult>;
   destroy(sandboxId: string): Promise<void>;
 }
 

@@ -1,30 +1,29 @@
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { mkdir, rm, writeFile, realpath, rename, lstat } from 'node:fs/promises';
+import { mkdir, rm, writeFile, realpath, rename, lstat, open } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+import { localTextCommand } from './local-file-text.ts';
 
 import type {
   SandboxClient,
   SandboxExecRequest,
   SandboxExecResult,
-  SandboxWriteFileRequest,
-  SandboxWriteFileResult,
+  SandboxFileRequest,
+  SandboxFileResult,
+  WorkspaceFileOperation,
 } from '../packages/product-contracts/src/index.ts';
 
 const MAX_STREAM_BYTES = 256 * 1024;
 const DEFAULT_TIMEOUT_MS = 120_000;
 
 /**
- * Filesystem-and-subprocess implementation of the Sandbox Broker port.
- *
- * WorkDude runs tool commands inside a Docker container brokered over HTTP.
- * Atoms Demo is a single-box deployment, so commands run directly in the
- * project workspace instead. Every path is re-resolved and confined to the
- * workspace root, because the agent controls the command string.
+ * Explicitly non-isolated local development adapter. File operations are
+ * structured and confined, but exec still runs with the host process authority.
  */
 export class LocalSandboxClient implements SandboxClient {
   private readonly sandboxes = new Map<string, string>();
+  private readonly fileQueues = new Map<string, Promise<void>>();
 
   constructor(
     private readonly options: {
@@ -130,13 +129,76 @@ export class LocalSandboxClient implements SandboxClient {
     });
   }
 
-  async writeFile(
+  async fileOperation(
     sandboxId: string,
-    request: SandboxWriteFileRequest,
+    request: SandboxFileRequest,
     signal?: AbortSignal,
-  ): Promise<SandboxWriteFileResult> {
+  ): Promise<SandboxFileResult> {
     const workspacePath = this.requireWorkspace(sandboxId);
     signal?.throwIfAborted();
+    const previous = this.fileQueues.get(workspacePath) ?? Promise.resolve();
+    let release!: () => void;
+    const current = new Promise<void>(resolve => { release = resolve; });
+    this.fileQueues.set(workspacePath, current);
+    await previous;
+    try {
+      signal?.throwIfAborted();
+      this.requireWorkspace(sandboxId);
+      const operation = request.operation;
+      if (operation.op === 'read_bytes') {
+        const bytes = await this.readWorkspaceBytes(workspacePath, operation.path);
+        signal?.throwIfAborted();
+        return { toolCallId: request.toolCallId, data: { base64: bytes.toString('base64'), sha256: createHash('sha256').update(bytes).digest('hex') } };
+      }
+      if (operation.op === 'write') {
+        const data = await this.writeWorkspaceFile(sandboxId, operation, signal);
+        return { toolCallId: request.toolCallId, data };
+      }
+      if (!Number.isInteger(operation.limit) || operation.limit < 1 || operation.limit > (operation.op === 'read_lines' ? 5000 : 500)) {
+        throw new Error('Invalid workspace result limit.');
+      }
+      if (operation.op === 'read_lines' && (!Number.isInteger(operation.start) || operation.start < 1 || operation.start > 10000000)) {
+        throw new Error('Invalid workspace line range.');
+      }
+      const result = await this.exec(sandboxId, { toolCallId: request.toolCallId, command: localTextCommand(operation), timeoutMs: 30_000 }, signal);
+      signal?.throwIfAborted();
+      if (result.timedOut || result.truncated || result.exitCode !== 0) throw new Error(result.stderr.trim() || 'Local file operation failed or exceeded its limits.');
+      return { toolCallId: request.toolCallId, data: { text: result.stdout.replace(/\r?\n$/u, '') } };
+    } finally {
+      release();
+      if (this.fileQueues.get(workspacePath) === current) this.fileQueues.delete(workspacePath);
+    }
+  }
+
+  private async readWorkspaceBytes(workspacePath: string, path: string): Promise<Buffer> {
+    const target = confineToWorkspace(workspacePath, path);
+    confineToWorkspace(await realpath(workspacePath), await realpath(target));
+    const before = await lstat(target);
+    if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1 || before.size > 8 * 1024 * 1024) throw new Error('Unsafe or oversized workspace file.');
+    const handle = await open(target, 'r');
+    try {
+      const info = await handle.stat();
+      if (info.dev !== before.dev || info.ino !== before.ino || info.size !== before.size) throw new Error('Workspace file changed during open.');
+      const buffer = Buffer.alloc(before.size + 1);
+      let length = 0;
+      while (length < buffer.length) {
+        const { bytesRead } = await handle.read(buffer, length, buffer.length - length, length);
+        if (!bytesRead) break;
+        length += bytesRead;
+      }
+      if (length !== before.size) throw new Error('Workspace file changed during read.');
+      return buffer.subarray(0, length);
+    } finally { await handle.close(); }
+  }
+
+  private async writeWorkspaceFile(
+    sandboxId: string,
+    request: Extract<WorkspaceFileOperation, { op: 'write' }>,
+    signal?: AbortSignal,
+  ) {
+    const workspacePath = this.requireWorkspace(sandboxId);
+    signal?.throwIfAborted();
+    if (Buffer.byteLength(request.content) > 8 * 1024 * 1024) throw new Error('Workspace file exceeds 8 MiB.');
     const target = confineToWorkspace(workspacePath, request.path);
     // Resolve every existing ancestor before creating directories through it.
     let ancestor = dirname(target);
@@ -146,7 +208,11 @@ export class LocalSandboxClient implements SandboxClient {
       if (error.code !== 'ENOENT') throw error;
       return undefined;
     });
-    if (info?.isSymbolicLink()) throw new Error('Sandbox writes cannot follow symlinks');
+    if (info && (!info.isFile() || info.isSymbolicLink() || info.nlink !== 1)) throw new Error('Sandbox writes require plain files');
+    if (request.expected_sha256 !== undefined) {
+      const existing = await this.readWorkspaceBytes(workspacePath, request.path);
+      if (createHash('sha256').update(existing).digest('hex') !== request.expected_sha256) throw new Error('Workspace file changed before conditional write.');
+    }
     await mkdir(dirname(target), { recursive: true });
     const temporary = `${target}.${randomUUID()}.tmp`;
     try {
@@ -156,7 +222,7 @@ export class LocalSandboxClient implements SandboxClient {
     } finally {
       await rm(temporary, { force: true });
     }
-    return { toolCallId: request.toolCallId, bytesWritten: Buffer.byteLength(request.content) };
+    return { bytes_written: Buffer.byteLength(request.content), sha256: createHash('sha256').update(request.content).digest('hex') };
   }
 
   async destroy(sandboxId: string): Promise<void> {
