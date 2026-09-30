@@ -94,3 +94,5 @@ Active-model fault acceptance continuation: extend the real Node/Pi fixture so a
 Validate the post-registration deadline boundary by delaying the actual completion HTTP response after durable registration/release. Require timed_out Run/project, retained committed new bytes and receipt, and no pending execution; test-only transport delay does not alter production timeouts.
 
 Keep one strongly referenced cancellation task per project, shield each request waiter, and preserve the stopping admission guard until finalization finishes. Shutdown includes both active jobs and cancellation tasks. Observe detached task exceptions by type without logging sensitive error text.
+
+Next T010 work follows contracts/revision-release.md: additive offline schema, transactional adoption/evidence/releases, pinned isolated serving/verifier, API/UI, then browser/fault rollout evidence. Copying committed bytes into mutable publication directories is insufficient.

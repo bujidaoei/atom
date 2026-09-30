@@ -458,3 +458,6 @@ Final tests invoke the real authenticated FastAPI cancel route with ASGI transpo
 cancel-waiter-routes-final: 34 tests, 0 failures, 0 errors, 0 skips, 2.718 seconds
 cancel-ownership-linux: 1 tests, 0 failures, 0 errors, 0 skips, 10.232 seconds
 Reports are in .logs. Existing Starlette/httpx deprecation remains. No Pi edits, production data, real credentials, push or deployment. Spec/plan/tasks/contracts/data model/quickstart and parent progress synchronized; no acceptance checkbox closed. Physical streaming/TCP cancellation, continuous recovery, revision-bound acceptance, publication/adoption and enterprise rollout remain open.
+
+## Continuation — release authority audit (2026-10-01)
+Baseline e7c4bd3; previous turn was progress. Actual publish/adopt/acceptance/preview/storage/serialization/frontend sources confirm mutable publication/adoption, timestamp freshness and unpinned iframe testing. Retrieved official Lovable publication and historical Replit rollback documentation. Added contracts/revision-release.md with identity, transaction, authority, migration and acceptance requirements. This is source/design evidence only: no production behavior changed or test gate closed. Next action is additive schema/repository implementation. No Pi changes, credentials, push or deployment.

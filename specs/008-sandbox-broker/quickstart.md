@@ -79,3 +79,5 @@ Active-model tests: test_orchestrated_execution.py cancel/deadline cases use act
 The deadline_checkpoint integration parameter delays the real completion response by 4.5 seconds after registration, beyond the fixture runtime deadline. It checks retained registered bytes/receipt and timed_out Run/project; this is controlled transport fault injection, not a paid model test.
 
 Run test_lifecycle.py::test_cancel_waiter_disconnect_does_not_interrupt_cleanup for both caller cases. Tests use real authenticated FastAPI ASGI cancel requests, block scripted runtime cleanup, cancel the request task, verify admission stays occupied, release cleanup, await shutdown, and verify durable terminal states plus idempotent HTTP retry. This is ASGI request cancellation, not TCP disconnect or a real broker fixture.
+
+Release acceptance is not runnable yet. Follow the migration, repository, pinned serving/verifier and publish/rollback test order in contracts/revision-release.md. Existing publish API success is not enterprise acceptance.

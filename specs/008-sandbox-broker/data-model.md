@@ -66,3 +66,5 @@ Interruption status distinction: runtime error lines now carry failed/cancelled/
 Post-registration deadline: execution may remain closed/confirmed/succeeded with its receipt and advanced head while Run/project become timed_out. These records describe different facts and must not be collapsed into a fabricated successful acceptance or rolled-back registration.
 
 Cancellation ownership is process-local in the orchestrator cancellation-task map; it is not a durable distributed lease. Persisted Run/project terminal states and broker execution reconciliation retain their separate roles after process death.
+
+Planned extension: immutable verification executions/evidence, releases, publication generation/pointer and adoption provenance. Schema remains unimplemented; legacy records must not receive inferred trusted identities. See contracts/revision-release.md.

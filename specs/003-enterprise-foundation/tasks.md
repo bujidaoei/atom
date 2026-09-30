@@ -122,3 +122,5 @@ T027 continuation: child 008 verified active-model runtime cancel/deadline with 
 T027 continuation: post-registration timeout now rejects late runtime success while retaining the committed artifact receipt. Real delayed-response coverage is recorded in feature 008 evidence; enterprise acceptance remains open.
 
 T027 continuation: cancellation cleanup now survives cancellation of API request waiters; real authenticated ASGI fault tests cover initiating/duplicate callers and shutdown, using a scripted runtime cleanup barrier. Real TCP/broker cancellation acceptance remains open.
+
+T027 continuation: actual release/acceptance authority audit and refreshed official product research are recorded in feature 008 contracts/revision-release.md. Its T014 design audit is complete; T015–T019 migration, implementation and acceptance remain open.

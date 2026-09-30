@@ -105,3 +105,5 @@ FR-005 active-model interruption: the runtime must distinguish explicit cancella
 A deadline observed after durable artifact registration but before the runtime response MUST prevent a successful Run/project outcome. The already committed revision and receipt remain valid; execution cleanup success is distinct from timely run completion.
 
 Cancellation request lifetime MUST NOT own cancellation cleanup. Disconnecting either the initiating caller or a duplicate waiter must not send another cancellation into the run cleanup. Shutdown must await owned cleanup even after the run job has left its job map.
+
+FR-006/FR-008 refinement: enterprise acceptance must bind exact artifact, contract and trusted verifier identity. Publication/adoption require fenced immutable revisions and atomic release pointers. Timestamp/client-reported checks cannot authorize release. contracts/revision-release.md defines the unimplemented requirements.
