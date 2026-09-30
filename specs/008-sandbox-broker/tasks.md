@@ -6,7 +6,7 @@
 - [x] T003 [US1] Implement versioned durable registry, idempotent admission, revocation and fence checks in backend/app/sandbox/registry.py with backend/tests/test_sandbox_registry.py (FR-003 registry component; 17 real SQLite tests passed, no driver termination claim).
 - [ ] T004 [US1] Implement independent broker configuration/authentication and bounded HTTP schemas in backend/app/sandbox/config.py and service.py; prove denied requests have zero driver effects (FR-001/002).
 ## US2 — bounded/recoverable lifecycle
-- [ ] T005 [US2] Implement fixed-profile Docker driver and real integration tests in backend/app/sandbox/docker_driver.py and backend/tests/integration/test_sandbox_driver.py (FR-004).
+- [x] T005 [US2] Implement fixed-profile Docker driver and real integration tests in backend/app/sandbox/docker_driver.py and backend/tests/integration/test_sandbox_driver.py (FR-004 driver/profile component; real CPU/PID/RAM/disk/network/deadline/ownership checks passed; service reconciliation and helper IO remain T006/T007).
 - [ ] T006 [US2] Implement registry/driver reconciliation, cancellation, independent expiry and readiness in backend/app/sandbox/lifecycle.py; test lost responses/restart/daemon failure (FR-003/005).
 ## US3 — real tool and snapshot integration
 - [ ] T007 [US3] Add structured file-operation contract and migrate own workspace wrappers in runtime/packages/product-contracts/src/index.ts and runtime/packages/agent-runtime/src/workspace-tools.ts; fixed broker helpers in backend/app/sandbox/file_ops.py (FR-004/007).
