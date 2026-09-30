@@ -233,6 +233,10 @@ class DockerDriver:
         except (ValueError, KeyError, TypeError):
             raise DriverError("invalid_image_configuration") from None
 
+    def validate_environment(self) -> None:
+        """Readiness requires the pinned local image without implicit volumes."""
+        self._environment()
+
     def _present(self, name: str) -> bool:
         output = self._run("container", "ls", "--all", "--filter", f"name=^/{name}$", "--format", "{{.Names}}")
         try:
