@@ -326,6 +326,22 @@ class RevisionRepository:
             attempt, _ = self._attempt(db, owner, attempt_id)
             return self._recovery(db, attempt)
 
+    def authorize_capability(self, owner: str, attempt_id: str, *, grant_id: str,
+                             project_id: str, run_id: str, generation: int, base_revision: str,
+                             issued_at: int, deadline: int) -> Recovery:
+        """Compare already cryptographically verified claims to durable identity."""
+        _identifiers(owner, attempt_id)
+        with self._transaction() as db:
+            attempt, _ = self._attempt(db, owner, attempt_id)
+            persisted = self._view(db, attempt)
+            if (any(type(value) is not int for value in (generation, issued_at, deadline))
+                    or persisted.broker_attempt_id is None
+                    or (grant_id,project_id,run_id,generation,base_revision,issued_at,deadline) !=
+                    (persisted.grant_id,persisted.project_id,persisted.run_id,persisted.generation,
+                     persisted.base_revision,persisted.issued_at,persisted.deadline)):
+                raise RevisionError('revision_conflict')
+            return self._recovery(db, attempt)
+
     def cancel(self, owner: str, attempt_id: str) -> Recovery:
         """Commit cancellation and return its cleanup identity in one transaction."""
         _identifiers(owner, attempt_id)

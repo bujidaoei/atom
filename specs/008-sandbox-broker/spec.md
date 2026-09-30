@@ -28,6 +28,8 @@ Duplicate creates, same identity/different grant, lost create response, worker o
 - FR-007: Own runtime and existing file tools MUST use the broker; production MUST fail closed without it. Explicit development local mode remains visibly non-isolated.
 - FR-008: Real integration, fault injection and deployment migration evidence MUST precede acceptance. No component test may close whole feature.
 
+FR-007 completion HTTP: complete/cancel requests MUST derive their target solely from verified execution-purpose claims and compare every immutable persisted binding plus current ownership before effects. Only confirmed closed results may return success; transport or storage failures must not be presented as accepted output.
+
 FR-007 completion authority: runtime completion MUST use an independently scoped execution capability; sandbox grants and administrative credentials must not authorize that boundary. Purpose, exact persisted scope, owner, fence and deadline must be checked before action. Issuance alone is not completion acceptance.
 
 FR-007 lease preparation: a ready runtime lease MUST derive from a persisted reservation and verified immutable base, bind the actual broker identity, and pass a fresh dispatch check. Ready replay must not reseed; preparation failure must never return a lease or imply successful completion.

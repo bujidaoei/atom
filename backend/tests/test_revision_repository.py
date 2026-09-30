@@ -564,3 +564,20 @@ def test_cancel_overrides_pending_success_without_erasing_receipt(repository):
     with pytest.raises(RevisionError,match='revision_conflict'):
         repo.observe_termination('owner','attempt',confirmed=True,outcome='succeeded')
     repo.observe_termination('owner','attempt',confirmed=True,outcome='cancelled')
+
+
+@pytest.mark.parametrize('field,value',[('grant_id','other'),('project_id','other'),('run_id','other'),
+    ('generation',2),('generation',True),('base_revision','f'*64),('issued_at',1),('deadline',1)])
+def test_completion_capability_must_match_persisted_binding(repository,field,value):
+    repo,path,main,heat=repository
+    repo.bootstrap('owner',main,BASE)
+    attempt=allocate(repo,main)
+    binding=dict(grant_id=attempt.grant_id,project_id=attempt.project_id,run_id=attempt.run_id,
+        generation=attempt.generation,base_revision=attempt.base_revision,
+        issued_at=attempt.issued_at,deadline=attempt.deadline)
+    assert repo.authorize_capability('owner','attempt',**binding)==repo.recovery('owner','attempt')
+    with pytest.raises(RevisionError,match='revision_conflict'):
+        repo.authorize_capability('owner','attempt',**{**binding,field:value})
+    with pytest.raises(RevisionError,match='revision_not_found'):
+        repo.authorize_capability('stranger','attempt',**binding)
+    assert repo.execution('owner','attempt')==attempt

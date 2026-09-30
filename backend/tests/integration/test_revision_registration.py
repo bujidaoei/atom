@@ -365,20 +365,20 @@ def coordinator_source_bundle():
     root = Path(__file__).resolve().parents[3]
     result = io.BytesIO()
     with zipfile.ZipFile(result,'w',zipfile.ZIP_DEFLATED) as bundle:
-        for package in ('httpx','httpcore','anyio','certifi','idna','h11','jwt'):
+        for package in ('httpx','httpcore','anyio','certifi','idna','h11','jwt','uvicorn','click'):
             directory = Path(importlib.util.find_spec(package).origin).parent
             for path in directory.rglob('*'):
                 if path.is_file() and (path.suffix == '.py' or path.name == 'cacert.pem'):
                     bundle.write(path,package+'/'+path.relative_to(directory).as_posix())
         bundle.write(importlib.util.find_spec('typing_extensions').origin,'typing_extensions.py')
-        for name in ('__init__','execution','artifacts','snapshots','revisions','migrations/__init__',
+        for name in ('__init__','execution','execution_http','artifacts','snapshots','revisions','migrations/__init__',
                      'migrations/revision_v1','sandbox/__init__','sandbox/client','sandbox/checkpoints',
                      'sandbox/docker_driver','sandbox/registry','sandbox/grants'):
             bundle.write(root / f'backend/app/{name}.py',f'app/{name}.py')
     return base64.b64encode(result.getvalue()).decode()
 
 
-@pytest.mark.parametrize('failure', ['none','missing','cancel','registered','acknowledged','storage','decision','released'])
+@pytest.mark.parametrize('failure', ['none','missing','cancel','registered','acknowledged','storage','decision','released','http_cancel'])
 def test_prepare_coordinator_with_real_linux_store_and_http(tmp_path, failure):
     path = tmp_path / 'api.db'
     create_api_database(path)
@@ -396,6 +396,7 @@ from app.artifacts import ArtifactStore,ArtifactError
 from app.revisions import RevisionRepository,RevisionError
 from app.migrations import migrate
 from app.execution import ExecutionCoordinator
+from app.execution_http import ExecutionAPI
 from app.sandbox.client import BrokerClient
 from app.sandbox.grants import GrantCodec,Grant,CompletionGrantCodec
 import httpx,struct
@@ -434,6 +435,23 @@ async def main():
     if inputs['failure']=='missing': next(store_path.glob('*.atomsnap')).unlink()
     async with BrokerClient(origin,inputs['admin'],GrantCodec(inputs['key'].encode())) as client:
         coordinator=ExecutionCoordinator(repo,client,completion_codec=CompletionGrantCodec(b'c'*32))
+        async def http_control(token, *, action='complete', body=b'', headers=None):
+            import socket,uvicorn
+            listener=socket.socket();listener.bind(('127.0.0.1',0));listener.setblocking(False)
+            server=uvicorn.Server(uvicorn.Config(ExecutionAPI(coordinator,store,CompletionGrantCodec(b'c'*32)),
+                lifespan='off',log_level='error',access_log=False))
+            task=asyncio.create_task(server.serve(sockets=[listener]))
+            try:
+                until=time.monotonic()+3
+                while not server.started and not task.done() and time.monotonic()<until: await asyncio.sleep(0.01)
+                assert server.started
+                async with httpx.AsyncClient(trust_env=False,timeout=20) as caller:
+                    return await caller.post('http://127.0.0.1:'+str(listener.getsockname()[1])+'/v1/executions/'+action,
+                        content=body,headers=headers if headers is not None else {'Authorization':'Bearer '+token})
+            finally:
+                server.should_exit=True
+                await asyncio.wait_for(task,5)
+                listener.close()
         try: await coordinator.prepare('stranger','attempt',store)
         except RevisionError: pass
         else: raise AssertionError('unauthorized preparation')
@@ -473,6 +491,18 @@ async def main():
                     intent.grant_id,intent.base_revision,intent.issued_at,intent.deadline)
             assert lease.run_id=='run' and lease.workspace_id==workspace and lease.deadline==intent.deadline
             assert repo.execution('owner','attempt').broker_attempt_id==lease.attempt_id
+            if inputs['failure']=='none':
+                from dataclasses import replace
+                before=repo.recovery('owner','attempt')
+                cases=[(lease.grant,403,b'',None),(inputs['admin'],403,b'',None),
+                    (lease.completion_grant,400,b'{}',None),
+                    (lease.completion_grant,401,b'',[(b'authorization',('Bearer '+lease.completion_grant).encode())]*2),
+                    (CompletionGrantCodec(b'c'*32).issue(replace(completion,fence=completion.fence+1)),409,b'',None),
+                    (CompletionGrantCodec(b'c'*32).issue(replace(completion,org='other')),403,b'',None)]
+                for token,expected,body,headers in cases:
+                    rejected=await http_control(token,body=body,headers=headers)
+                    assert rejected.status_code==expected,rejected.text
+                    assert token not in rejected.text and repo.recovery('owner','attempt')==before
             async with httpx.AsyncClient(trust_env=False) as runtime:
                 denied=await runtime.get(origin+'/v1/attempts/'+lease.attempt_id,
                     headers={'Authorization':'Bearer '+lease.completion_grant})
@@ -521,20 +551,31 @@ asyncio.run(main())
                 import fcntl,os
                 lock=os.open(store_path,os.O_RDONLY|os.O_DIRECTORY);fcntl.flock(lock,fcntl.LOCK_EX)
                 try:
-                    try: await coordinator.complete('owner','attempt',store)
-                    except ArtifactError: pass
-                    else: raise AssertionError('failed storage accepted')
+                    failed=await http_control(lease.completion_grant)
+                    assert failed.status_code==503 and failed.json()=={'error':'execution_unavailable'}
                 finally:
                     fcntl.flock(lock,fcntl.LOCK_UN);os.close(lock)
                 state=repo.recovery('owner','attempt')
                 assert state.state=='closed' and state.outcome=='failed' and state.receipt is None
                 with sqlite3.connect(path) as db:
                     assert db.execute('SELECT current_revision_id FROM revision_workspaces').fetchone()==(intent.base_revision_id,)
+            elif inputs['failure']=='http_cancel':
+                cancelled=await http_control(lease.completion_grant,action='cancel')
+                assert cancelled.status_code==200 and cancelled.json()['outcome']=='cancelled'
+                state=repo.recovery('owner','attempt')
+                assert state.state=='closed' and state.receipt is None
+                repeated=await http_control(lease.completion_grant,action='cancel')
+                assert repeated.json()==cancelled.json()
             else:
-                state=await coordinator.complete('owner','attempt',store)
+                completed=await http_control(lease.completion_grant)
+                assert completed.status_code==200,completed.text
+                assert completed.headers['cache-control']=='no-store'
+                state=repo.recovery('owner','attempt')
+                assert completed.json()['outcome']==state.outcome and completed.json()['receipt']['revision_id']==state.receipt.revision_id
                 assert state.state=='closed' and state.outcome=='succeeded' and state.receipt is not None
                 assert b'actual coordinator output' in store.read(state.receipt.artifact_key)
-                assert await coordinator.complete('owner','attempt',store)==state
+                repeated=await http_control(lease.completion_grant)
+                assert repeated.json()==completed.json()
                 with sqlite3.connect(path) as db:
                     assert db.execute('SELECT COUNT(*) FROM revision_outbox').fetchone()==(1,)
     proxy.close();await proxy.wait_closed()
