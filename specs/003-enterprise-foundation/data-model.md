@@ -45,6 +45,8 @@ All cross-entity references enforce same organization/project via composite cons
 
 ## Migration and coexistence
 
+Collaboration contract revision 1 adds RepositoryConnection (organization, provider host/repository immutable ID, installation/grant reference, selected base SHA), RepositoryChange (base/head/upstream SHAs, execution, pull-request receipt, conflict state), ConnectorGrant (principal/action/resource/environment/expiry) and WebhookReceipt (provider/delivery ID, payload digest, validation outcome, processing state). Enforce organization scope and delivery uniqueness; no raw credential or webhook authorization header in these records. Imported repository state does not itself grant project access. Environment-specific secret bindings must be explicit; build credit units and published-app operating cost remain separate.
+
 1. Capture consistent SQLite backup and immutable workspace manifests; verify restoration before altering schema.
 2. Deterministically map each existing owner to a personal organization and preserve project/run IDs. Keep a migration mapping and reconciliation counts; do not grant every member all imported projects.
 3. Preserve legacy acceptance as client-reported evidence, never silently promote it to trusted acceptance. Preserve published bytes as legacy release snapshots requiring revalidation for new promotion.

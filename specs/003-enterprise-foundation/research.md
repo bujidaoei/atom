@@ -16,6 +16,8 @@ OBS = authenticated browser observation; DOC = official documentation, not indep
 | A06 | People | OBS: owner/active member row, invite field, role/status/usage/join-date columns | No invitation sent; editor restrictions not empirically tested |
 | A07 | Connectors | OBS: GitHub, Supabase, Stripe, GA4, GSC, Ads, Asana, Box, Dropbox, Todoist, Linear | No connector authorized; listed services do not prove their actions work |
 | A08 | Preferences | OBS: default model Auto; default project permission Public, described as link/Discover accessible; notification/sound/badge preferences | No settings changed; future test prompts must contain no private source or secrets |
+| A09 | Dashboard → public Discover example | OBS: a public Hello World project detail has embedded app, separate browser-open link, save and clone controls | No save/clone executed; no owner chat, code or history access inferred |
+| A10 | Public example → open in browser | OBS: published Hello World rendered successfully on a distinct `*.app.atoms.dev` origin | Public static page only; does not prove private preview, backend behavior, authentication isolation or publish/update workflow |
 
 ## Official source map
 Accessed 2026-09-30; these are documented behavior and limitations, not observed incident rates.
@@ -32,8 +34,8 @@ Accessed 2026-09-30; these are documented behavior and limitations, not observed
 | [GitHub](https://help.atoms.dev/en/articles/12129569-connect-github) | Guide supports new personal private repos, not existing/org repos; manual sync can overwrite conflicts; broad account OAuth scope | Existing enterprise repos, narrow grants and explicit conflict handling |
 | [Workspace](https://help.atoms.dev/en/articles/12129584-workspace-settings) | Shared members, credits, connections and Cloud usage | Organization operational ownership |
 | [Account](https://help.atoms.dev/en/articles/12129583-account-settings) | Role-sensitive defaults and preferences | Visible effective policy hierarchy |
-| [Secrets](https://help.atoms.dev/en/articles/12129564-keys-and-secrets) | Dedicated official reference located | Detailed rotation/environment semantics still to review |
-| [Plans](https://help.atoms.dev/en/articles/12129587-plans-and-credits) | Billing reference located | Exact budget/overrun semantics still to review; no price assumptions |
+| [Secrets](https://help.atoms.dev/en/articles/12129564-keys-and-secrets) | DOC: separate Test/Production and project/library scope; absent Production value reuses Test; deleting an entry does not revoke provider credential | Explicit environment grant; production binding cannot silently inherit; rotation tested in both environments |
+| [Plans](https://help.atoms.dev/en/articles/12129587-plans-and-credits) | DOC: build credits and published-app Cloud/AI charges differ; grant/reset/rollover depend on account terms | Separate usage units and runtime budget; do not infer available funds or a spend cap from build credits |
 
 ## Broader research and code baseline
 - [Seven-product official comparison](../../docs/research/2026-09-30-commercial-products.md): Cursor, Copilot, Devin, Replit, Lovable, Bolt, Claude Code. Documents limitations and remaining research, not subscription hands-on verification.
@@ -83,3 +85,9 @@ Incident update timestamps are not guaranteed outage-start/end times. This is a 
 Added proposed contracts/execution.md and contracts/delivery.md. [PostgreSQL 17 SELECT](https://www.postgresql.org/docs/17/sql-select.html) was checked for the locally available experiment version; separate real sessions verified nonblocking queue claim and guarded stale writes. This is a database mechanism experiment, not an application reliability result.
 
 [SLSA provenance v1.1](https://slsa.dev/spec/v1.1/provenance) separates builder identity and invocation/input records. [GitHub secure use](https://docs.github.com/en/actions/reference/security/secure-use) explains the risks of untrusted code on self-hosted runners. Design inference: independently controlled evidence identity and isolated verification workloads are necessary; an approval screen or signed agent-authored report alone cannot establish trustworthy acceptance. No SLSA level or certification claimed.
+
+## Collaboration and execution boundary — 2026-09-30
+
+Official Atoms secret and credit references above reviewed in detail without editing the account or spending credits. New proposed collaboration.md covers existing repositories, scoped grants, pinned revisions, conflict handling, webhook verification and portable export. GitHub's [App permission model](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/differences-between-github-apps-and-oauth-apps) and [webhook signature validation](https://docs.github.com/en/webhooks/using-webhooks/validating-webhook-deliveries) provide primary integration guidance. A direct Devin integration page lookup failed; no additional Devin behavior inferred from that failure.
+
+LocalSandboxClient.exec reproduced environment inheritance and access to a synthetic file outside its workspace on Windows and Linux. This confirms absence of an OS boundary in that class, not agent exploitability. Runtime server currently filters tools to glob/grep/read_file/write/edit. Do not enable arbitrary command/build tools before isolated execution passes SEC-05. See evidence.md for exact scope and results.
