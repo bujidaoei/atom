@@ -132,9 +132,27 @@ print(json.dumps(asdict(attempt)))
         assert registry.find_grant('g') is None
         grant = Grant(reserved['grant_id'],'owner',reserved['project_id'],reserved['run_id'],reserved['id'],
                       reserved['generation'],reserved['base_revision'],reserved['issued_at'],reserved['deadline'])
+        # Linux ledger and Windows HTTP client can straddle a wall-clock second.
+        # Wait for actual validity; never weaken the production grant clock check.
+        clock_deadline = time.monotonic()+5
+        while int(time.time()) < grant.iat and time.monotonic() < clock_deadline:
+            time.sleep(0.02)
+        assert grant.iat <= int(time.time()) < grant.exp
         if cancel_before_provision:
-            execute("app.revisions.RevisionRepository(path).cancel('owner','attempt')")
-            assert runner.run(client.revoke(grant.jti)) == 'not_admitted'
+            cleanup = json.loads(execute('''
+from dataclasses import asdict
+repo=app.revisions.RevisionRepository(path)
+pid=os.fork()
+if pid==0:
+    repo.cancel('owner','attempt')
+    os._exit(53)
+assert os.waitpid(pid,0)[1]==53<<8
+recovery=app.revisions.RevisionRepository(path).recovery('owner','attempt')
+assert recovery.state=='cancel_requested' and recovery.broker_attempt_id is None
+assert recovery.receipt is None
+print(json.dumps(asdict(recovery)))
+'''))
+            assert runner.run(client.revoke(cleanup['grant_id'])) == 'not_admitted'
             with pytest.raises(BrokerClientError) as denied:
                 runner.run(client.provision(grant))
             assert denied.value.status == 409 and registry.find_grant(grant.jti) is None
@@ -191,6 +209,7 @@ if pid==0:
 assert os.waitpid(pid,0)[1]==47<<8
 receipt=repo.receipt('owner','attempt',data['worker'],data['grant'])
 assert receipt is not None and store.read(receipt.artifact_key)==base64.b64decode(data['output'])
+assert repo.recovery('owner','attempt').receipt==receipt
 assert repo.register('owner','attempt',data['worker'],data['grant'],output)==receipt
 with sqlite3.connect(path) as db:
     assert db.execute('SELECT COUNT(*) FROM revision_outbox').fetchone()==(1,)
@@ -208,7 +227,16 @@ print(json.dumps(asdict(receipt)))
                 lifecycle.confirm_checkpoint(grant,changed,registered_revision=digest)
             assert registry.find(worker.id).state == 'quiescing'
         if cancel_before_ack:
-            assert runner.run(client.revoke(grant.jti)) == 'terminated'
+            cleanup = json.loads(execute('''
+from dataclasses import asdict
+repo=app.revisions.RevisionRepository(path)
+recovery=repo.cancel('owner','attempt')
+assert recovery.state=='cancel_requested' and recovery.receipt is not None
+assert app.revisions.RevisionRepository(path).recovery('owner','attempt')==recovery
+print(json.dumps(asdict(recovery)))
+'''))
+            assert cleanup['broker_attempt_id'] == worker.id
+            assert runner.run(client.revoke(cleanup['grant_id'])) == 'terminated'
             with pytest.raises(BrokerClientError) as denied:
                 runner.run(client.confirm(grant,exported,receipt))
             assert denied.value.status == 409
@@ -230,6 +258,9 @@ print(json.dumps(asdict(receipt)))
         assert execute('outcome=' + repr(outcome) + '\n' + '''
 repo=app.revisions.RevisionRepository(path)
 repo.observe_termination('owner','attempt',confirmed=True,outcome=outcome)
+recovery=repo.recovery('owner','attempt')
+assert recovery.state=='closed' and recovery.outcome==outcome and recovery.receipt is not None
+assert repo.cancel('owner','attempt')==recovery
 with sqlite3.connect(path) as db:
     assert db.execute('SELECT active_attempt_id FROM revision_workspaces').fetchone()==(None,)
     assert db.execute('SELECT state,termination_state,outcome FROM revision_attempts').fetchone()==('closed','confirmed',outcome)

@@ -53,6 +53,20 @@ class Receipt:
     snapshot_revision: str
 
 
+@dataclass(frozen=True)
+class Recovery:
+    """Cleanup observations only; deliberately excludes grant issuance inputs."""
+    attempt_id: str
+    workspace_id: str
+    grant_id: str
+    broker_attempt_id: str | None
+    deadline: int
+    state: str
+    termination_state: str
+    outcome: str | None
+    receipt: Receipt | None
+
+
 def _identifiers(*values):
     if any(not isinstance(value, str) or not _ID.fullmatch(value) for value in values):
         raise RevisionError('invalid_revision_request')
@@ -278,18 +292,38 @@ class RevisionRepository:
             attempt, workspace = self._attempt(db, owner, attempt_id)
             if (attempt['broker_attempt_id'], attempt['grant_id']) != (broker_attempt_id, grant_id):
                 raise RevisionError('revision_conflict')
-            row = db.execute('''SELECT c.revision_id,r.artifact_key,r.snapshot_revision FROM revision_receipts c
-                JOIN revision_records r ON r.id=c.revision_id WHERE c.attempt_id=?''', (attempt_id,)).fetchone()
-            if row is None:
-                return None
-            return Receipt(attempt_id, workspace['id'], row['revision_id'], row['artifact_key'], row['snapshot_revision'])
+            return self._receipt(db, attempt_id, workspace['id'])
 
-    def cancel(self, owner: str, attempt_id: str) -> None:
+    @staticmethod
+    def _receipt(db, attempt_id, workspace_id):
+        row = db.execute('''SELECT c.revision_id,r.artifact_key,r.snapshot_revision FROM revision_receipts c
+            JOIN revision_records r ON r.id=c.revision_id WHERE c.attempt_id=?''', (attempt_id,)).fetchone()
+        if row is None:
+            return None
+        return Receipt(attempt_id, workspace_id, row['revision_id'], row['artifact_key'], row['snapshot_revision'])
+
+    def _recovery(self, db, attempt):
+        return Recovery(attempt['id'], attempt['workspace_id'], attempt['grant_id'],
+            attempt['broker_attempt_id'], attempt['deadline'], attempt['state'],
+            attempt['termination_state'], attempt['outcome'],
+            self._receipt(db, attempt['id'], attempt['workspace_id']))
+
+    def recovery(self, owner: str, attempt_id: str) -> Recovery:
+        """Inspect durable cleanup state without granting execution or closure."""
+        _identifiers(owner, attempt_id)
+        with self._transaction() as db:
+            attempt, _ = self._attempt(db, owner, attempt_id)
+            return self._recovery(db, attempt)
+
+    def cancel(self, owner: str, attempt_id: str) -> Recovery:
+        """Commit cancellation and return its cleanup identity in one transaction."""
         _identifiers(owner, attempt_id)
         with self._transaction() as db:
             attempt, _ = self._attempt(db, owner, attempt_id)
             if attempt['state'] != 'closed':
                 db.execute("UPDATE revision_attempts SET state='cancel_requested' WHERE id=?", (attempt_id,))
+                attempt = db.execute('SELECT * FROM revision_attempts WHERE id=?', (attempt_id,)).fetchone()
+            return self._recovery(db, attempt)
 
     def observe_termination(self, owner: str, attempt_id: str, *, confirmed: bool, outcome: str) -> None:
         """Persist a trusted coordinator observation; does not terminate a worker."""

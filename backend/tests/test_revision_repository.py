@@ -51,6 +51,90 @@ def allocate(repo, workspace, *, attempt='attempt', run='run', deadline=None):
     return repo.bind('owner',attempt,'broker-' + attempt)
 
 
+@pytest.mark.parametrize('state', ['reserved', 'cancelled', 'expired', 'registered', 'unknown', 'closed'])
+def test_recovery_remains_readable_without_dispatch_or_database_effects(repository, monkeypatch, state):
+    repo, path, main, heat = repository
+    repo.bootstrap('owner',main,BASE)
+    pending = repo.reserve('owner',main,'run','attempt','grant-attempt',int(time.time())+120)
+    receipt = None
+    if state in ('registered','closed'):
+        repo.bind('owner','attempt','broker-attempt')
+        receipt = register(repo)
+    if state == 'cancelled':
+        repo.cancel('owner','attempt')
+    if state == 'unknown':
+        repo.observe_termination('owner','attempt',confirmed=False,outcome='failed')
+    if state == 'closed':
+        repo.observe_termination('owner','attempt',confirmed=True,outcome='succeeded')
+        allocate(repo,main,attempt='successor')
+    if state == 'expired':
+        monkeypatch.setattr('app.revisions.time.time',lambda: pending.deadline)
+    with sqlite3.connect(path) as db:
+        before = list(db.iterdump())
+    recovered = RevisionRepository(path).recovery('owner','attempt')
+    assert recovered.attempt_id == 'attempt' and recovered.workspace_id == main
+    assert recovered.grant_id == 'grant-attempt' and recovered.deadline == pending.deadline
+    assert recovered.broker_attempt_id == ('broker-attempt' if receipt else None)
+    assert recovered.receipt == receipt
+    assert recovered.state == ('closed' if state == 'closed' else
+        'cancel_requested' if state in ('cancelled','unknown') else 'active')
+    assert recovered.termination_state == ('confirmed' if state == 'closed' else
+        'unknown' if state == 'unknown' else 'pending')
+    assert recovered.outcome == ('succeeded' if state == 'closed' else None)
+    assert not hasattr(recovered,'issued_at') and not hasattr(recovered,'base_revision')
+    if state != 'reserved':
+        with pytest.raises(RevisionError,match='revision_conflict'):
+            repo.execution('owner','attempt')
+    with sqlite3.connect(path) as db:
+        assert list(db.iterdump()) == before
+    with pytest.raises(RevisionError,match='revision_not_found'):
+        repo.recovery('stranger','attempt')
+    with pytest.raises(RevisionError,match='revision_not_found'):
+        repo.recovery('owner','missing')
+
+
+def test_cancel_returns_committed_recovery_and_preserves_closed_successor(repository):
+    repo, path, main, heat = repository
+    repo.bootstrap('owner',main,BASE)
+    allocate(repo,main)
+    receipt = register(repo)
+    cancelled = repo.cancel('owner','attempt')
+    assert cancelled.state == 'cancel_requested' and cancelled.receipt == receipt
+    assert RevisionRepository(path).recovery('owner','attempt') == cancelled
+    assert repo.cancel('owner','attempt') == cancelled
+    repo.observe_termination('owner','attempt',confirmed=True,outcome='cancelled')
+    successor = allocate(repo,main,attempt='successor')
+    closed = repo.recovery('owner','attempt')
+    assert repo.cancel('owner','attempt') == closed
+    assert closed.outcome == 'cancelled' and closed.termination_state == 'confirmed'
+    assert repo.execution('owner','successor') == successor
+    with pytest.raises(RevisionError,match='revision_not_found'):
+        repo.cancel('stranger','attempt')
+
+
+def test_recovery_checks_current_owner_but_does_not_require_running_run(repository):
+    repo, path, main, heat = repository
+    repo.bootstrap('owner',main,BASE)
+    allocate(repo,main)
+    expected = repo.recovery('owner','attempt')
+    with sqlite3.connect(path) as db:
+        db.execute("UPDATE runs SET status='failed' WHERE id='run'")
+        db.execute("UPDATE projects SET active_run_id=NULL WHERE id='p'")
+    assert repo.recovery('owner','attempt') == expected
+    with pytest.raises(RevisionError,match='revision_conflict'):
+        repo.execution('owner','attempt')
+    engine = create_engine('sqlite:///' + path.as_posix())
+    with Session(engine) as session:
+        session.add(User(id='new-owner',email='new@example.invalid',name='New',password_hash='fixture'))
+        session.commit()
+    engine.dispose()
+    with sqlite3.connect(path) as db:
+        db.execute("UPDATE projects SET user_id='new-owner' WHERE id='p'")
+    with pytest.raises(RevisionError,match='revision_not_found'):
+        repo.recovery('owner','attempt')
+    assert repo.recovery('new-owner','attempt') == expected
+
+
 def test_reservation_survives_restart_and_binds_once(repository, monkeypatch):
     repo, path, main, heat = repository
     root = repo.bootstrap('owner',main,BASE)
