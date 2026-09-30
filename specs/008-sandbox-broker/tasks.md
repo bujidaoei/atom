@@ -118,3 +118,5 @@ T017 continuation: committed published-artifact metadata lookup now checks curre
 T017 continuation: private verified release materialization now passes real Linux artifact/database integration, including corruption, cleanup and visibility change during IO. Published HTTP routes, admission bounds, cache/pinned asset handling, isolated origin and trusted verifier remain open.
 
 T017 continuation: bounded one-view process admission and post-extraction visibility recheck pass real Linux integration. Capacity/error cleanup is verified. HTTP serving/stream cancellation, isolated origins, caching and distributed readiness remain open.
+
+T017/T018 architecture refinement: source audit and browser primary documentation now define contracts/content-origin.md. Dedicated content site, pinned host mapping, separate private access and independent verifier must precede live HTTP cutover. Existing same-origin iframe acceptance is not enterprise isolation. Implementation and browser gates remain unchecked.

@@ -88,3 +88,5 @@ UnpublishReceipt contains command ID, affected release and committed generation.
 PublishedArtifact contains project/release/revision identity and exact artifact key, semantic digest and size. Resolution is point-in-time authorization metadata, not an ongoing capability or proof of bytes. Historical release and current publication audiences are intersected.
 
 ReleaseView pairs an authorized PublishedArtifact with an ephemeral private extraction path. It does not change revision/publication records and is not a long-lived access capability. Reauthorization after IO pins the original release instead of switching to current head.
+
+Planned content extension: immutable host binding (opaque route identity, project, pinned revision/release, purpose), one-use audience/host-bound private handoff and separate content sessions. No schema or token implementation exists yet. Existing release IDs are not assumed DNS-safe.

@@ -118,3 +118,5 @@ T017 prerequisite: ReleaseRepository.resolve selects immutable artifact metadata
 T017 artifact prerequisite implemented in release_view.py: resolve authorization, verify ArtifactStore bytes and snapshot descriptor, reauthorize captured release after IO, materialize privately and clean via context lifetime. HTTP serving, bounded admission and origin isolation remain to be integrated.
 
 T017 read admission now wraps resolve/read/verify/extract/view lifetime with a process-local bounded semaphore. Recheck authorization after storage IO and after extraction. This does not provide distributed resource admission, response-stream cancellation or cache revocation.
+
+HTTP integration follows contracts/content-origin.md before enabling v2 publication. Source audit found same-origin nginx routing, iframe allow-scripts/allow-same-origin, and console contentDocument acceptance. Introduce durable opaque host bindings and separate private content handoff, then strict serving/proxy policy and an independent verifier. Path/query versioning alone cannot pin arbitrary root-relative resources.

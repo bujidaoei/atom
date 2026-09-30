@@ -129,3 +129,5 @@ Pinned published artifact lookup requires an active current publication and auth
 Published materialization must verify actual immutable storage bytes against recorded semantic digest and size, never fall back to legacy directories, and clean private temporary output on normal/error exit. Recheck current visibility after storage IO before yielding a captured version.
 
 Published view materialization must bound concurrent in-memory snapshot reads and extraction. Current single-process profile permits one active view with a three-second admission wait; capacity is released after normal/error exits. Reauthorize the pinned release after extraction before returning it.
+
+T017 content isolation refinement: generated content must use a dedicated content site and durable per-version host binding. Root-relative resources must resolve within the same pinned artifact. Console credentials and direct DOM-based acceptance must not cross the content boundary. See contracts/content-origin.md; requirements remain unimplemented.

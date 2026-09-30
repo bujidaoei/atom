@@ -146,3 +146,5 @@ T027 / feature008 T017: pinned publication metadata now honors current live stat
 T027 / feature008 T017: actual immutable release bytes and private cleanup now pass Linux integration, including corrupt storage and unpublish during read. HTTP/browser release acceptance remains open.
 
 T027 / feature008 T017: release-view capacity and post-extraction revocation now pass Linux tests. Real publication HTTP/browser serving remains open.
+
+T027 / feature008 T017/T018: audited browser origin assumptions and documented pinned content hosting/private access/verifier architecture against MDN semantics. No browser security or deployment gate closed.

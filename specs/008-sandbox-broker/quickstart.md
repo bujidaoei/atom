@@ -103,3 +103,5 @@ Release repository tests now cover private/public current and historical lookup,
 Pinned API image integration test_revision_routes.py now additionally imports actual files, upgrades its disposable DB to v2, registers a fixture report/release and verifies Linux release views, stale legacy exclusion, normal/exception cleanup, corrupt artifact rejection and unpublish during storage read. Fixture report is not browser execution evidence.
 
 Linux release-view integration now holds a real view while a second thread waits and is rejected by the three-second capacity bound. It also performs actual extraction then invokes real unpublish before yielding, asserting denial, cleanup and semaphore release.
+
+Content serving has no accepted production launch path yet. contracts/content-origin.md lists host-binding, private handoff, independent verifier, browser attack and multi-asset consistency tests. Local origins can support implementation; public DNS/TLS and private embedded-cookie behavior require separate staging acceptance.
