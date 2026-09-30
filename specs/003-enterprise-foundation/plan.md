@@ -40,6 +40,8 @@ The same bounded process applies to `005-configuration-guards`, which closes dem
 ## Phased implementation direction
 ### Increment A — trust boundaries (US1)
 Unified provider credentials/destination policy; production config fail-closed; independent preview origin; sandbox capabilities and secret isolation. Test actual denial, not merely configuration presence. Existing builder's limited tools remain constrained.
+
+Isolation design in contracts/isolation.md replaces the sandbox port via a separate broker and quota-backed per-attempt workspace, with immutable input/output snapshots. Ordinary host binds cannot satisfy disk quotas. Validate candidate limits before committing implementation interfaces; keep current limited file tools, no model-facing shell expansion. Shared-kernel containers alone do not close public multi-tenant isolation.
 ### Increment B — durable execution (US2)
 Versioned storage migrations, atomic command/lease ownership with stale-worker fencing, cross-worker event delivery and resync; cancellation/retry state machine; reserved/settled budget ledger. Never enable multiple API workers before these invariants are proven.
 ### Increment C — evidence and release (US3)
