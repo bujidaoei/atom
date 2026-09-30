@@ -44,6 +44,8 @@ test('runtime refuses invalid configuration before listening', { timeout: 60000 
   for (const overrides of [
     { ATOM_RUNTIME_TOKEN: '' }, { ATOM_RUNTIME_TOKEN: 'change-me' },
     { ATOM_RUNTIME_TOKEN: 'do-not-echo-secret-with-newline-123456\n' },
+    { ATOM_ENVIRONMENT: 'production', ATOM_SANDBOX_MODE: 'local' },
+    { ATOM_SANDBOX_MODE: 'broker' }, { ATOM_SANDBOX_MODE: 'invalid' },
     { ATOM_ENVIRONMENT: 'typo' }, { ATOM_RUNTIME_PORT: 'NaN' },
     { ATOM_RUNTIME_PORT: '0' }, { ATOM_RUNTIME_PORT: '65536' },
     { ATOM_ENVIRONMENT: 'production', ATOM_RUNTIME_HOST: '0.0.0.0' },
@@ -60,7 +62,7 @@ test('runtime refuses invalid configuration before listening', { timeout: 60000 
 
 test('actual runtime HTTP surface requires service authentication', { timeout: 20000 }, async () => {
   const port = await freePort();
-  const run = launch(port, { ATOM_ENVIRONMENT: 'production' });
+  const run = launch(port, { ATOM_ENVIRONMENT: 'production', ATOM_SANDBOX_MODE: 'broker', ATOM_BROKER_ORIGIN: 'http://127.0.0.1:8766', ATOM_EXECUTION_ORIGIN: 'http://127.0.0.1:8765' });
   try {
     const deadline = Date.now() + 8000;
     while (!run.output().includes('listening on')) {

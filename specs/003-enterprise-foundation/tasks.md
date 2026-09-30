@@ -96,3 +96,5 @@ T027 continuation: child 008 now has verified Node completion transport and actu
 T027 continuation: child 008 has tested outer Node execution lifecycle ownership across recovery and checkpoint-before-release, including actual Linux/Docker completion. Production runtime/server adoption remains open.
 
 T027 continuation: actual ProductAgentRuntime now supports trusted external sandbox ownership across recovery, validated with real Pi sessions/local file IO and synthetic model protocol. Production server wiring and enterprise acceptance remain open.
+
+T027 continuation: child 008 production-mode Node server now uses validated broker leases and checkpoint-before-release lifecycle. Real server/Pi/Docker/Linux registration evidence passed; API orchestrator lease delivery, production mounting and enterprise release remain open.

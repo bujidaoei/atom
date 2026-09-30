@@ -635,7 +635,7 @@ asyncio.run(main())
                         'attemptId':lease['attempt_id'],'executionId':lease['execution_id'],'grantId':lease['grant_id'],
                         'grant':lease['grant'],'completionGrant':lease['completion_grant'],'deadline':lease['deadline']}}
                     code,node_out,node_err=run_bounded(['node','--import',(runtime/'node_modules/tsx/dist/loader.mjs').as_uri(),
-                        str(runtime/'scripts/test-execution-integration.ts')],input_data=json.dumps(node_input).encode(),timeout=20)
+                        str(runtime/'scripts/test-server-execution.ts')],input_data=json.dumps(node_input).encode(),timeout=20)
                     assert code==0,node_err.decode()
                     assert len(json.loads(node_out)['revision'])==32
                     out,err=process.communicate(timeout=10);status=process.returncode

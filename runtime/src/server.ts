@@ -14,6 +14,10 @@ import { dirname, isAbsolute } from 'node:path';
 import { ProductAgentRuntime } from '../packages/agent-runtime/src/product-agent-runtime.ts';
 import type { RunEventType } from '../packages/product-contracts/src/index.ts';
 import { LocalSandboxClient } from './local-sandbox.ts';
+import { BrokerSandboxClient, type BrokerLease } from './broker-sandbox.ts';
+import { ExecutionClient, type ExecutionBinding } from './execution-client.ts';
+import { withExecution } from './execution-lifecycle.ts';
+import type { ExternalSandboxScope } from '../packages/agent-runtime/src/sandbox-lifecycle.ts';
 import { allRoles, roleDefinition } from './squad.ts';
 import { runWithRecovery } from './run-recovery.ts';
 import { loadRuntimeConfig } from './config.ts';
@@ -34,6 +38,7 @@ interface RunBody {
   systemPromptSuffix?: string;
   enableTools?: boolean;
   budgetMs?: number;
+  lease?: BrokerLease & ExecutionBinding;
 }
 
 const active = new Map<string, AbortController>();
@@ -77,6 +82,19 @@ async function handle(request: IncomingMessage, response: ServerResponse): Promi
 async function startRun(request: IncomingMessage, response: ServerResponse): Promise<void> {
   const body = (await readJson(request)) as RunBody;
   const role = roleDefinition(body.role);
+  const enableTools = body.enableTools ?? role.tools;
+  let sandbox: LocalSandboxClient | BrokerSandboxClient;
+  let completion: ExecutionClient | undefined;
+  try {
+    if (config.sandboxMode === 'broker') {
+      if (!body.lease || body.lease.runId !== body.runId) throw new Error('Missing or mismatched execution lease');
+      sandbox = new BrokerSandboxClient({ baseUrl: config.brokerOrigin!, lease: body.lease });
+      completion = new ExecutionClient({ baseUrl: config.executionOrigin!, lease: body.lease });
+    } else {
+      if (body.lease) throw new Error('Execution lease requires broker mode');
+      sandbox = new LocalSandboxClient({ resolveWorkspace: () => body.workspacePath });
+    }
+  } catch { return sendJson(response, 400, { error: 'invalid execution configuration or lease' }); }
 
   if (active.has(body.runId)) return sendJson(response, 409, { error: 'run already active' });
 
@@ -98,58 +116,64 @@ async function startRun(request: IncomingMessage, response: ServerResponse): Pro
   response.on('close', () => controller.abort());
 
   try {
-    // The caller runs in a different working directory, so a relative path
-    // would silently land somewhere else. Refuse it rather than guess.
-    requireAbsolute(body, 'workspacePath', 'sessionPath', 'agentDir');
+    const execute = async (sandboxScope?: ExternalSandboxScope) => {
+      // The caller runs in a different working directory, so a relative path
+      // would silently land somewhere else. Refuse it rather than guess.
+      requireAbsolute(body, 'workspacePath', 'sessionPath', 'agentDir');
 
-    await mkdir(body.workspacePath, { recursive: true });
-    await mkdir(body.agentDir, { recursive: true });
-    await mkdir(dirname(body.sessionPath), { recursive: true });
+      await mkdir(body.workspacePath, { recursive: true });
+      await mkdir(body.agentDir, { recursive: true });
+      await mkdir(dirname(body.sessionPath), { recursive: true });
 
-    const sandbox = new LocalSandboxClient({
-      resolveWorkspace: () => body.workspacePath,
-    });
-
-    const runtime = new ProductAgentRuntime({
-      aiGateway: {
-        baseUrl: body.gateway.baseUrl,
-        masterKey: body.gateway.apiKey,
-        model: body.gateway.model,
-        requestTimeoutMs: body.gateway.requestTimeoutMs ?? 300_000,
-      },
-      agentDir: body.agentDir,
-      sandbox,
-      approvals: { request: async () => 'approved' as const },
-      events: {
-        async emit(type: RunEventType, payload: Record<string, unknown>) {
-          write({ kind: 'event', type, payload });
+      const runtime = new ProductAgentRuntime({
+        aiGateway: {
+          baseUrl: body.gateway.baseUrl,
+          masterKey: body.gateway.apiKey,
+          model: body.gateway.model,
+          requestTimeoutMs: body.gateway.requestTimeoutMs ?? 300_000,
         },
-      },
-      enableTools: body.enableTools ?? role.tools,
-      workspaceToolNames: ['glob', 'grep', 'read_file', 'write', 'edit'],
-      systemPrompt: (body.systemPromptSuffix
-        ? `${role.systemPrompt}\n\n## Context from the squad\n${body.systemPromptSuffix}`
-        : role.systemPrompt) + `\n\nThis turn has a wall-clock budget of ${(body.budgetMs ?? 180_000) / 1000} seconds including tools and recovery. Finish core functionality within this budget.`,
-    });
+        agentDir: body.agentDir,
+        sandbox,
+        sandboxScope,
+        approvals: { request: async () => 'approved' as const },
+        events: {
+          async emit(type: RunEventType, payload: Record<string, unknown>) {
+            write({ kind: 'event', type, payload });
+          },
+        },
+        enableTools,
+        workspaceToolNames: ['glob', 'grep', 'read_file', 'write', 'edit'],
+        systemPrompt: (body.systemPromptSuffix
+          ? `${role.systemPrompt}\n\n## Context from the squad\n${body.systemPromptSuffix}`
+          : role.systemPrompt) + `\n\nThis turn has a wall-clock budget of ${(body.budgetMs ?? 180_000) / 1000} seconds including tools and recovery. Finish core functionality within this budget.`,
+      });
 
-    const result = await runWithRecovery({
-      signal: controller.signal,
-      onRecover(attempt, maxAttempts) {
-        write({ kind: 'event', type: 'run.recovering', payload: {
-          attempt, maxAttempts, message: `响应被截断，正在从已有进度恢复（${attempt}/${maxAttempts}）`,
-        } });
-      },
-      run: (recovery) => runtime.run({
-      runId: body.runId,
-      prompt: body.prompt,
-      workspacePath: body.workspacePath,
-      sessionPath: body.sessionPath,
-      ...(body.parentSessionPath ? { parentSessionPath: body.parentSessionPath } : {}),
-      model: body.gateway.model,
-      signal: controller.signal,
-      recovery,
-      }),
-    });
+      return await runWithRecovery({
+        signal: controller.signal,
+        onRecover(attempt, maxAttempts) {
+          write({ kind: 'event', type: 'run.recovering', payload: {
+            attempt, maxAttempts, message: `响应被截断，正在从已有进度恢复（${attempt}/${maxAttempts}）`,
+          } });
+        },
+        run: (recovery) => runtime.run({
+        runId: body.runId,
+        prompt: body.prompt,
+        workspacePath: body.workspacePath,
+        sessionPath: body.sessionPath,
+        ...(body.parentSessionPath ? { parentSessionPath: body.parentSessionPath } : {}),
+        model: body.gateway.model,
+        signal: controller.signal,
+        recovery,
+        }),
+      });
+    };
+    const finished = completion ? await withExecution({ sandbox, completion,
+      runId: body.runId, workspaceId: body.lease!.workspaceId }, async sandboxId => {
+        const result = await execute({ runId: body.runId, workspaceId: body.lease!.workspaceId, sandboxId });
+        controller.signal.throwIfAborted();
+        return result;
+      }) : { value: await execute(), receipt: undefined };
+    const result = finished.value;
 
     write({
       kind: 'result',
@@ -158,6 +182,7 @@ async function startRun(request: IncomingMessage, response: ServerResponse): Pro
       usage: result.usage,
       sessionFile: result.sessionFile,
       providerCorrelationId: result.providerCorrelationId,
+      ...(finished.receipt ? { revisionReceipt: finished.receipt } : {}),
     });
   } catch (error) {
     write({

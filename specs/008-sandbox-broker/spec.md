@@ -79,3 +79,5 @@ Initial deployment is a single trusted private-team Docker host, not a hostile p
 FR-007 lifecycle ownership: one sandbox acquisition and one final checkpoint MUST cover the entire model recovery sequence. Work results must not return before verified completion and cleanup; failures preserve their original and cleanup causes.
 
 FR-007 external scope: ProductAgentRuntime MUST reject a different run before session effects and MUST NOT destroy a sandbox owned by an outer execution lifecycle during internal recovery or failure.
+
+FR-007 production selection: production runtime MUST require broker mode, configured trusted origins and matching ready leases, with no local fallback. Terminal result delivery must follow registered completion and expose the verified revision receipt.
