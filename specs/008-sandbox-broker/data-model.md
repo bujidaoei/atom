@@ -48,3 +48,5 @@ Authenticated RunBody may contain a trusted ready lease combining BrokerLease an
 RuntimeClient leased calls carry explicit repository/owner alongside ExecutionLease internally; these are never sent as runtime-selected authority. Terminal NDJSON revisionReceipt must equal the persisted owner-scoped Receipt, with closed/confirmed/succeeded status and matching workspace/broker/grant. No schema changes.
 
 Workspace identity creation: the repository may insert revision_workspaces for a committed owner-scoped project/heat after migration. It preserves the v1 defaults (null head/active attempt, generation zero), enforces heat membership through races and reuses existing identity under a write transaction. This is not a revision or acceptance record.
+
+ImportedWorkspace is a trusted offline operation result containing workspace_id, revision_id and verified Artifact metadata. It adds no schema or acceptance status. The artifact becomes durable before root registration; a failure between these steps can retain unreferenced bytes without changing the workspace head.

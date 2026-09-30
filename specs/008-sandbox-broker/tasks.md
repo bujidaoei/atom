@@ -67,3 +67,5 @@ T008/T009 continuation: actual Node server now selects broker mode with fail-clo
 T008/T009 continuation: API RuntimeClient now serializes trusted leases and verifies returned success against current durable confirmed receipt. Real socket negative tests cover missing/wrong/uncommitted receipt; automatic orchestrator preparation and positive end-to-end API integration remain open.
 
 T010 continuation: owner-scoped workspace identity creation now supports projects/heats committed after migration, with concurrency/idempotency and foreign-scope tests. No artifact/head is fabricated. Application creation routes, verified file import and runtime/preview adoption remain open; T010 stays unchecked.
+
+T010 continuation: trusted offline import now exports an actual quiescent directory, persists its verified snapshot and bootstraps the owner-scoped root. Exact replay and changed-source rejection are implemented; application route/startup adoption, writer fencing/cutover and preview migration remain open. T010 stays unchecked.

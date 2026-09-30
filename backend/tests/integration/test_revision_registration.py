@@ -373,7 +373,7 @@ def coordinator_source_bundle():
                 if path.is_file() and (path.suffix == '.py' or path.name == 'cacert.pem'):
                     bundle.write(path,package+'/'+path.relative_to(directory).as_posix())
         bundle.write(importlib.util.find_spec('typing_extensions').origin,'typing_extensions.py')
-        for name in ('__init__','execution','execution_http','artifacts','snapshots','revisions','migrations/__init__',
+        for name in ('__init__','execution','execution_http','workspace_import','artifacts','snapshots','revisions','migrations/__init__',
                      'migrations/revision_v1','sandbox/__init__','sandbox/client','sandbox/checkpoints',
                      'sandbox/docker_driver','sandbox/registry','sandbox/grants'):
             bundle.write(root / f'backend/app/{name}.py',f'app/{name}.py')
@@ -399,6 +399,8 @@ from app.revisions import RevisionRepository,RevisionError
 from app.migrations import migrate
 from app.execution import ExecutionCoordinator
 from app.execution_http import ExecutionAPI
+from app.workspace_import import import_workspace
+from app.snapshots import SnapshotError,verify_snapshot
 from app.sandbox.client import BrokerClient
 from app.sandbox.grants import GrantCodec,Grant,CompletionGrantCodec
 import httpx,struct
@@ -427,14 +429,43 @@ async def main():
     with sqlite3.connect(path) as db: workspace=db.execute('SELECT id FROM revision_workspaces').fetchone()[0]
     store_path=Path('/workspace/artifacts');store_path.mkdir(mode=0o700)
     store=ArtifactStore(store_path)
-    manifest=b'{"files":[],"version":1}'
-    payload=b'ATOMSNAP1\n'+struct.pack('>I',len(manifest))+manifest
-    base=store.put(payload)
-    repo.bootstrap('owner',workspace,base)
+    source=Path('/workspace/legacy');source.mkdir(mode=0o700)
+    (source/'initial.txt').write_text('actual imported source',encoding='utf-8')
+    try: import_workspace(repo,store,owner='stranger',project_id='p',source=source)
+    except RevisionError: pass
+    else: raise AssertionError('foreign import')
+    assert list(store_path.iterdir())==[]
+    nested=store_path/'nested';nested.mkdir(mode=0o700)
+    for unsafe in (Path('relative'),Path('/workspace'),store_path,nested):
+        try: import_workspace(repo,store,owner='owner',project_id='p',source=unsafe)
+        except RevisionError: pass
+        else: raise AssertionError('unsafe source')
+    nested.rmdir()
+    (source/'alias').symlink_to('/etc/passwd')
+    try: import_workspace(repo,store,owner='owner',project_id='p',source=source)
+    except SnapshotError: pass
+    else: raise AssertionError('symlink import')
+    assert list(store_path.iterdir())==[]
+    (source/'alias').unlink()
+    imported=import_workspace(repo,store,owner='owner',project_id='p',source=source)
+    assert imported.workspace_id==workspace
+    assert import_workspace(repo,store,owner='owner',project_id='p',source=source)==imported
+    base=imported.artifact
+    verified=verify_snapshot(io.BytesIO(store.read(base.key)))
+    assert verified.revision==base.revision and len(verified.files)==1
+    assert verified.files[0].path=='initial.txt'
+    assert b'actual imported source' in store.read(base.key)
+    (source/'initial.txt').write_text('changed source',encoding='utf-8')
+    try: import_workspace(repo,store,owner='owner',project_id='p',source=source)
+    except RevisionError as error: assert error.code=='revision_conflict'
+    else: raise AssertionError('changed root import')
+    with sqlite3.connect(path) as db:
+        assert db.execute('SELECT current_revision_id FROM revision_workspaces WHERE id=?',(workspace,)).fetchone()[0]==imported.revision_id
+        assert db.execute('SELECT count(*) FROM revision_records').fetchone()[0]==1
     intent=repo.reserve('owner',workspace,'run','attempt','target',int(time.time())+120)
     # Cross-system test clock boundary; production checks remain strict.
     await asyncio.sleep(2)
-    if inputs['failure']=='missing': next(store_path.glob('*.atomsnap')).unlink()
+    if inputs['failure']=='missing': (store_path/(base.key+'.atomsnap')).unlink()
     async with BrokerClient(origin,inputs['admin'],GrantCodec(inputs['key'].encode())) as client:
         coordinator=ExecutionCoordinator(repo,client,completion_codec=CompletionGrantCodec(b'c'*32))
         async def http_control(token, *, action='complete', body=b'', headers=None):
@@ -510,6 +541,7 @@ async def main():
                     state=repo.recovery('owner','attempt')
                     assert state.state=='closed' and state.outcome=='succeeded' and state.receipt is not None
                     assert b'actual coordinator output' in store.read(state.receipt.artifact_key)
+                    assert b'actual imported source' in store.read(state.receipt.artifact_key)
                 finally:
                     server.should_exit=True
                     await asyncio.wait_for(serving,5)
@@ -599,6 +631,7 @@ asyncio.run(main())
                 assert completed.json()['outcome']==state.outcome and completed.json()['receipt']['revision_id']==state.receipt.revision_id
                 assert state.state=='closed' and state.outcome=='succeeded' and state.receipt is not None
                 assert b'actual coordinator output' in store.read(state.receipt.artifact_key)
+                assert b'actual imported source' in store.read(state.receipt.artifact_key)
                 repeated=await http_control(lease.completion_grant)
                 assert repeated.json()==completed.json()
                 with sqlite3.connect(path) as db:

@@ -85,3 +85,5 @@ FR-007 production selection: production runtime MUST require broker mode, config
 FR-007 API acknowledgement: leased runtime success MUST match an owner-scoped durable confirmed successful receipt before the API yields the terminal result. Missing, mismatched or uncommitted runtime receipts must be rejected.
 
 FR-006 workspace identity: new committed projects and race heats MUST obtain an owner-checked durable workspace identity without fabricating artifact or revision evidence. Concurrent retries preserve identity and existing execution/head state; foreign heat membership is denied.
+
+FR-006 initial import: trusted quiescent legacy workspaces must be exported and stored as verified immutable bytes before root registration. Exact replay must preserve identity; changed input must not reset an existing root or head. Import must reject source roots containing control-plane database or artifact storage.

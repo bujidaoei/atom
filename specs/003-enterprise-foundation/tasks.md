@@ -102,3 +102,5 @@ T027 continuation: child 008 production-mode Node server now uses validated brok
 T027 continuation: API runtime transport can now deliver prepared leases and reject unverified terminal receipts using the ledger. Main orchestrator lease creation/adoption and positive whole-API acceptance remain open.
 
 T027 continuation: child 008 now resolves/creates owner-scoped identities for post-migration projects and heats, with concurrent SQLite verification. File import, application wiring and enterprise acceptance remain open.
+
+T027 continuation: child 008 now implements trusted offline real-directory import before revision bootstrap. Application integration, production writer fencing/cutover and enterprise acceptance remain open.
