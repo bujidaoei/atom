@@ -21,6 +21,8 @@ Scoped exception to sequencing, not to acceptance: source-backed credential bind
 
 The same bounded process applies to `005-configuration-guards`, which closes demonstrated missing-credential startup and runtime authorization fallback. Its own readiness, startup/HTTP tests and migration instructions are mandatory; it does not close origin/CSRF/isolation/HA gates.
 
+`006-sandbox-snapshots` implements the researched immutable-transfer component after local isolation/quota probes. Its explicit component readiness, Linux filesystem tests and malformed-stream evidence permit this foundation independently of paid competitor access. Broker, grant validation, runtime integration, fenced registration and crash cleanup remain open; no production isolation claim follows from a serialization component.
+
 ## Project Structure
 - `backend/app`: control plane and current authorization, provider and orchestration paths.
 - `runtime/src`: own runtime adapters; place isolation boundaries here or a dedicated worker adapter without changing `runtime/pi`.

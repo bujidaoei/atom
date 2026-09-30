@@ -37,6 +37,8 @@ Goal: controlled enterprise repository integration. Independent test: role matri
 - [x] T016 [US4] Draft grants, existing-repo onboarding, conflict handling and export guarantees in specs/003-enterprise-foundation/contracts/collaboration.md; proposed design only, independent CO-01…07 tests unexecuted.
 
 ## Final phase: readiness and delivery
+- [x] T026 [US1] Implement and locally verify snapshot component specs/006-sandbox-snapshots/tasks.md. No runtime call site exists yet; this closes only the transfer foundation, not SEC-05.
+- [ ] T027 [US1] Implement broker grant/lifecycle and connect snapshots to existing file tools, with genuine cancel/crash/quiesce/export and fenced revision tests from specs/003-enterprise-foundation/contracts/isolation.md; generate dedicated implementation spec/plan/tasks before coding.
 - [x] T024 [US1] Implement and locally verify specs/005-configuration-guards/tasks.md; no missing-token authorization or signing-secret fallback. Commit 050faba and scoped test evidence recorded; parent production delivery remains T019.
 - [ ] T017 Run Spec Kit cross-artifact analysis and replace staged tasks with concrete implementation/debug/test/acceptance tasks in specs/003-enterprise-foundation/tasks.md.
 - [ ] T018 Implement and validate accepted increments with evidence in specs/003-enterprise-foundation/evidence.md; this umbrella task must be split before coding and cannot close by prose alone.
