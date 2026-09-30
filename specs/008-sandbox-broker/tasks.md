@@ -18,6 +18,8 @@
 - [ ] T011 Run real broker/container/Pi/cancel/crash/security scenarios and relevant product regressions; record measured limits and missing gates in specs/008-sandbox-broker/evidence.md (FR-008/SC-001…004).
 - [ ] T012 Review Spec Kit/code alignment and rollout readiness in specs/008-sandbox-broker/evidence.md; update parent specs/003-enterprise-foundation/tasks.md without closing enterprise release early.
 ## Dependencies
+T009 continuation: broker now has explicit trusted post-registration confirmation, strict verified-export/digest/attempt/version matching and exact idempotent acknowledgement. Generic transition cannot mark checkpointed. Real Linux registration tests cover successful acknowledgement and cancellation between registration and confirmation, preserving registered output in both cases. Production coordinator, HTTP authority, runtime ordering and remaining T009/T010 gates stay open.
+
 T009/T010 continuation: trusted revision repository now implements owner-scoped bootstrap, fenced allocation, cancellation, atomic registration/outbox, exact receipt replay/lookup and separately observed termination. Real SQLite tests and Linux export→storage→registration→confirmed-release integration exercise these components. No production registration endpoint, coordinator, outbox delivery, legacy Run synchronization or preview migration is enabled; both tasks remain open.
 
 T010 continuation: offline API migration v1 is implemented in backend/app/migrations with backup, restore rehearsal, WAL/crash and scoped-constraint tests. Application repositories, workspace import/creation/deletion, revision registration, preview/runtime adoption and live migration acceptance remain open. No live database has been migrated; T010 remains unchecked.

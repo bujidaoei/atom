@@ -4,6 +4,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 import os
 import hashlib
+import io
 import json
 from pathlib import Path
 import re
@@ -16,6 +17,7 @@ from .file_ops import FileOperations
 from .registry import Attempt, Registry, RegistryError
 from .seeding import MAX_SEED_BYTES, SeedOperations
 from .checkpoints import CheckpointExport, CheckpointOperations
+from ..snapshots import MAX_ARCHIVE_BYTES, SnapshotError, verify_snapshot
 
 
 class LifecycleError(RuntimeError):
@@ -222,6 +224,31 @@ class Lifecycle:
                 if not isinstance(error, Exception):
                     raise
                 raise LifecycleError("checkpoint_outcome_unknown") from None
+
+    def confirm_checkpoint(self, grant: Grant, exported: CheckpointExport, *, registered_revision: str) -> Attempt:
+        """Trusted coordinator only, after a durable registration receipt.
+
+        The matching digest is an assertion by the coordinator, not a capability
+        available to runtime. This method neither commits API state nor releases.
+        """
+        if (not isinstance(exported, CheckpointExport) or not isinstance(exported.payload, bytes)
+                or len(exported.payload) > MAX_ARCHIVE_BYTES
+                or type(exported.attempt_version) is not int or exported.attempt_version < 1
+                or not isinstance(registered_revision, str) or exported.revision != registered_revision):
+            raise LifecycleError("invalid_checkpoint_acknowledgement")
+        with self._exclusive():
+            if not self.ready:
+                raise LifecycleError("broker_not_ready")
+            attempt = self.registry.find_grant(grant.jti)
+            if attempt is None or attempt.id != exported.attempt_id or attempt.grant_fingerprint != grant.fingerprint():
+                raise LifecycleError("checkpoint_scope_mismatch")
+            try:
+                verified = verify_snapshot(io.BytesIO(exported.payload))
+            except SnapshotError:
+                raise LifecycleError("invalid_checkpoint_acknowledgement") from None
+            if verified.revision != registered_revision:
+                raise LifecycleError("invalid_checkpoint_acknowledgement")
+            return self.registry.confirm_checkpoint(grant, exported.attempt_version, registered_revision)
 
     def revoke(self, grant_id: str) -> Attempt | None:
         # Persist cancellation even if a bounded control operation currently holds the lock.

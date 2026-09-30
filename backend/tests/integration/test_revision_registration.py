@@ -6,6 +6,7 @@ from pathlib import Path
 import sqlite3
 import struct
 import time
+from dataclasses import replace
 
 import pytest
 from sqlalchemy import create_engine
@@ -14,14 +15,15 @@ from sqlalchemy.orm import Session
 from app.models import Base, User, Project, Run
 from app.sandbox.docker_driver import DockerDriver, run_bounded
 from app.sandbox.grants import Grant
-from app.sandbox.lifecycle import Lifecycle
-from app.sandbox.registry import Registry
+from app.sandbox.lifecycle import Lifecycle, LifecycleError
+from app.sandbox.registry import Registry, RegistryError
 
 IMAGE = os.environ.get('ATOM_TEST_DOCKER_IMAGE')
 pytestmark = pytest.mark.skipif(not IMAGE, reason='requires explicit pinned local Docker test image')
 
 
-def test_real_export_storage_registration_then_confirmed_release(tmp_path):
+@pytest.mark.parametrize('cancel_before_ack', [False, True])
+def test_real_export_storage_registration_then_confirmed_release(tmp_path, cancel_before_ack):
     root = Path(__file__).resolve().parents[3]
     path = tmp_path / 'api.db'
     engine = create_engine('sqlite:///' + path.as_posix())
@@ -103,15 +105,33 @@ print(receipt.snapshot_revision)
 ''')
         assert registered == exported.revision
         assert registry.find(worker.id).state == 'quiescing'
+        for changed, digest in [(exported, '0'*64), (replace(exported,payload=exported.payload[:-1]),registered),
+                                (replace(exported,attempt_id='other'),registered),
+                                (replace(exported,attempt_version=exported.attempt_version+1),registered)]:
+            with pytest.raises((LifecycleError, RegistryError)):
+                lifecycle.confirm_checkpoint(grant,changed,registered_revision=digest)
+            assert registry.find(worker.id).state == 'quiescing'
+        if cancel_before_ack:
+            lifecycle.revoke(grant.jti)
+            with pytest.raises(RegistryError, match='grant_revoked'):
+                lifecycle.confirm_checkpoint(grant,exported,registered_revision=registered)
+            assert registry.find(worker.id).checkpoint_revision is None
+        else:
+            confirmed = lifecycle.confirm_checkpoint(grant,exported,registered_revision=registered)
+            assert confirmed.state == 'checkpointed' and confirmed.checkpoint_revision == registered
+            assert lifecycle.confirm_checkpoint(grant,exported,registered_revision=registered) == confirmed
+            assert driver.inspect(worker).running
         lifecycle.release(grant,worker.id)
         assert registry.find(worker.id).state == 'terminated'
         assert driver.inspect(worker) is None
-        assert execute('''
+        outcome = 'cancelled' if cancel_before_ack else 'succeeded'
+        assert execute('outcome=' + repr(outcome) + '\n' + '''
 repo=app.revisions.RevisionRepository(path)
-repo.observe_termination('owner','attempt',confirmed=True,outcome='succeeded')
+repo.observe_termination('owner','attempt',confirmed=True,outcome=outcome)
 with sqlite3.connect(path) as db:
     assert db.execute('SELECT active_attempt_id FROM revision_workspaces').fetchone()==(None,)
-    assert db.execute('SELECT state,termination_state,outcome FROM revision_attempts').fetchone()==('closed','confirmed','succeeded')
+    assert db.execute('SELECT state,termination_state,outcome FROM revision_attempts').fetchone()==('closed','confirmed',outcome)
+    assert db.execute('SELECT COUNT(*) FROM revision_receipts').fetchone()==(1,)
     assert not db.execute('PRAGMA foreign_key_check').fetchall()
 print('confirmed')
 ''') == 'confirmed'

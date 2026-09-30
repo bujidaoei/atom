@@ -18,7 +18,7 @@ import uuid
 from .grants import Grant
 
 _REVISION = re.compile(r"[0-9a-f]{64}\Z")
-_EDGES = {"intent": "provisioning", "provisioning": "ready", "ready": "quiescing", "quiescing": "checkpointed"}
+_EDGES = {"intent": "provisioning", "provisioning": "ready", "ready": "quiescing"}
 _SCHEMA_V1 = {
     "broker_meta": """CREATE TABLE broker_meta (
         singleton INTEGER PRIMARY KEY CHECK(singleton=1), broker_id TEXT NOT NULL)""",
@@ -252,13 +252,29 @@ class Registry:
             self._version(attempt, expected_version)
             if not isinstance(target, str) or _EDGES.get(attempt.state) != target:
                 raise RegistryError("invalid_transition")
-            if target == "checkpointed":
-                if not isinstance(revision, str) or not _REVISION.fullmatch(revision):
-                    raise RegistryError("invalid_revision")
-            elif revision is not None:
+            if revision is not None:
                 raise RegistryError("invalid_revision")
             db.execute("UPDATE attempts SET state=?,version=version+1,checkpoint_revision=?,updated_at=? WHERE id=?",
                        (target, revision, self._clock(), attempt.id))
+            return self._by_id(db, attempt.id)
+
+    def confirm_checkpoint(self, grant: Grant, export_version: int, revision: str) -> Attempt:
+        """Trusted post-registration acknowledgement; never runtime authority."""
+        if type(export_version) is not int or export_version < 1:
+            raise RegistryError("version_conflict")
+        if not isinstance(revision, str) or not _REVISION.fullmatch(revision):
+            raise RegistryError("invalid_revision")
+        with self._transaction() as db:
+            attempt = self._owned(db, grant)
+            if attempt.state == "checkpointed":
+                if attempt.version != export_version + 1 or attempt.checkpoint_revision != revision:
+                    raise RegistryError("checkpoint_conflict")
+                return attempt
+            self._version(attempt, export_version)
+            if attempt.state != "quiescing":
+                raise RegistryError("invalid_transition")
+            db.execute("UPDATE attempts SET state='checkpointed',version=version+1,checkpoint_revision=?,updated_at=? WHERE id=?",
+                       (revision, self._clock(), attempt.id))
             return self._by_id(db, attempt.id)
 
     def _terminate(self, db: sqlite3.Connection, attempt: Attempt) -> Attempt:

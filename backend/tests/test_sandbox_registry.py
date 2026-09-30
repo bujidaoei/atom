@@ -6,6 +6,7 @@ import sqlite3
 import subprocess
 import sys
 import time
+import threading
 
 import pytest
 
@@ -28,6 +29,66 @@ def ready(registry, grant):
     attempt = registry.admit(grant)
     attempt = registry.transition(grant, attempt.version, "provisioning")
     return registry.transition(grant, attempt.version, "ready")
+
+
+def test_checkpoint_confirmation_is_exact_idempotent_and_current(registry, grant):
+    attempt = ready(registry, grant)
+    with pytest.raises(RegistryError):
+        registry.confirm_checkpoint(grant, attempt.version, 'b'*64)
+    attempt = registry.transition(grant, attempt.version, 'quiescing')
+    with pytest.raises(RegistryError):
+        registry.transition(grant, attempt.version, 'checkpointed', revision='b'*64)
+    confirmed = registry.confirm_checkpoint(grant, attempt.version, 'b'*64)
+    assert confirmed.state == 'checkpointed' and confirmed.version == attempt.version + 1
+    assert registry.confirm_checkpoint(grant, attempt.version, 'b'*64) == confirmed
+    for version, revision in [(confirmed.version,'b'*64),(attempt.version,'c'*64),(True,'b'*64)]:
+        with pytest.raises(RegistryError):
+            registry.confirm_checkpoint(grant, version, revision)
+    registry.revoke(grant.jti)
+    with pytest.raises(RegistryError, match='grant_revoked'):
+        registry.confirm_checkpoint(grant, attempt.version, 'b'*64)
+    assert registry.find(confirmed.id).checkpoint_revision == 'b'*64
+
+
+def test_checkpoint_ack_concurrency_restart_and_expiry(registry, grant):
+    attempt = ready(registry, grant)
+    attempt = registry.transition(grant, attempt.version, 'quiescing')
+    expired = Registry(registry.path, clock=lambda: grant.exp)
+    with pytest.raises(RegistryError, match='grant_expired'):
+        expired.confirm_checkpoint(grant, attempt.version, 'b'*64)
+    assert registry.find(attempt.id).state == 'quiescing'
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        results = list(pool.map(lambda _: registry.confirm_checkpoint(grant, attempt.version, 'b'*64), range(8)))
+    assert all(item == results[0] for item in results)
+    reopened = Registry(registry.path, clock=lambda: 1000)
+    assert reopened.confirm_checkpoint(grant, attempt.version, 'b'*64) == results[0]
+    with pytest.raises(RegistryError, match='grant_expired'):
+        expired.confirm_checkpoint(grant, attempt.version, 'b'*64)
+
+
+def test_checkpoint_ack_and_revoke_serialize_without_late_promotion(registry, grant):
+    attempt = ready(registry, grant)
+    attempt = registry.transition(grant, attempt.version, 'quiescing')
+    barrier = threading.Barrier(2)
+    def acknowledge():
+        barrier.wait(timeout=5)
+        try:
+            return registry.confirm_checkpoint(grant, attempt.version, 'b'*64)
+        except RegistryError as error:
+            assert error.code == 'grant_revoked'
+            return None
+    def revoke():
+        barrier.wait(timeout=5)
+        registry.revoke(grant.jti)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        ack, cancellation = pool.submit(acknowledge), pool.submit(revoke)
+        result = ack.result(timeout=10)
+        cancellation.result(timeout=10)
+    current = registry.find(attempt.id)
+    assert current.state == 'terminating'
+    assert current.checkpoint_revision == ('b'*64 if result else None)
+    with pytest.raises(RegistryError, match='grant_revoked'):
+        registry.confirm_checkpoint(grant, attempt.version, 'b'*64)
 
 
 def test_reopen_and_idempotent_admission(registry, grant):
@@ -83,8 +144,8 @@ def test_state_version_checkpoint_and_termination(registry, grant):
         registry.transition(grant, active.version, "checkpointed", revision="b" * 64)
     quiescent = registry.transition(grant, active.version, "quiescing")
     with pytest.raises(RegistryError, match="invalid_revision"):
-        registry.transition(grant, quiescent.version, "checkpointed")
-    checkpoint = registry.transition(grant, quiescent.version, "checkpointed", revision="b" * 64)
+        registry.confirm_checkpoint(grant, quiescent.version, None)
+    checkpoint = registry.confirm_checkpoint(grant, quiescent.version, "b" * 64)
     assert checkpoint.checkpoint_revision == "b" * 64
     with pytest.raises(RegistryError, match="invalid_transition"):
         registry.transition(grant, checkpoint.version, None)
