@@ -111,3 +111,5 @@ FR-006/FR-008 refinement: enterprise acceptance must bind exact artifact, contra
 FR-006 next-version migration prerequisite: verified backups must retain the exact supported source schema (baseline or v1), include committed WAL, exclude concurrent writers during capture, and refuse overwrite/drift. Backup verification must explicitly select the expected version rather than accepting any version.
 
 FR-006 migration extension: explicit target v2 may add verification/release identity tables while preserving exact v1 business and journal records. Original evidence is not backfilled or promoted. Runtime startup remains v1-only until repositories, verifier and application adoption pass their gates.
+
+Verification contract identity includes ordered requirements/checks/setup, title/detail, selectors and exact input/expected text. Strict versioned encoding rejects unknown fields, duplicate keys and invalid Unicode; it must not silently repair or discard checks. Complete results require exact unique check identities and actual booleans.

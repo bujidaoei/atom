@@ -100,3 +100,5 @@ T010/T011/T012 remain open; unfinished cancellation/recovery and parent enterpri
 T015 continuation: implemented writer-excluded baseline/v1 backup and explicit version verification. Real SQLite WAL/restore/overwrite/contention/drift tests and Linux container backup/restore pass. v2 journal and revision provenance constraints still need deliberate migration; T015 remains unchecked.
 
 T015 continuation: explicit offline baseline/v1 to v2 migration, journal preservation, backup/replay/downgrade handling and structural evidence/release tables implemented. Real constraint, rollback and process-exit tests plus Linux crash/retry pass. Adoption provenance and complete verifier identity/application migration remain open, so T015 stays unchecked.
+
+T016 continuation: strict versioned contract/report codec implemented with real encoding/validation tests. No repository publication or verifier authority added. T015 complete provenance/adoption and T016 transactional repository behavior remain open; no checkbox closure.
