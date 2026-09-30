@@ -115,6 +115,10 @@ class BrokerClient:
         except (GrantError, TypeError, AttributeError):
             raise BrokerClientError('invalid_broker_request') from None
 
+    def runtime_token(self, grant: Grant) -> str:
+        """Issue scoped bearer authority for a trusted coordinator's ready lease."""
+        return self._token(grant)
+
     async def _request(self, route, payload, *, headers=None, expected=200,
                        media='application/json', limit=16384):
         if self._http.is_closed:

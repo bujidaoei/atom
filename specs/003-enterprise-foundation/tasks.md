@@ -80,3 +80,5 @@ T027 continuation: child 008 replaces post-provision allocation with durable res
 T027 continuation: child 008 now exposes owner-scoped cleanup observations separately from execution authority; cancellation returns its committed recovery identity. Real SQLite and Linux/HTTP tests verify restart and receipt preservation. Production coordinator, runtime server selection and release acceptance remain open.
 
 T027 continuation: child 008 now has an actual cancellation coordinator connecting API intent to broker revocation and confirmed closure, with 41 affected tests passing including real Docker/HTTP and transport fault cases. Production provisioning/completion coordination, scheduled reconciliation, runtime adoption and enterprise acceptance remain open.
+
+T027 continuation: child 008 now prepares actual sandbox leases from reserved intent and immutable stored inputs; real Linux coordinator/store/database and HTTP broker integration passes. Runtime server adoption, successful completion, durable scheduling/ownership and enterprise release remain open.

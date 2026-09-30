@@ -28,6 +28,8 @@ Duplicate creates, same identity/different grant, lost create response, worker o
 - FR-007: Own runtime and existing file tools MUST use the broker; production MUST fail closed without it. Explicit development local mode remains visibly non-isolated.
 - FR-008: Real integration, fault injection and deployment migration evidence MUST precede acceptance. No component test may close whole feature.
 
+FR-007 lease preparation: a ready runtime lease MUST derive from a persisted reservation and verified immutable base, bind the actual broker identity, and pass a fresh dispatch check. Ready replay must not reseed; preparation failure must never return a lease or imply successful completion.
+
 FR-005 cancellation ordering: committed API cancellation MUST precede administrative revocation; confirmed closure MUST follow verified broker termination. Transport uncertainty or caller cancellation must not release the active slot. Concurrent already-closed outcomes and receipts remain unchanged.
 
 FR-005 recovery visibility: trusted owner-checked cleanup reads MUST remain available after cancellation, expiry, registration and closure without granting dispatch, releasing ownership or changing any persisted outcome. Cancellation returns committed cleanup identity; closed-attempt retries preserve successor state.

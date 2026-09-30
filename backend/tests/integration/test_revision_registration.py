@@ -11,6 +11,10 @@ import time
 import secrets
 import socket
 import threading
+import importlib.util
+import io
+import zipfile
+import uuid
 from dataclasses import replace
 
 import pytest
@@ -53,7 +57,7 @@ def running_broker(path):
             client = BrokerClient(f'http://127.0.0.1:{listener.getsockname()[1]}',config.admin_token,
                                   GrantCodec(config.grant_key.encode()))
             try:
-                yield app.state.lifecycle, client, runner
+                yield app.state.lifecycle, client, runner, config
             finally:
                 runner.run(client.__aexit__())
     finally:
@@ -89,7 +93,7 @@ def test_coordinator_cancels_actual_broker_and_releases_only_its_slot(tmp_path, 
     seed = b'ATOMSNAP1\n' + struct.pack('>I',len(manifest)) + manifest
     registry = Registry(tmp_path / 'broker.db')
     driver = DockerDriver(registry.broker_id,IMAGE)
-    with running_broker(registry.path) as (lifecycle, client, runner):
+    with running_broker(registry.path) as (lifecycle, client, runner, config):
         now = int(time.time())
         ledger_grant = Grant('storage','owner','storage','storage','storage',1,
                              hashlib.sha256(manifest).hexdigest(),now,now+180)
@@ -184,7 +188,7 @@ path=Path('/workspace/api.db');store_path=Path('/workspace/artifacts')
     manifest = b'{"files":[],"version":1}'
     seed = b'ATOMSNAP1\n' + struct.pack('>I',len(manifest)) + manifest
     now = int(time.time())
-    with running_broker(registry.path) as (lifecycle, client, runner):
+    with running_broker(registry.path) as (lifecycle, client, runner, config):
         ledger_grant = Grant('ledger-g','o','ledger-p','ledger-r','ledger-a',1,hashlib.sha256(manifest).hexdigest(),now,now+180)
         ledger = driver.inspect(lifecycle.provision(ledger_grant))
         parameters = {'sources':sources,'schema':schema,'seed':base64.b64encode(seed).decode(),
@@ -354,3 +358,141 @@ with sqlite3.connect(path) as db:
 print('confirmed')
 ''') == 'confirmed'
     assert not driver.owned_inventory()
+
+
+def coordinator_source_bundle():
+    """Only installed pure-Python runtime dependencies, never environment files."""
+    root = Path(__file__).resolve().parents[3]
+    result = io.BytesIO()
+    with zipfile.ZipFile(result,'w',zipfile.ZIP_DEFLATED) as bundle:
+        for package in ('httpx','httpcore','anyio','certifi','idna','h11','jwt'):
+            directory = Path(importlib.util.find_spec(package).origin).parent
+            for path in directory.rglob('*'):
+                if path.is_file() and (path.suffix == '.py' or path.name == 'cacert.pem'):
+                    bundle.write(path,package+'/'+path.relative_to(directory).as_posix())
+        bundle.write(importlib.util.find_spec('typing_extensions').origin,'typing_extensions.py')
+        for name in ('__init__','execution','artifacts','snapshots','revisions','migrations/__init__',
+                     'migrations/revision_v1','sandbox/__init__','sandbox/client','sandbox/checkpoints',
+                     'sandbox/docker_driver','sandbox/registry','sandbox/grants'):
+            bundle.write(root / f'backend/app/{name}.py',f'app/{name}.py')
+    return base64.b64encode(result.getvalue()).decode()
+
+
+@pytest.mark.parametrize('failure', ['none','missing','cancel'])
+def test_prepare_coordinator_with_real_linux_store_and_http(tmp_path, failure):
+    path = tmp_path / 'api.db'
+    create_api_database(path)
+    with sqlite3.connect(path) as db:
+        schema = '\n'.join(db.iterdump())
+    name = 'atom-coordinator-test-' + uuid.uuid4().hex
+    script = r"""
+import asyncio,base64,io,json,sqlite3,sys,time,zipfile
+from pathlib import Path
+inputs=json.loads(sys.stdin.buffer.read())
+code=Path('/tmp/code');code.mkdir(mode=0o700)
+with zipfile.ZipFile(io.BytesIO(base64.b64decode(inputs['bundle']))) as z: z.extractall(code)
+sys.path.insert(0,str(code))
+from app.artifacts import ArtifactStore,ArtifactError
+from app.revisions import RevisionRepository,RevisionError
+from app.migrations import migrate
+from app.execution import ExecutionCoordinator
+from app.sandbox.client import BrokerClient
+from app.sandbox.grants import GrantCodec
+import httpx,struct
+async def main():
+    async def relay(reader,writer):
+        upstream=None
+        tasks=[]
+        try:
+            other,upstream=await asyncio.open_connection('host.docker.internal',inputs['port'])
+            async def copy(source,destination):
+                while chunk:=await source.read(65536):
+                    destination.write(chunk);await destination.drain()
+            tasks=[asyncio.create_task(copy(reader,upstream)),asyncio.create_task(copy(other,writer))]
+            await asyncio.wait(tasks,return_when=asyncio.FIRST_COMPLETED)
+        finally:
+            for task in tasks: task.cancel()
+            await asyncio.gather(*tasks,return_exceptions=True)
+            writer.close()
+            if upstream is not None: upstream.close()
+    proxy=await asyncio.start_server(relay,'127.0.0.1',0)
+    origin='http://127.0.0.1:'+str(proxy.sockets[0].getsockname()[1])
+    path=Path('/workspace/api.db')
+    with sqlite3.connect(path) as db: db.executescript(inputs['schema'])
+    migrate(path,Path('/workspace/backup.db'))
+    repo=RevisionRepository(path)
+    with sqlite3.connect(path) as db: workspace=db.execute('SELECT id FROM revision_workspaces').fetchone()[0]
+    store_path=Path('/workspace/artifacts');store_path.mkdir(mode=0o700)
+    store=ArtifactStore(store_path)
+    manifest=b'{"files":[],"version":1}'
+    payload=b'ATOMSNAP1\n'+struct.pack('>I',len(manifest))+manifest
+    base=store.put(payload)
+    repo.bootstrap('owner',workspace,base)
+    intent=repo.reserve('owner',workspace,'run','attempt','target',int(time.time())+120)
+    # Cross-system test clock boundary; production checks remain strict.
+    await asyncio.sleep(2)
+    if inputs['failure']=='missing': next(store_path.glob('*.atomsnap')).unlink()
+    async with BrokerClient(origin,inputs['admin'],GrantCodec(inputs['key'].encode())) as client:
+        coordinator=ExecutionCoordinator(repo,client)
+        try: await coordinator.prepare('stranger','attempt',store)
+        except RevisionError: pass
+        else: raise AssertionError('unauthorized preparation')
+        if inputs['failure']=='cancel':
+            import fcntl,os
+            lock=os.open(store_path,os.O_RDONLY|os.O_DIRECTORY)
+            fcntl.flock(lock,fcntl.LOCK_EX)
+            try:
+                task=asyncio.create_task(coordinator.prepare('owner','attempt',store))
+                await asyncio.sleep(0.15)
+                assert not task.done()
+                task.cancel()
+                try: await task
+                except asyncio.CancelledError: pass
+                else: raise AssertionError('cancelled preparation returned a lease')
+            finally:
+                fcntl.flock(lock,fcntl.LOCK_UN);os.close(lock)
+            state=repo.recovery('owner','attempt')
+            assert state.state=='closed' and state.outcome=='cancelled' and state.broker_attempt_id is None
+        elif inputs['failure']=='missing':
+            try: await coordinator.prepare('owner','attempt',store)
+            except ArtifactError: pass
+            else: raise AssertionError('missing base accepted')
+            state=repo.recovery('owner','attempt')
+            assert state.state=='closed' and state.outcome=='failed'
+            assert state.broker_attempt_id is None
+        else:
+            leases=await asyncio.gather(coordinator.prepare('owner','attempt',store),
+                                       coordinator.prepare('owner','attempt',store))
+            lease=leases[0]
+            assert leases[1]==lease and lease.grant not in repr(lease)
+            assert lease.run_id=='run' and lease.workspace_id==workspace and lease.deadline==intent.deadline
+            assert repo.execution('owner','attempt').broker_attempt_id==lease.attempt_id
+            async with httpx.AsyncClient(trust_env=False) as runtime:
+                response=await runtime.get(origin+'/v1/attempts/'+lease.attempt_id,
+                    headers={'Authorization':'Bearer '+lease.grant})
+                assert response.status_code==200 and response.json()['state']=='ready'
+            state=await coordinator.cancel('owner','attempt')
+            assert state.state=='closed' and state.outcome=='cancelled'
+    proxy.close();await proxy.wait_closed()
+    print(json.dumps({'state':state.state,'outcome':state.outcome}))
+asyncio.run(main())
+"""
+    with running_broker(tmp_path / 'broker.db') as (lifecycle,client,runner,config):
+        data={'bundle':coordinator_source_bundle(),'schema':schema,'failure':failure,
+              'port':int(client._origin.rsplit(':',1)[1]),'admin':config.admin_token,'key':config.grant_key}
+        try:
+            status,out,err=run_bounded(['docker','run','--rm','--name',name,'--label',f'atom.coordinator-test={name}',
+                '--network=bridge','--read-only','--cap-drop=ALL','--security-opt=no-new-privileges',
+                '--user','1000:1000','--memory=256m','--pids-limit=64',
+                '--tmpfs','/tmp:rw,nosuid,nodev,size=64m,mode=1777',
+                '--tmpfs','/workspace:rw,nosuid,nodev,size=64m,mode=1777',
+                '-i',IMAGE,'python3','-I','-c',script],input_data=json.dumps(data).encode(),timeout=30)
+            assert status==0,err.decode()
+            assert json.loads(out)['state']=='closed'
+            worker=lifecycle.registry.find_grant('target')
+            if failure != 'none': assert worker is None
+            else: assert worker.state=='terminated' and lifecycle.driver.inspect(worker) is None
+        finally:
+            # Exact unique infrastructure name; never touch unrelated containers.
+            run_bounded(['docker','rm','-f',name])
+    assert not lifecycle.driver.owned_inventory()
