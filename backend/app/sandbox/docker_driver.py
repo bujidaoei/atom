@@ -99,7 +99,7 @@ def run_bounded(args: list[str], *, timeout: float = 15, output_limit: int = 256
         raise DriverError("invalid_driver_timeout")
     if type(output_limit) is not int or not 1 <= output_limit <= 12 * 1024 * 1024:
         raise DriverError("invalid_driver_output_limit")
-    if input_data is not None and (not isinstance(input_data, bytes) or len(input_data) > 50 * 1024 * 1024):
+    if input_data is not None and (not isinstance(input_data, bytes) or len(input_data) > 65 * 1024 * 1024 + 13):
         raise DriverError("invalid_driver_input")
     return asyncio.run(_bounded(args, timeout, output_limit, input_data))
 

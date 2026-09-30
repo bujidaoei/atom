@@ -54,3 +54,5 @@ Goal: controlled enterprise repository integration. Independent test: role matri
 T001→T002; T003/T004 can run independently. T003…T007 inform T008/T009. Story design T010…T016 follows foundational contracts; tests remain independent per story. T017 is required before T018 is split and implemented. T019 requires real release gates, backup and rollback evidence. Research UI/document work can continue while credit allowance is pending. No task may be marked accepted solely because a file exists, the agent said done, or fake data rendered.
 
 T027 continuation: child 008 durable operation receipts and real write/retry/crash/revoke component tests pass; HTTP/Pi integration and snapshot-seeded ready lifecycle remain open. Full backend evidence is recorded in child evidence.md; enterprise release is not accepted.
+
+T027 continuation: child 008 can now seed actual provisioning workers from verified input snapshots and commit ready, with eleven real-container cases. HTTP/runtime integration and output checkpoint registration remain unimplemented; T027 stays open.

@@ -18,6 +18,8 @@
 - [ ] T011 Run real broker/container/Pi/cancel/crash/security scenarios and relevant product regressions; record measured limits and missing gates in specs/008-sandbox-broker/evidence.md (FR-008/SC-001…004).
 - [ ] T012 Review Spec Kit/code alignment and rollout readiness in specs/008-sandbox-broker/evidence.md; update parent specs/003-enterprise-foundation/tasks.md without closing enterprise release early.
 ## Dependencies
+T009 seed prerequisite is now implemented internally in backend/app/sandbox/seeding.py and lifecycle.py, with real-container tests in backend/tests/integration/test_sandbox_seeding.py. This allows verified provisioning→ready without test-only transitions. Output checkpoint export, conditional registration and runtime recovery integration remain open; T009 is not complete. Seed precedes T008's actual file execution path; output registration still follows T008/T009 integration.
+
 T006/T007 continuation: durable schema-v3 operation receipts and trusted lifecycle dispatch implemented; real retry, post-write commit failure, process death and concurrent revocation scenarios added. HTTP operation admission, production snapshot seeding, actual Pi-through-broker and full deadline acceptance remain open. Tests explicitly promote component fixtures to ready; this is not an implemented seed workflow.
 
 T001→T002→T003; T003/T004/T005→T006; T005/T007→T008; T006/T008→T009→T010→T011→T012. Shared lifecycle edits sequential. Component tests do not close user stories. Resolve concrete HTTP/registry/migration contracts within relevant tasks before their code, preserving completed invariants.

@@ -1,4 +1,4 @@
-"""Durable lifecycle coordination; service scheduling and file operations follow."""
+"""Durable ownership, verified input, file-operation receipts and cleanup."""
 from __future__ import annotations
 
 from contextlib import contextmanager
@@ -14,6 +14,7 @@ from .grants import Grant
 from .file_helper import FileError, validate
 from .file_ops import FileOperations
 from .registry import Attempt, Registry, RegistryError
+from .seeding import MAX_SEED_BYTES, SeedOperations
 
 
 class LifecycleError(RuntimeError):
@@ -182,6 +183,25 @@ class Lifecycle:
                 except (DriverError, RegistryError, LifecycleError):
                     self._ready = False
                 raise LifecycleError("provision_failed") from None
+
+    def seed(self, grant: Grant, payload: bytes) -> Attempt:
+        """Admit execution only after exact verified input and a durable ready commit."""
+        if not isinstance(payload, bytes) or len(payload) > MAX_SEED_BYTES:
+            raise LifecycleError("invalid_seed_input")
+        with self._exclusive():
+            if not self.ready:
+                raise LifecycleError("broker_not_ready")
+            attempt = self.registry.admit(grant)
+            if attempt.state != "provisioning":
+                raise LifecycleError("attempt_not_provisioning")
+            try:
+                SeedOperations(self.driver).execute(attempt, payload)
+                return self.registry.transition(grant, attempt.version, "ready")
+            except BaseException as error:
+                self._retire_operation(attempt)
+                if not isinstance(error, Exception):
+                    raise
+                raise LifecycleError("seed_outcome_unknown") from None
 
     def revoke(self, grant_id: str) -> Attempt | None:
         # Persist cancellation even if a bounded control operation currently holds the lock.
