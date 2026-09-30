@@ -164,6 +164,31 @@ class RevisionRepository:
             db.execute('INSERT INTO revision_artifacts VALUES (?,?,?,?)',
                        (artifact.key, artifact.revision, artifact.size, int(time.time())))
 
+    def ensure_workspace(self, owner: str, project_id: str, heat_id: str | None = None) -> str:
+        """Resolve a committed project scope without inventing an initial revision."""
+        _identifiers(owner, project_id)
+        if heat_id is not None:
+            _identifiers(heat_id)
+        with self._transaction() as db:
+            project = db.execute('SELECT id FROM projects WHERE id=? AND user_id=?',
+                                 (project_id, owner)).fetchone()
+            if project is None:
+                raise RevisionError('revision_not_found')
+            if heat_id is not None:
+                heat = db.execute('''SELECT h.id FROM race_heats h
+                    JOIN races r ON r.id=h.race_id WHERE h.id=? AND r.project_id=?''',
+                                  (heat_id, project_id)).fetchone()
+                if heat is None:
+                    raise RevisionError('revision_not_found')
+            existing = db.execute('SELECT id FROM revision_workspaces WHERE project_id=? AND heat_id IS ?',
+                                  (project_id, heat_id)).fetchone()
+            if existing is not None:
+                return existing['id']
+            identity = uuid.uuid4().hex
+            db.execute('INSERT INTO revision_workspaces(id,project_id,heat_id) VALUES (?,?,?)',
+                       (identity, project_id, heat_id))
+            return identity
+
     def bootstrap(self, owner: str, workspace_id: str, artifact: Artifact) -> str:
         _identifiers(owner, workspace_id)
         _artifact(artifact)

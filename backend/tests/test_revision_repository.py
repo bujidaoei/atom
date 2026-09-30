@@ -55,6 +55,67 @@ def allocate(repo, workspace, *, attempt='attempt', run='run', deadline=None):
     return repo.bind('owner',attempt,'broker-' + attempt)
 
 
+def test_workspace_identity_after_migration_is_concurrent_and_empty(repository):
+    repo, path, main, heat = repository
+    engine = create_engine('sqlite:///' + path.as_posix())
+    with Session(engine) as s:
+        s.add(Project(id='new', user_id='owner', prompt='fixture', title='New'))
+        s.flush()
+        s.add(Race(id='new-race', project_id='new'))
+        s.flush()
+        s.add(RaceHeat(id='new-heat', race_id='new-race', model='fixture'))
+        s.commit()
+    engine.dispose()
+    for heat_id in (None, 'new-heat'):
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            identities = list(pool.map(lambda _: repo.ensure_workspace('owner', 'new', heat_id), range(8)))
+        assert len(set(identities)) == 1
+        with sqlite3.connect(path) as db:
+            row = db.execute('SELECT project_id,heat_id,current_revision_id,generation,active_attempt_id '
+                             'FROM revision_workspaces WHERE id=?', (identities[0],)).fetchone()
+            assert row == ('new', heat_id, None, 0, None)
+            assert db.execute('SELECT count(*) FROM revision_records').fetchone()[0] == 0
+            assert db.execute('SELECT count(*) FROM revision_artifacts').fetchone()[0] == 0
+
+
+def test_workspace_identity_replay_preserves_active_head(repository):
+    repo, path, main, heat = repository
+    root = repo.bootstrap('owner', main, BASE)
+    attempt = allocate(repo, main)
+    assert repo.ensure_workspace('owner', 'p') == main
+    assert repo.ensure_workspace('owner', 'p', 'heat') == heat
+    with sqlite3.connect(path) as db:
+        assert db.execute('SELECT current_revision_id,generation,active_attempt_id FROM revision_workspaces '
+                          'WHERE id=?', (main,)).fetchone() == (root, attempt.generation, attempt.id)
+
+
+@pytest.mark.parametrize('owner,project,heat', [
+    ('foreign', 'p', None), ('owner', 'missing', None), ('owner', 'p', 'missing'),
+    ('owner', 'p', ''), ('owner', '../p', None),
+])
+def test_workspace_identity_denies_invalid_scope_without_effects(repository, owner, project, heat):
+    repo, path, main, existing_heat = repository
+    with sqlite3.connect(path) as db:
+        before = db.execute('SELECT * FROM revision_workspaces ORDER BY id').fetchall()
+    with pytest.raises(RevisionError):
+        repo.ensure_workspace(owner, project, heat)
+    with sqlite3.connect(path) as db:
+        assert db.execute('SELECT * FROM revision_workspaces ORDER BY id').fetchall() == before
+
+
+def test_workspace_identity_rejects_heat_from_another_project(repository):
+    repo, path, main, heat = repository
+    engine = create_engine('sqlite:///' + path.as_posix())
+    with Session(engine) as s:
+        s.add(Project(id='other', user_id='owner', prompt='fixture', title='Other'))
+        s.commit()
+    engine.dispose()
+    with pytest.raises(RevisionError, match='revision_not_found'):
+        repo.ensure_workspace('owner', 'other', 'heat')
+    with sqlite3.connect(path) as db:
+        assert db.execute("SELECT count(*) FROM revision_workspaces WHERE project_id='other'").fetchone()[0] == 0
+
+
 @pytest.mark.parametrize('state', ['reserved', 'cancelled', 'expired', 'registered', 'unknown', 'closed'])
 def test_recovery_remains_readable_without_dispatch_or_database_effects(repository, monkeypatch, state):
     repo, path, main, heat = repository

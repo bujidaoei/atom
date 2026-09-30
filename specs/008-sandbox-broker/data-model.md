@@ -46,3 +46,5 @@ ExternalSandboxScope is trusted transient run/workspace/sandbox identity, constr
 Authenticated RunBody may contain a trusted ready lease combining BrokerLease and ExecutionBinding. Broker mode requires runId equality and both client validators; API receipt is returned on the final result as revisionReceipt. Endpoint origins come from process configuration, never request-supplied routing. No database schema changes.
 
 RuntimeClient leased calls carry explicit repository/owner alongside ExecutionLease internally; these are never sent as runtime-selected authority. Terminal NDJSON revisionReceipt must equal the persisted owner-scoped Receipt, with closed/confirmed/succeeded status and matching workspace/broker/grant. No schema changes.
+
+Workspace identity creation: the repository may insert revision_workspaces for a committed owner-scoped project/heat after migration. It preserves the v1 defaults (null head/active attempt, generation zero), enforces heat membership through races and reuses existing identity under a write transaction. This is not a revision or acceptance record.
