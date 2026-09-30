@@ -50,4 +50,6 @@ Grant, broker attempt registry, operation receipt, immutable snapshot, registere
 - SC-004: Cancellation/timeout and orphan reconciliation are measured against configured deadlines; unknown outcomes are visible and prevent unsafe replacement.
 
 ## Assumptions
+FR-006 migration prerequisite: reject unsupported API schema drift, preserve existing business rows, create a verified exclusive backup before transactional changes, and recover interrupted DDL. New scoped workspace heads start empty; legacy status cannot invent verified artifacts, accepted revisions or terminated attempts. Offline migration alone does not satisfy revision registration or application adoption.
+
 Initial deployment is a single trusted private-team Docker host, not a hostile public multi-tenant isolation claim or HA milestone. Broker-local registry is separate from future PostgreSQL control-plane execution ownership. Paid models and full enterprise release remain parent gates. First profile only permits controlled file helpers; arbitrary user shell/background processes and dependency-network access are excluded until separately designed.

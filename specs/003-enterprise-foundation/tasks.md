@@ -64,3 +64,5 @@ T027 continuation: child 008 T007 file-port migration now has actual Pi → Node
 T027 continuation: child 008 T009 can now export/verify real quiesced workers; it deliberately leaves state quiescing and checkpoint_revision unset. Durable artifact storage, control-plane revision/attempt-fence migration and registration remain required, so T009/T027 remain open.
 
 T027 continuation: child 008 adds real immutable artifact persistence and verified process/container recovery. Project/run/workspace ownership migration and fenced revision-head registration are specified but not implemented; T009/T010/T027 stay open. Original application tests are preserved and final complete regression passed.
+
+T027 continuation: child 008 now implements offline API schema migration with verified backups and real SQLite/Linux crash/restore tests. Revision registration, application adoption and live migration acceptance remain open; no production database was changed and T010/T027 stay unchecked.
