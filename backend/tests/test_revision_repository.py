@@ -143,7 +143,7 @@ def test_recovery_checks_current_owner_but_does_not_require_running_run(reposito
 def test_coordinator_cancel_persists_intent_before_actual_transport(repository, mode):
     from app.execution import ExecutionCoordinator
     from app.sandbox.client import BrokerClient, BrokerClientError
-    from app.sandbox.grants import GrantCodec
+    from app.sandbox.grants import GrantCodec, CompletionGrantCodec
     repo, path, main, heat = repository
     repo.bootstrap('owner',main,BASE)
     allocate(repo,main)
@@ -164,7 +164,7 @@ def test_coordinator_cancel_persists_intent_before_actual_transport(repository, 
     async def scenario():
         async with BrokerClient(f'http://127.0.0.1:{server.server_port}',secrets.token_urlsafe(32),
                                 GrantCodec(b'k'*32),timeout=3) as client:
-            coordinator = ExecutionCoordinator(repo,client)
+            coordinator = ExecutionCoordinator(repo,client,completion_codec=CompletionGrantCodec(b'c'*32))
             with pytest.raises(RevisionError,match='revision_not_found'):
                 await coordinator.cancel('stranger','attempt')
             assert not requests

@@ -30,7 +30,7 @@ from app.migrations import migrate
 from app.sandbox.client import BrokerClient, BrokerClientError
 from app.sandbox.config import BrokerConfig
 from app.sandbox.docker_driver import DockerDriver, run_bounded
-from app.sandbox.grants import Grant, GrantCodec
+from app.sandbox.grants import Grant, GrantCodec, CompletionGrantCodec
 from app.sandbox.lifecycle import LifecycleError
 from app.sandbox.registry import Registry, RegistryError
 from app.sandbox.service import create_app
@@ -135,7 +135,7 @@ print(json.dumps(asdict(artifact)))
         if state == 'registered':
             # A real unchanged snapshot is a valid no-op revision, not generated output.
             receipt = repo.register('owner','attempt',worker.id,grant.jti,base)
-        coordinator = ExecutionCoordinator(repo,client)
+        coordinator = ExecutionCoordinator(repo,client,completion_codec=CompletionGrantCodec(b'c'*32))
         async def cancel_twice():
             return await asyncio.gather(coordinator.cancel('owner','attempt'),coordinator.cancel('owner','attempt'))
         first, second = runner.run(cancel_twice())
@@ -397,7 +397,7 @@ from app.revisions import RevisionRepository,RevisionError
 from app.migrations import migrate
 from app.execution import ExecutionCoordinator
 from app.sandbox.client import BrokerClient
-from app.sandbox.grants import GrantCodec,Grant
+from app.sandbox.grants import GrantCodec,Grant,CompletionGrantCodec
 import httpx,struct
 async def main():
     async def relay(reader,writer):
@@ -433,7 +433,7 @@ async def main():
     await asyncio.sleep(2)
     if inputs['failure']=='missing': next(store_path.glob('*.atomsnap')).unlink()
     async with BrokerClient(origin,inputs['admin'],GrantCodec(inputs['key'].encode())) as client:
-        coordinator=ExecutionCoordinator(repo,client)
+        coordinator=ExecutionCoordinator(repo,client,completion_codec=CompletionGrantCodec(b'c'*32))
         try: await coordinator.prepare('stranger','attempt',store)
         except RevisionError: pass
         else: raise AssertionError('unauthorized preparation')
@@ -465,9 +465,18 @@ async def main():
                                        coordinator.prepare('owner','attempt',store))
             lease=leases[0]
             assert leases[1]==lease and lease.grant not in repr(lease)
+            assert lease.completion_grant not in repr(lease) and lease.completion_grant!=lease.grant
+            completion=CompletionGrantCodec(b'c'*32).verify(lease.completion_grant)
+            assert (completion.org,completion.project,completion.run,completion.attempt,completion.fence,
+                    completion.jti,completion.base_revision,completion.iat,completion.exp)==(
+                    'owner',intent.project_id,intent.run_id,intent.id,intent.generation,
+                    intent.grant_id,intent.base_revision,intent.issued_at,intent.deadline)
             assert lease.run_id=='run' and lease.workspace_id==workspace and lease.deadline==intent.deadline
             assert repo.execution('owner','attempt').broker_attempt_id==lease.attempt_id
             async with httpx.AsyncClient(trust_env=False) as runtime:
+                denied=await runtime.get(origin+'/v1/attempts/'+lease.attempt_id,
+                    headers={'Authorization':'Bearer '+lease.completion_grant})
+                assert denied.status_code==403
                 response=await runtime.get(origin+'/v1/attempts/'+lease.attempt_id,
                     headers={'Authorization':'Bearer '+lease.grant})
                 assert response.status_code==200 and response.json()['state']=='ready'
@@ -490,7 +499,7 @@ from pathlib import Path
 data=json.loads(sys.stdin.buffer.read());sys.path.insert(0,'/tmp/code')
 from app.revisions import RevisionRepository
 from app.sandbox.client import BrokerClient
-from app.sandbox.grants import GrantCodec
+from app.sandbox.grants import GrantCodec, CompletionGrantCodec
 async def main():
     repo=RevisionRepository(Path('/workspace/api.db'))
     intent=repo.decide_termination('owner','attempt','succeeded')
@@ -507,7 +516,7 @@ asyncio.run(main())
                     assert process.returncode==57,err.decode()
                     pending=RevisionRepository(path).recovery('owner','attempt')
                     assert pending.state!='closed' and pending.outcome=='succeeded'
-                coordinator=ExecutionCoordinator(RevisionRepository(path),client)
+                coordinator=ExecutionCoordinator(RevisionRepository(path),client,completion_codec=CompletionGrantCodec(b'c'*32))
             if inputs['failure']=='storage':
                 import fcntl,os
                 lock=os.open(store_path,os.O_RDONLY|os.O_DIRECTORY);fcntl.flock(lock,fcntl.LOCK_EX)

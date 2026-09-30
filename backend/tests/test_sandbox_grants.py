@@ -120,3 +120,30 @@ def test_key_config_fails_without_echoing_value(key):
 def test_lifetime_config(limit):
     with pytest.raises(ValueError, match="^invalid_grant_lifetime$"):
         GrantCodec(KEY, max_lifetime=limit)
+
+
+def test_execution_and_sandbox_capabilities_are_not_interchangeable(grant):
+    from app.sandbox.grants import CompletionGrantCodec
+    sandbox=GrantCodec(KEY,clock=lambda:NOW)
+    completion=CompletionGrantCodec(KEY,clock=lambda:NOW)
+    work_token=sandbox.issue(grant)
+    finish_token=completion.issue(grant)
+    assert completion.verify(finish_token)==grant
+    assert sandbox.verify(work_token)==grant
+    for verifier,token in ((sandbox,finish_token),(completion,work_token)):
+        with pytest.raises(GrantError): verifier.verify(token)
+    claims=jwt.decode(finish_token,options={'verify_signature':False})
+    assert claims['aud']=='atom-execution' and jwt.get_unverified_header(finish_token)['typ']=='atom-execution+jwt'
+    assert KEY.decode() not in repr(completion)
+    with pytest.raises(GrantError): CompletionGrantCodec(KEY,clock=lambda:grant.exp).verify(finish_token)
+    with pytest.raises(GrantError): CompletionGrantCodec(b'z'*32,clock=lambda:NOW).verify(finish_token)
+
+
+@pytest.mark.parametrize('field,value',[('aud','atom-sandbox'),('sub','admin'),('fence',True),('host_path','/tmp'),('exp',1060.0)])
+def test_execution_capability_rejects_signed_invalid_claims(grant,field,value):
+    from app.sandbox.grants import CompletionGrantCodec
+    completion=CompletionGrantCodec(KEY,clock=lambda:NOW)
+    claims=jwt.decode(completion.issue(grant),options={'verify_signature':False})
+    claims[field]=value
+    token=jwt.encode(claims,KEY,algorithm='HS256',headers={'typ':'atom-execution+jwt'})
+    with pytest.raises(GrantError): completion.verify(token)

@@ -7,7 +7,7 @@ import io
 from .artifacts import ArtifactStore, ArtifactError
 from .revisions import Recovery, RevisionError, RevisionRepository
 from .sandbox.client import BrokerClient, BrokerClientError
-from .sandbox.grants import Grant
+from .sandbox.grants import Grant, CompletionGrantCodec, GrantError
 from .snapshots import verify_snapshot, SnapshotError
 
 
@@ -22,11 +22,15 @@ class ExecutionLease:
     attempt_id: str
     deadline: int
     grant: str = field(repr=False)
+    completion_grant: str = field(repr=False)
 
 
 class ExecutionCoordinator:
-    def __init__(self, repository: RevisionRepository, broker: BrokerClient):
+    def __init__(self, repository: RevisionRepository, broker: BrokerClient, *, completion_codec: CompletionGrantCodec):
+        if not isinstance(completion_codec, CompletionGrantCodec):
+            raise ExecutionError('invalid_completion_configuration')
         self.repository, self.broker = repository, broker
+        self._completion_codec = completion_codec
         self._coordination = asyncio.Lock()
 
     async def _termination(self, owner: str, attempt_id: str, *, confirmed: bool,
@@ -106,11 +110,11 @@ class ExecutionCoordinator:
                 if current != bound:
                     raise ExecutionError('execution_changed')
                 return ExecutionLease(current.run_id, current.workspace_id, observed.attempt_id,
-                                      current.deadline, token)
+                                      current.deadline, token, self._completion_codec.issue(grant))
             except asyncio.CancelledError:
                 await self._stop(owner, attempt_id, 'cancelled')
                 raise
-            except (ArtifactError, SnapshotError, RevisionError, BrokerClientError, ExecutionError):
+            except (ArtifactError, SnapshotError, RevisionError, BrokerClientError, ExecutionError, GrantError):
                 await self._stop(owner, attempt_id, 'failed')
                 raise
 

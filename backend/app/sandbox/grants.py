@@ -70,8 +70,8 @@ def _part(segment: str) -> dict:
     return parsed
 
 
-def _validate(claims: dict, now: float, lifetime: int) -> Grant:
-    if set(claims) != _FIELDS or any(claims[key] != value for key, value in _PURPOSE.items()):
+def _validate(claims: dict, now: float, lifetime: int, purpose: dict) -> Grant:
+    if set(claims) != _FIELDS or any(claims[key] != value for key, value in purpose.items()):
         raise GrantError()
     for key in ("jti", "org", "project", "run", "attempt"):
         if not isinstance(claims[key], str) or not _ID.fullmatch(claims[key]):
@@ -89,7 +89,7 @@ def _validate(claims: dict, now: float, lifetime: int) -> Grant:
     return Grant(**{key: claims[key] for key in Grant.__dataclass_fields__})
 
 
-class GrantCodec:
+class _CapabilityCodec:
     """Dedicated-key codec; never infer an algorithm or clock from a request."""
 
     __slots__ = ("_key", "_clock", "_max_lifetime")
@@ -105,8 +105,9 @@ class GrantCodec:
 
     def issue(self, grant: Grant) -> str:
         claims = grant.claims()
-        _validate(claims, self._clock(), self._max_lifetime)
-        return jwt.encode(claims, self._key, algorithm="HS256", headers={"typ": _HEADER["typ"]})
+        claims.update(self._purpose)
+        _validate(claims, self._clock(), self._max_lifetime, self._purpose)
+        return jwt.encode(claims, self._key, algorithm="HS256", headers={"typ": self._header["typ"]})
 
     def verify(self, token: str) -> Grant:
         try:
@@ -116,13 +117,27 @@ class GrantCodec:
             if len(segments) != 3 or any(not _SEGMENT.fullmatch(part) for part in segments):
                 raise GrantError()
             header, claims = _part(segments[0]), _part(segments[1])
-            if header != _HEADER:
+            if header != self._header:
                 raise GrantError()
             # Time is validated below with strict integer types and one trusted clock.
             # Signature verification remains enabled; algorithm is fixed, not token-derived.
-            jwt.decode(token, self._key, algorithms=["HS256"], issuer=_PURPOSE["iss"],
-                       audience=_PURPOSE["aud"], subject=_PURPOSE["sub"],
+            jwt.decode(token, self._key, algorithms=["HS256"], issuer=self._purpose["iss"],
+                       audience=self._purpose["aud"], subject=self._purpose["sub"],
                        options={"verify_exp": False, "verify_iat": False, "verify_nbf": False, "strict_aud": True})
-            return _validate(claims, self._clock(), self._max_lifetime)
+            return _validate(claims, self._clock(), self._max_lifetime, self._purpose)
         except (ValueError, TypeError, RecursionError, jwt.PyJWTError):
             raise GrantError() from None
+
+
+class GrantCodec(_CapabilityCodec):
+    """Sandbox-only capabilities; never authorize API completion with these."""
+    __slots__ = ()
+    _purpose = _PURPOSE
+    _header = _HEADER
+
+
+class CompletionGrantCodec(_CapabilityCodec):
+    """Execution completion capabilities; rejected by the sandbox broker."""
+    __slots__ = ()
+    _purpose = {"iss": "atom-control", "aud": "atom-execution", "sub": "runtime"}
+    _header = {"alg": "HS256", "typ": "atom-execution+jwt"}
