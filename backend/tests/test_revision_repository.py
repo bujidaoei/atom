@@ -55,6 +55,26 @@ def allocate(repo, workspace, *, attempt='attempt', run='run', deadline=None):
     return repo.bind('owner',attempt,'broker-' + attempt)
 
 
+def test_startup_inventory_is_bounded_and_keeps_unknown_attempts(repository):
+    repo, path, main, heat = repository
+    assert repo.pending_executions() == ()
+    repo.bootstrap('owner', main, BASE)
+    repo.bootstrap('owner', heat, BASE)
+    allocate(repo, main)
+    allocate(repo, heat, attempt='heat-attempt', run='heat-run')
+    repo.cancel('owner', 'attempt')
+    repo.observe_termination('owner', 'attempt', confirmed=False, outcome='cancelled')
+    assert {item.attempt_id for item in repo.pending_executions()} == {'attempt','heat-attempt'}
+    assert {item.owner for item in repo.pending_executions()} == {'owner'}
+    with pytest.raises(RevisionError, match='revision_recovery_capacity'):
+        repo.pending_executions(limit=1)
+    for invalid in (0, True, 1001, '1'):
+        with pytest.raises(RevisionError, match='invalid_revision_request'):
+            repo.pending_executions(limit=invalid)
+    repo.observe_termination('owner', 'attempt', confirmed=True, outcome='cancelled')
+    assert [item.attempt_id for item in repo.pending_executions(limit=1)] == ['heat-attempt']
+
+
 def test_workspace_identity_after_migration_is_concurrent_and_empty(repository):
     repo, path, main, heat = repository
     engine = create_engine('sqlite:///' + path.as_posix())
@@ -200,9 +220,9 @@ def test_recovery_checks_current_owner_but_does_not_require_running_run(reposito
     assert repo.recovery('new-owner','attempt') == expected
 
 
-@pytest.mark.parametrize('mode', ['disconnect', 'cancel_task', 'concurrent_close'])
+@pytest.mark.parametrize('mode', ['disconnect', 'cancel_task', 'concurrent_close', 'startup_disconnect', 'startup_timeout'])
 def test_coordinator_cancel_persists_intent_before_actual_transport(repository, mode):
-    from app.execution import ExecutionCoordinator
+    from app.execution import ExecutionCoordinator, ExecutionError
     from app.sandbox.client import BrokerClient, BrokerClientError
     from app.sandbox.grants import GrantCodec, CompletionGrantCodec
     repo, path, main, heat = repository
@@ -229,7 +249,8 @@ def test_coordinator_cancel_persists_intent_before_actual_transport(repository, 
             with pytest.raises(RevisionError,match='revision_not_found'):
                 await coordinator.cancel('stranger','attempt')
             assert not requests
-            task = asyncio.create_task(coordinator.cancel('owner','attempt'))
+            task = asyncio.create_task(coordinator.reconcile(timeout=0.3 if mode == 'startup_timeout' else 60) if mode.startswith('startup_')
+                                       else coordinator.cancel('owner','attempt'))
             assert await asyncio.to_thread(arrived.wait,3)
             assert requests[0][0:2] == ('/v1/admin/revoke',{'grant_id':'grant-attempt'})
             assert requests[0][2].state == 'cancel_requested'
@@ -237,6 +258,15 @@ def test_coordinator_cancel_persists_intent_before_actual_transport(repository, 
                 repo.observe_termination('owner','attempt',confirmed=True,outcome='cancelled')
             if mode == 'cancel_task':
                 task.cancel()
+            if mode == 'startup_timeout':
+                with pytest.raises(ExecutionError, match='execution_recovery_timeout'):
+                    await task
+                recovered = repo.recovery('owner','attempt')
+                assert recovered.state == 'cancel_requested' and recovered.termination_state == 'unknown'
+                assert recovered.outcome == 'failed'
+                assert repo.pending_executions()[0].attempt_id == 'attempt'
+                release.set()
+                return
             release.set()
             if mode == 'concurrent_close':
                 result = await task
@@ -248,6 +278,7 @@ def test_coordinator_cancel_persists_intent_before_actual_transport(repository, 
                     await task
                 recovered = repo.recovery('owner','attempt')
                 assert recovered.state == 'cancel_requested' and recovered.termination_state == 'unknown'
+                assert recovered.outcome == ('failed' if mode == 'startup_disconnect' else 'cancelled')
                 with pytest.raises(RevisionError,match='revision_conflict'):
                     allocate(repo,main,attempt='successor')
     try:

@@ -50,3 +50,5 @@ RuntimeClient leased calls carry explicit repository/owner alongside ExecutionLe
 Workspace identity creation: the repository may insert revision_workspaces for a committed owner-scoped project/heat after migration. It preserves the v1 defaults (null head/active attempt, generation zero), enforces heat membership through races and reuses existing identity under a write transaction. This is not a revision or acceptance record.
 
 ImportedWorkspace is a trusted offline operation result containing workspace_id, revision_id and verified Artifact metadata. It adds no schema or acceptance status. The artifact becomes durable before root registration; a failure between these steps can retain unreferenced bytes without changing the workspace head.
+
+PendingExecution is a trusted cleanup inventory view (current owner, attempt ID), including expired, cancelled and unknown nonclosed rows and excluding confirmed closed rows. It contains no bearer capability, fence or snapshot issuance inputs. Inventory capacity failure returns no partial result.

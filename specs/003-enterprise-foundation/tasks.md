@@ -104,3 +104,5 @@ T027 continuation: API runtime transport can now deliver prepared leases and rej
 T027 continuation: child 008 now resolves/creates owner-scoped identities for post-migration projects and heats, with concurrent SQLite verification. File import, application wiring and enterprise acceptance remain open.
 
 T027 continuation: child 008 now implements trusted offline real-directory import before revision bootstrap. Application integration, production writer fencing/cutover and enterprise acceptance remain open.
+
+T027 continuation: child 008 now provides bounded startup attempt scanning and confirmed broker cleanup, including durable success decision recovery after process loss. Main lifespan, exclusive ownership, legacy status adoption and enterprise release remain open.

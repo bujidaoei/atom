@@ -87,3 +87,5 @@ FR-007 API acknowledgement: leased runtime success MUST match an owner-scoped du
 FR-006 workspace identity: new committed projects and race heats MUST obtain an owner-checked durable workspace identity without fabricating artifact or revision evidence. Concurrent retries preserve identity and existing execution/head state; foreign heat membership is denied.
 
 FR-006 initial import: trusted quiescent legacy workspaces must be exported and stored as verified immutable bytes before root registration. Exact replay must preserve identity; changed input must not reset an existing root or head. Import must reject source roots containing control-plane database or artifact storage.
+
+FR-005 startup recovery: before broker-backed API admission, interrupted attempts must be enumerated from the durable ledger and revoked with separately confirmed termination. Preserve already-decided outcomes and receipts; absence of a success decision is not success. Capacity exhaustion, timeout or uncertain termination must prevent readiness.

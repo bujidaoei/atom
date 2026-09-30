@@ -380,7 +380,7 @@ def coordinator_source_bundle():
     return base64.b64encode(result.getvalue()).decode()
 
 
-@pytest.mark.parametrize('failure', ['none','missing','cancel','registered','acknowledged','storage','decision','released','http_cancel','node'])
+@pytest.mark.parametrize('failure', ['none','missing','cancel','registered','acknowledged','storage','decision','released','http_cancel','node','startup'])
 def test_prepare_coordinator_with_real_linux_store_and_http(tmp_path, failure):
     path = tmp_path / 'api.db'
     create_api_database(path)
@@ -604,7 +604,17 @@ asyncio.run(main())
                     pending=RevisionRepository(path).recovery('owner','attempt')
                     assert pending.state!='closed' and pending.outcome=='succeeded'
                 coordinator=ExecutionCoordinator(RevisionRepository(path),client,completion_codec=CompletionGrantCodec(b'c'*32))
-            if inputs['failure']=='storage':
+                if inputs['failure'] in ('decision','released'):
+                    recovered=await coordinator.reconcile()
+                    assert len(recovered)==1 and recovered[0].outcome=='succeeded'
+                    assert await coordinator.reconcile()==()
+            if inputs['failure']=='startup':
+                recovered=await coordinator.reconcile()
+                assert len(recovered)==1
+                state=recovered[0]
+                assert state.state=='closed' and state.outcome=='failed' and state.receipt is None
+                assert await coordinator.reconcile()==()
+            elif inputs['failure']=='storage':
                 import fcntl,os
                 lock=os.open(store_path,os.O_RDONLY|os.O_DIRECTORY);fcntl.flock(lock,fcntl.LOCK_EX)
                 try:

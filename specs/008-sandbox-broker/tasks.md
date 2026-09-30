@@ -69,3 +69,5 @@ T008/T009 continuation: API RuntimeClient now serializes trusted leases and veri
 T010 continuation: owner-scoped workspace identity creation now supports projects/heats committed after migration, with concurrency/idempotency and foreign-scope tests. No artifact/head is fabricated. Application creation routes, verified file import and runtime/preview adoption remain open; T010 stays unchecked.
 
 T010 continuation: trusted offline import now exports an actual quiescent directory, persists its verified snapshot and bootstraps the owner-scoped root. Exact replay and changed-source rejection are implemented; application route/startup adoption, writer fencing/cutover and preview migration remain open. T010 stays unchecked.
+
+T006/T008 continuation: bounded durable startup inventory and coordinator reconciliation now clean interrupted attempts through exact-grant revocation, retaining pending decisions and unknown ownership. Actual socket/deadline and Linux worker/process-exit scenarios pass. Main API configuration/mounting, exclusive scheduler ownership and legacy Run/outbox synchronization remain open; no checkbox closure.

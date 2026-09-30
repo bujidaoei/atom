@@ -54,6 +54,12 @@ class Receipt:
 
 
 @dataclass(frozen=True)
+class PendingExecution:
+    owner: str
+    attempt_id: str
+
+
+@dataclass(frozen=True)
 class Recovery:
     """Cleanup observations only; deliberately excludes grant issuance inputs."""
     attempt_id: str
@@ -163,6 +169,18 @@ class RevisionRepository:
         else:
             db.execute('INSERT INTO revision_artifacts VALUES (?,?,?,?)',
                        (artifact.key, artifact.revision, artifact.size, int(time.time())))
+
+    def pending_executions(self, *, limit: int = 100) -> tuple[PendingExecution, ...]:
+        """Trusted startup inventory, never a tenant-facing query or dispatch grant."""
+        if type(limit) is not int or not 1 <= limit <= 1000:
+            raise RevisionError('invalid_revision_request')
+        with self._transaction() as db:
+            rows = db.execute('''SELECT p.user_id,a.id FROM revision_attempts a
+                JOIN projects p ON p.id=a.project_id WHERE a.state!='closed'
+                ORDER BY a.created_at,a.id LIMIT ?''', (limit + 1,)).fetchall()
+            if len(rows) > limit:
+                raise RevisionError('revision_recovery_capacity')
+            return tuple(PendingExecution(row['user_id'], row['id']) for row in rows)
 
     def ensure_workspace(self, owner: str, project_id: str, heat_id: str | None = None) -> str:
         """Resolve a committed project scope without inventing an initial revision."""

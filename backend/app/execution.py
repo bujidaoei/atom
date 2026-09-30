@@ -58,6 +58,31 @@ class ExecutionCoordinator:
         """Durably fence dispatch before revocation; release only on broker proof."""
         return await self._stop(owner, attempt_id, 'cancelled')
 
+    async def reconcile(self, *, limit: int = 100, timeout: float = 60) -> tuple[Recovery, ...]:
+        """Drain interrupted ownership before admitting work in a single-owner API.
+
+        The caller must exclude other API schedulers for the whole startup. A
+        pending successful decision is preserved; no decision defaults to failed.
+        This does not synchronize legacy Run status or provide a process lease.
+        """
+        if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or not 0 < timeout <= 300:
+            raise ExecutionError('invalid_recovery_configuration')
+        try:
+            async with asyncio.timeout(timeout):
+                async with self._admission():
+                    pending = await asyncio.to_thread(self.repository.pending_executions, limit=limit)
+                    outcomes = []
+                    for item in pending:
+                        result = await self._stop(item.owner, item.attempt_id, 'failed')
+                        if result.state != 'closed' or result.termination_state != 'confirmed':
+                            raise ExecutionError('execution_recovery_incomplete')
+                        outcomes.append(result)
+                    if await asyncio.to_thread(self.repository.pending_executions, limit=limit):
+                        raise ExecutionError('execution_recovery_incomplete')
+                    return tuple(outcomes)
+        except TimeoutError:
+            raise ExecutionError('execution_recovery_timeout') from None
+
     async def _stop(self, owner: str, attempt_id: str, outcome: str) -> Recovery:
         intent = await asyncio.to_thread(self.repository.decide_termination, owner, attempt_id, outcome)
         if intent.state == 'closed':
