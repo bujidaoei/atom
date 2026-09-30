@@ -119,3 +119,5 @@ Verification intent reservation must capture the stored project contract under t
 Verification result registration derives outcome/counts from exact complete coverage of the captured contract. A first report outside the original time interval is rejected. Exact historical replay retains the original timestamp; changed report content conflicts. Persisting a report does not publish or prove verifier authority.
 
 Verification interruption must persist cancelled/timed_out separately from observed check results. A report and interruption racing for the same request can commit only one immutable terminal result. Expiry inventory must be bounded and reject capacity overflow without partial mutation.
+
+Release metadata promotion must recheck owner, idle main workspace, expected head, current contract, passing evidence, policy and runner in the same transaction that advances the publication generation. Release record, pointer and idempotency receipt commit together; historical replay must not repromote old content.

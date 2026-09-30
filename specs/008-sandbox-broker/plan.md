@@ -108,3 +108,5 @@ T016 reservation component implemented in verification_repository.py, requiring 
 T016 result component: trusted internal record_report resolves owner-scoped intent, reloads its canonical contract, validates complete strict results and inserts atomically under the existing bounded writer transaction. Passing/failed status is computed, not accepted as an input. No public endpoint is added before verifier authentication.
 
 T016 terminal component: terminate records explicit interruption under writer exclusion; expired returns bounded owner/request pairs for trusted recovery. Timed-out decisions require current time strictly after the inclusive report deadline. No background sweeper or browser stop is implied by a ledger decision.
+
+T016 release metadata component implemented in release_repository.py using the v2 ledger transaction boundary. Immutable release records also record creator/previous release for audit provenance; existing command_receipts stores a reserved release:<id> request digest and response in the same transaction. Dedicated event delivery/outbox, artifact-serving promotion and verifier provenance remain unfinished.
