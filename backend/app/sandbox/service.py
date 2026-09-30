@@ -1,4 +1,4 @@
-"""Private control-plane HTTP boundary. Workload file operations are not exposed."""
+"""Private administrative and grant-scoped sandbox HTTP boundaries."""
 import asyncio
 from contextlib import asynccontextmanager
 import hmac
@@ -16,6 +16,8 @@ from .docker_driver import DockerDriver, DriverError
 from .grants import GrantCodec, GrantError
 from .lifecycle import Lifecycle, LifecycleError
 from .registry import Registry, RegistryError
+from .seeding import MAX_SEED_BYTES
+from .file_helper import validate
 
 _LOG = logging.getLogger("atom.sandbox")
 
@@ -38,23 +40,38 @@ def _nonfinite(value):
     raise ValueError
 
 
-async def _body(request: Request, field: str) -> str:
-    if request.headers.get("content-type", "").lower() != "application/json" or request.headers.get("content-encoding"):
+async def _read_body(request: Request, media_type: str, limit: int) -> bytes:
+    if ([value.lower() for value in request.headers.getlist("content-type")] != [media_type]
+            or request.headers.getlist("content-encoding")):
         raise ServiceError(415, "unsupported_content_type")
     data = bytearray()
     try:
         async with asyncio.timeout(5):
             async for chunk in request.stream():
-                if len(data) + len(chunk) > 12288:
+                if len(data) + len(chunk) > limit:
                     raise ServiceError(413, "request_too_large")
                 data.extend(chunk)
-        value = json.loads(data.decode("utf-8"), object_pairs_hook=_unique, parse_constant=_nonfinite)
+        return bytes(data)
+    except TimeoutError:
+        raise ServiceError(408, "request_timeout") from None
+    except ClientDisconnect:
+        raise ServiceError(400, "invalid_request") from None
+
+
+def _json(data: bytes):
+    try:
+        return json.loads(data.decode("utf-8"), object_pairs_hook=_unique, parse_constant=_nonfinite)
+    except (ValueError, TypeError, RecursionError):
+        raise ServiceError(400, "invalid_request") from None
+
+
+async def _body(request: Request, field: str) -> str:
+    value = _json(await _read_body(request, "application/json", 12288))
+    try:
         if not isinstance(value, dict) or set(value) != {field} or not isinstance(value[field], str):
             raise ValueError
         return value[field]
-    except TimeoutError:
-        raise ServiceError(408, "request_timeout") from None
-    except (ValueError, TypeError, RecursionError, ClientDisconnect):
+    except (ValueError, TypeError, RecursionError):
         raise ServiceError(400, "invalid_request") from None
 
 
@@ -67,6 +84,7 @@ def create_app(config: BrokerConfig | None = None) -> FastAPI:
         registry = Registry(config.registry_path)
         lifecycle = Lifecycle(registry, DockerDriver(registry.broker_id, config.image), batch_size=config.batch_size)
         app.state.lifecycle = lifecycle
+        app.state.transfer_lock = asyncio.Lock()
         app.state.maintenance_ok = False
         stop = asyncio.Event()
 
@@ -119,6 +137,33 @@ def create_app(config: BrokerConfig | None = None) -> FastAPI:
         lifecycle = getattr(app.state, "lifecycle", None)
         return lifecycle is not None and app.state.maintenance_ok and lifecycle.ready
 
+    def signed_header(request, header="authorization"):
+        values = request.headers.getlist(header)
+        if len(values) != 1:
+            raise ServiceError(401, "unauthorized")
+        token = values[0]
+        if header == "authorization":
+            if not token.startswith("Bearer "):
+                raise ServiceError(401, "unauthorized")
+            token = token[7:]
+        try:
+            return codec.verify(token)
+        except GrantError:
+            raise ServiceError(403, "invalid_grant") from None
+
+    @asynccontextmanager
+    async def transfer():
+        lifecycle = getattr(app.state, "lifecycle", None)
+        if lifecycle is None or not app.state.maintenance_ok:
+            raise ServiceError(503, "broker_not_ready")
+        lock = app.state.transfer_lock
+        # There is no await between observing and acquiring an unlocked lock;
+        # all intake runs on the single service event loop.
+        if lock.locked():
+            raise ServiceError(503, "broker_busy")
+        async with lock:
+            yield lifecycle
+
     async def control(function, *args):
         try:
             return await run_in_threadpool(function, *args)
@@ -165,5 +210,37 @@ def create_app(config: BrokerConfig | None = None) -> FastAPI:
             raise ServiceError(503, "broker_not_ready")
         attempt = await control(lifecycle.revoke, grant_id)
         return {"revoked": True, "state": attempt.state if attempt else "not_admitted"}
+
+    @app.post("/v1/admin/seed")
+    async def seed(request: Request):
+        authenticate(request)
+        grant = signed_header(request, "x-atom-grant")
+        async with transfer() as lifecycle:
+            await control(lifecycle.registry.authorize_provisioning, grant)
+            payload = await _read_body(request, "application/octet-stream", MAX_SEED_BYTES)
+            attempt = await control(lifecycle.seed, grant, payload)
+            return JSONResponse({"attempt_id": attempt.id, "state": attempt.state, "deadline": attempt.deadline})
+
+    @app.post("/v1/attempts/{attempt_id}/files")
+    async def files(attempt_id: str, request: Request):
+        grant = signed_header(request)
+        async with transfer() as lifecycle:
+            attempt = await control(lifecycle.registry.authorize, grant)
+            if attempt.id != attempt_id:
+                raise ServiceError(409, "ownership_conflict")
+            value = _json(await _read_body(request, "application/json", 50 * 1024 * 1024))
+            if (not isinstance(value, dict) or set(value) != {"operation_id", "tool_call_id", "operation"}
+                    or not isinstance(value["operation_id"], str)
+                    or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", value["operation_id"])
+                    or not isinstance(value["tool_call_id"], str)
+                    or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}", value["tool_call_id"])):
+                raise ServiceError(400, "invalid_request")
+            try:
+                validate(value["operation"])
+            except (ValueError, TypeError, RecursionError):
+                raise ServiceError(400, "invalid_request") from None
+            outcome = await control(lifecycle.file_operation, grant, attempt_id,
+                                    value["operation_id"], value["tool_call_id"], value["operation"])
+            return JSONResponse({"tool_call_id": value["tool_call_id"], "outcome": outcome})
 
     return app

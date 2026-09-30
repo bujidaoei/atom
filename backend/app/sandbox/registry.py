@@ -226,6 +226,14 @@ class Registry:
                 raise RegistryError("attempt_not_ready")
             return attempt
 
+    def authorize_provisioning(self, grant: Grant) -> Attempt:
+        """Read current seed authority without admitting a new attempt."""
+        with self._transaction() as db:
+            attempt = self._owned(db, grant)
+            if attempt.state != "provisioning":
+                raise RegistryError("attempt_not_provisioning")
+            return attempt
+
     @staticmethod
     def _version(attempt: Attempt, expected: int) -> None:
         if type(expected) is not int or expected != attempt.version:
