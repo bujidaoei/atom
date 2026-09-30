@@ -57,6 +57,13 @@ assert m.verify(source)==0 and m.verify_backup(backup)
 assert backup.stat().st_mode & 0o777 == 0o600
 assert m.migrate(source,Path('/workspace/retry.db')).applied
 assert m.verify(source)==1
+versioned=Path('/workspace/versioned.db')
+result=m.backup_database(source,versioned)
+assert result.version==1 and m.verify_backup(versioned,expected_version=1)==result.sha256
+assert versioned.stat().st_mode & 0o777 == 0o600
+with sqlite3.connect(versioned) as src, sqlite3.connect('/workspace/versioned-restored.db') as dst:
+    src.backup(dst)
+assert m.verify(Path('/workspace/versioned-restored.db'))==1
 restored=Path('/workspace/restored.db')
 with sqlite3.connect(backup) as src, sqlite3.connect(restored) as dst:
     src.backup(dst)

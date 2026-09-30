@@ -52,3 +52,5 @@ All implementation and acceptance gates remain open.
 Lovable documents explicit snapshot publishing, unpublished edits, audience and configurable security gates: https://docs.lovable.dev/features/publish (retrieved 2026-10-01). Replit's historical rollback article, updated 2024-08-30, describes new rollback deployments, configuration differences and retained-build availability: https://replit.com/blog/introducing-deployment-rollbacks (retrieved 2026-10-01). These are official design evidence, not paid-account testing or current Replit retention guarantees.
 
 Atom's proposed delivery record connects requirements, exact artifacts, independent verification, release and explicit recovery scope, with explainable stale/blocked states. This is a design direction, not an exclusivity or implementation claim.
+
+Migration prerequisite progress (2026-10-01): supported-version backup/verification now handles v1 under writer exclusion, with real WAL/restore and Linux evidence. v1 schema remains locked. Journal version CHECK and producing-attempt-only revision constraints must be explicitly migrated before new release/adoption behavior; no new schema is enabled.

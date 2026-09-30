@@ -9,7 +9,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from app.models import Base, User, Project, Run, Race, RaceHeat
-from app.migrations import MigrationError, migrate, verify, verify_backup
+from app.migrations import MigrationError, migrate, verify, verify_backup, backup_database
 import app.migrations as migrations
 
 
@@ -194,3 +194,57 @@ def test_schema_identity_preserves_sql_literal_case(legacy):
         db.execute(sql.replace('immutable_revision_evidence', 'IMMUTABLE_REVISION_EVIDENCE'))
     with pytest.raises(MigrationError, match='unsupported_schema'):
         verify(path)
+
+
+@pytest.mark.parametrize('version', [0, 1])
+def test_supported_backup_wal_restore_and_no_overwrite(legacy, tmp_path, version):
+    path, baseline_backup = legacy
+    if version:
+        migrate(path, baseline_backup)
+    destination = tmp_path / 'version-backup.db'
+    with sqlite3.connect(path) as writer:
+        writer.execute('PRAGMA journal_mode=WAL')
+        writer.execute('PRAGMA wal_autocheckpoint=0')
+        writer.execute("UPDATE projects SET prompt='saved committed WAL revision'")
+        writer.commit()
+        result = backup_database(path, destination)
+        assert result.version == version
+        assert result.sha256 == verify_backup(destination, expected_version=version)
+        assert verify(path) == version
+        before = destination.read_bytes()
+        with pytest.raises(MigrationError):
+            backup_database(path, destination)
+        assert destination.read_bytes() == before
+    restored = tmp_path / 'version-restored.db'
+    with sqlite3.connect(destination) as source, sqlite3.connect(restored) as target:
+        source.backup(target)
+    assert verify(restored) == version
+    with sqlite3.connect(restored) as db:
+        assert db.execute('SELECT prompt FROM projects').fetchone() == ('saved committed WAL revision',)
+        if version:
+            assert db.execute('SELECT count(*) FROM revision_workspaces').fetchone() == (2,)
+            assert db.execute('SELECT count(*) FROM atom_schema_migrations').fetchone() == (1,)
+    with pytest.raises(MigrationError, match='invalid_backup_version'):
+        verify_backup(destination, expected_version=1-version)
+
+
+def test_versioned_backup_denies_busy_writer_and_drift(legacy, tmp_path):
+    path, baseline = legacy
+    migrate(path, baseline)
+    destination = tmp_path / 'denied.db'
+    with sqlite3.connect(path) as writer:
+        writer.execute('BEGIN IMMEDIATE')
+        with pytest.raises(MigrationError):
+            backup_database(path, destination, lock_timeout=0.05)
+        assert not destination.exists()
+        writer.rollback()
+        writer.execute('ALTER TABLE projects ADD COLUMN drift TEXT')
+    with pytest.raises(MigrationError, match='unsupported_schema'):
+        backup_database(path, destination)
+    assert not destination.exists()
+
+
+@pytest.mark.parametrize('version', [True, None, -1, 2, '1'])
+def test_backup_expected_version_is_explicit(legacy, version):
+    with pytest.raises(MigrationError, match='invalid_backup_version'):
+        verify_backup(legacy[0], expected_version=version)

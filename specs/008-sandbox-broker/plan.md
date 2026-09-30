@@ -96,3 +96,5 @@ Validate the post-registration deadline boundary by delaying the actual completi
 Keep one strongly referenced cancellation task per project, shield each request waiter, and preserve the stopping admission guard until finalization finishes. Shutdown includes both active jobs and cancellation tasks. Observe detached task exceptions by type without logging sensitive error text.
 
 Next T010 work follows contracts/revision-release.md: additive offline schema, transactional adoption/evidence/releases, pinned isolated serving/verifier, API/UI, then browser/fault rollout evidence. Copying committed bytes into mutable publication directories is insufficient.
+
+T015 prerequisite implemented: backup_database owns a bounded writer lock and snapshots the supported current schema; verify_backup accepts explicit expected_version while preserving baseline default. Schema v1 remains unchanged. Its journal CHECK(version=1) and revision-record producing-attempt constraint require an explicit, tested rebuild/migration design before release/adoption tables can be enabled.

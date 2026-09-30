@@ -124,3 +124,5 @@ T027 continuation: post-registration timeout now rejects late runtime success wh
 T027 continuation: cancellation cleanup now survives cancellation of API request waiters; real authenticated ASGI fault tests cover initiating/duplicate callers and shutdown, using a scripted runtime cleanup barrier. Real TCP/broker cancellation acceptance remains open.
 
 T027 continuation: actual release/acceptance authority audit and refreshed official product research are recorded in feature 008 contracts/revision-release.md. Its T014 design audit is complete; T015–T019 migration, implementation and acceptance remain open.
+
+T027 / feature008 T015 continuation: baseline/v1 backup prerequisite now preserves exact version under writer exclusion with real WAL/restore and Linux tests. Release schema upgrade remains unimplemented and unchecked.

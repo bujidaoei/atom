@@ -24,6 +24,12 @@ class MigrationResult:
     backup_sha256: str
 
 
+@dataclass(frozen=True)
+class BackupResult:
+    version: int
+    sha256: str
+
+
 def _path(value, *, existing):
     path = Path(value)
     if not path.is_absolute() or path.is_symlink() or not path.parent.is_dir() or (existing and not path.is_file()):
@@ -83,12 +89,14 @@ def _integrity(db):
         raise MigrationError("invalid_database_integrity")
 
 
-def verify_backup(path: Path) -> str:
+def verify_backup(path: Path, *, expected_version: int = 0) -> str:
+    if type(expected_version) is not int or expected_version not in (0, 1):
+        raise MigrationError("invalid_backup_version")
     db = None
     try:
         path = _path(path, existing=True)
         db = _open(path, readonly=True)
-        if _schema(db) != 0:
+        if _schema(db) != expected_version:
             raise MigrationError("invalid_backup_version")
         _integrity(db)
         return _digest(path)
@@ -99,7 +107,7 @@ def verify_backup(path: Path) -> str:
             db.close()
 
 
-def _backup(source, destination):
+def _backup(source, destination, *, expected_version=0):
     descriptor = os.open(destination, os.O_CREAT | os.O_EXCL | os.O_WRONLY | getattr(os, "O_NOFOLLOW", 0), 0o600)
     os.close(descriptor)
     reader = target = None
@@ -113,7 +121,7 @@ def _backup(source, destination):
         reader.backup(target, pages=128, progress=progress, sleep=0.01)
         target.execute("PRAGMA journal_mode=DELETE")
         _integrity(target)
-        if _schema(target) != 0:
+        if _schema(target) != expected_version:
             raise MigrationError("invalid_backup_version")
     finally:
         if reader is not None:
@@ -128,7 +136,35 @@ def _backup(source, destination):
             os.fsync(directory)
         finally:
             os.close(directory)
-    return verify_backup(destination)
+    return verify_backup(destination, expected_version=expected_version)
+
+
+def backup_database(path: Path, backup: Path, *, lock_timeout: float = 3) -> BackupResult:
+    """Snapshot a supported database under writer exclusion; never overwrite.
+
+    Operators must still stop application writers and protect parent paths.
+    The returned version is the exact schema verified in the saved snapshot.
+    """
+    if isinstance(lock_timeout, bool) or not isinstance(lock_timeout, (int, float)) or not 0 < lock_timeout <= 10:
+        raise MigrationError("invalid_migration_timeout")
+    db = None
+    try:
+        path, backup = _path(path, existing=True), _path(backup, existing=False)
+        if path.resolve() == backup.resolve():
+            raise MigrationError("invalid_backup_path")
+        db = _open(path, timeout=lock_timeout)
+        db.execute("BEGIN IMMEDIATE")
+        version = _schema(db)
+        _integrity(db)
+        digest = _backup(path, backup, expected_version=version)
+        return BackupResult(version, digest)
+    except (OSError, sqlite3.Error):
+        raise MigrationError("backup_unavailable") from None
+    finally:
+        if db is not None:
+            if db.in_transaction:
+                db.rollback()
+            db.close()
 
 
 def migrate(path: Path, backup: Path, *, lock_timeout: float = 3) -> MigrationResult:

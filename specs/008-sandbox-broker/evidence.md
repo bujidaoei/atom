@@ -461,3 +461,10 @@ Reports are in .logs. Existing Starlette/httpx deprecation remains. No Pi edits,
 
 ## Continuation — release authority audit (2026-10-01)
 Baseline e7c4bd3; previous turn was progress. Actual publish/adopt/acceptance/preview/storage/serialization/frontend sources confirm mutable publication/adoption, timestamp freshness and unpinned iframe testing. Retrieved official Lovable publication and historical Replit rollback documentation. Added contracts/revision-release.md with identity, transaction, authority, migration and acceptance requirements. This is source/design evidence only: no production behavior changed or test gate closed. Next action is additive schema/repository implementation. No Pi changes, credentials, push or deployment.
+
+## Continuation — supported-version backup prerequisite (2026-10-01)
+Baseline ab89707; prior turn was progress. Migration inspection found backup verification fixed to baseline and immutable v1 journal/provenance constraints incompatible with naive additive release migration. Added public backup_database for exact supported schema snapshots under writer exclusion, plus explicit expected-version verification. No v1 schema/hash changes and no v2 claim.
+Real SQLite tests cover baseline/v1 committed WAL capture, restoration preserving project content and v1 workspace/journal rows, source-version preservation, exclusive destination, writer contention, drift and invalid expected versions. Existing DDL crash/restore tests remain passing. Actual restricted Linux container additionally backs up v1, verifies private 0600 mode, restores and validates exact v1 schema, alongside prior migration process-exit rehearsal.
+versioned-backup: 19 tests, 0 failures, 0 errors, 0 skips, 2.425 seconds
+versioned-backup-linux: 1 tests, 0 failures, 0 errors, 0 skips, 2.010 seconds
+Reports in .logs. Existing Starlette/httpx warning remains. Spec/plan/tasks/data model/contract/quickstart/migration synchronized; T015 stays open. No credentials, production data, Pi edits, push or deployment. New schema, repository operations, release/browser verification and enterprise rollout remain open.

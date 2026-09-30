@@ -68,3 +68,5 @@ Post-registration deadline: execution may remain closed/confirmed/succeeded with
 Cancellation ownership is process-local in the orchestrator cancellation-task map; it is not a durable distributed lease. Persisted Run/project terminal states and broker execution reconciliation retain their separate roles after process death.
 
 Planned extension: immutable verification executions/evidence, releases, publication generation/pointer and adoption provenance. Schema remains unimplemented; legacy records must not receive inferred trusted identities. See contracts/revision-release.md.
+
+BackupResult contains the verified source version and file SHA-256. It introduces no business rows or schema version. The v1 migration journal remains immutable; v2 upgrade has not been implemented.

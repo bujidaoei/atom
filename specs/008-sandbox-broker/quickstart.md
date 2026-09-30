@@ -81,3 +81,5 @@ The deadline_checkpoint integration parameter delays the real completion respons
 Run test_lifecycle.py::test_cancel_waiter_disconnect_does_not_interrupt_cleanup for both caller cases. Tests use real authenticated FastAPI ASGI cancel requests, block scripted runtime cleanup, cancel the request task, verify admission stays occupied, release cleanup, await shutdown, and verify durable terminal states plus idempotent HTTP retry. This is ASGI request cancellation, not TCP disconnect or a real broker fixture.
 
 Release acceptance is not runnable yet. Follow the migration, repository, pinned serving/verifier and publish/rollback test order in contracts/revision-release.md. Existing publish API success is not enterprise acceptance.
+
+Offline Python API: backup_database(absolute_source, new_absolute_backup) returns version/sha256; verify_backup(backup, expected_version=result.version) verifies exact schema/integrity and digest. Stop application writers and protect parent directories first. Restore via SQLite backup into a new file, then verify schema and business records. This does not upgrade the schema or run against production automatically.

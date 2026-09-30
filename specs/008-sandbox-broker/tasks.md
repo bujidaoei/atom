@@ -96,3 +96,5 @@ T008/T011 continuation: reproduced premature cleanup termination when either can
 - [ ] T018 Wire API/UI acceptance, adoption, publication and rollback to exact identities; preserve labelled legacy history. Depends on T017.
 - [ ] T019 Run browser/release/fault/migration and deployed rollback gates. Depends on T018.
 T010/T011/T012 remain open; unfinished cancellation/recovery and parent enterprise requirements are unchanged.
+
+T015 continuation: implemented writer-excluded baseline/v1 backup and explicit version verification. Real SQLite WAL/restore/overwrite/contention/drift tests and Linux container backup/restore pass. v2 journal and revision provenance constraints still need deliberate migration; T015 remains unchecked.
