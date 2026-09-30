@@ -1,0 +1,224 @@
+[
+  {
+    "name": "calculator",
+    "id": "804f9eedee3b4c3b99bec6f6a9b9787d",
+    "status": "ready",
+    "http": 200,
+    "errors": [],
+    "checks": [
+      {
+        "key": "display-area",
+        "checkIndex": 0,
+        "passed": true,
+        "note": "匹配到 [data-testid='calculator']"
+      },
+      {
+        "key": "display-area",
+        "checkIndex": 1,
+        "passed": true,
+        "note": "匹配到 [data-testid='display']"
+      },
+      {
+        "key": "display-area",
+        "checkIndex": 2,
+        "passed": true,
+        "note": "包含「0」"
+      },
+      {
+        "key": "keypad-grid",
+        "checkIndex": 0,
+        "passed": true,
+        "note": "匹配到 [data-testid='keypad']"
+      },
+      {
+        "key": "keypad-grid",
+        "checkIndex": 1,
+        "passed": true,
+        "note": "匹配到 [data-testid='key-add']"
+      },
+      {
+        "key": "keypad-grid",
+        "checkIndex": 2,
+        "passed": true,
+        "note": "匹配到 [data-testid='key-equals']"
+      },
+      {
+        "key": "compute",
+        "checkIndex": 0,
+        "passed": true,
+        "note": "点击后出现了 [data-testid='display'][data-value='10']"
+      },
+      {
+        "key": "compute",
+        "checkIndex": 1,
+        "passed": true,
+        "note": "点击后出现了 [data-testid='display'][data-value='-5']"
+      },
+      {
+        "key": "compute",
+        "checkIndex": 2,
+        "passed": true,
+        "note": "点击后出现了 [data-testid='display'][data-value='42']"
+      },
+      {
+        "key": "clear-and-error",
+        "checkIndex": 0,
+        "passed": true,
+        "note": "点击后出现了 [data-testid='display'][data-state='error']"
+      },
+      {
+        "key": "clear-and-error",
+        "checkIndex": 1,
+        "passed": true,
+        "note": "包含「不能除以零」"
+      },
+      {
+        "key": "clear-and-error",
+        "checkIndex": 2,
+        "passed": true,
+        "note": "点击后出现了 [data-testid='display'][data-value='0']"
+      }
+    ],
+    "passed": 12,
+    "total": 12,
+    "mobileOverflow": false
+  },
+  {
+    "name": "lottery",
+    "id": "5c2571b2666e4532ae4558e2ec0e156b",
+    "status": "ready",
+    "http": 200,
+    "errors": [],
+    "checks": [
+      {
+        "key": "layout-inputs",
+        "checkIndex": 0,
+        "passed": true,
+        "note": "匹配到 [data-testid='name-input']"
+      },
+      {
+        "key": "layout-inputs",
+        "checkIndex": 1,
+        "passed": true,
+        "note": "匹配到 [data-testid='add-btn']"
+      },
+      {
+        "key": "layout-inputs",
+        "checkIndex": 2,
+        "passed": true,
+        "note": "匹配到 [data-testid='draw-btn']"
+      },
+      {
+        "key": "add-name",
+        "checkIndex": 0,
+        "passed": true,
+        "note": "点击后出现了 [data-testid='name-item']"
+      },
+      {
+        "key": "add-name",
+        "checkIndex": 1,
+        "passed": true,
+        "note": "包含「张三」"
+      },
+      {
+        "key": "draw-winner",
+        "checkIndex": 0,
+        "passed": true,
+        "note": "点击后出现了 [data-testid='winner-display']"
+      },
+      {
+        "key": "no-repeat-reset",
+        "checkIndex": 0,
+        "passed": true,
+        "note": "点击后出现了 [data-testid='pool-empty-hint']"
+      },
+      {
+        "key": "no-repeat-reset",
+        "checkIndex": 1,
+        "passed": true,
+        "note": "包含「已抽完」"
+      },
+      {
+        "key": "no-repeat-reset",
+        "checkIndex": 2,
+        "passed": true,
+        "note": "点击后出现了 [data-testid='empty-hint']"
+      }
+    ],
+    "passed": 9,
+    "total": 9,
+    "mobileOverflow": false
+  },
+  {
+    "name": "snake",
+    "id": "79aa169d4c9c48ceb093991ec15bbc2b",
+    "status": "ready",
+    "http": 200,
+    "errors": [],
+    "checks": [
+      {
+        "key": "board-render",
+        "checkIndex": 0,
+        "passed": true,
+        "note": "匹配到 [data-testid='game-board']"
+      },
+      {
+        "key": "board-render",
+        "checkIndex": 1,
+        "passed": true,
+        "note": "匹配到 [data-testid='game-canvas']"
+      },
+      {
+        "key": "hud-score-status",
+        "checkIndex": 0,
+        "passed": true,
+        "note": "匹配到 [data-testid='score-panel']"
+      },
+      {
+        "key": "hud-score-status",
+        "checkIndex": 1,
+        "passed": true,
+        "note": "包含「0」"
+      },
+      {
+        "key": "hud-score-status",
+        "checkIndex": 2,
+        "passed": true,
+        "note": "匹配到 [data-testid='status-text']"
+      },
+      {
+        "key": "control-bar",
+        "checkIndex": 0,
+        "passed": true,
+        "note": "匹配到 [data-testid='controls']"
+      },
+      {
+        "key": "control-bar",
+        "checkIndex": 1,
+        "passed": true,
+        "note": "包含「方向键」"
+      },
+      {
+        "key": "state-machine-flow",
+        "checkIndex": 0,
+        "passed": true,
+        "note": "点击后出现了 [data-testid='status-running']"
+      },
+      {
+        "key": "state-machine-flow",
+        "checkIndex": 1,
+        "passed": true,
+        "note": "点击后出现了 [data-testid='status-paused']"
+      },
+      {
+        "key": "state-machine-flow",
+        "checkIndex": 2,
+        "passed": true,
+        "note": "点击后出现了 [data-testid='dir-indicator'][data-dir='down']"
+      }
+    ],
+    "passed": 10,
+    "total": 10,
+    "mobileOverflow": false
+  }
+]

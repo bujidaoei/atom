@@ -1,0 +1,47 @@
+[
+  {
+    "name": "calculator",
+    "id": "804f9eedee3b4c3b99bec6f6a9b9787d",
+    "status": "ready",
+    "planningSeconds": 78.74,
+    "buildSeconds": 74.57,
+    "latestRun": {
+      "id": "ff11d2a151564dabaf4b8ca2b589b9d6",
+      "status": "done",
+      "phase": "build",
+      "error": null,
+      "startedAt": "2026-09-30T06:52:31.349761",
+      "finishedAt": "2026-09-30T06:53:43.878017"
+    }
+  },
+  {
+    "name": "lottery",
+    "id": "5c2571b2666e4532ae4558e2ec0e156b",
+    "status": "ready",
+    "planningSeconds": 81.13,
+    "buildSeconds": 69.96,
+    "latestRun": {
+      "id": "6d71620b5c9c4c7ebdaf3cafe82f67d7",
+      "status": "done",
+      "phase": "build",
+      "error": null,
+      "startedAt": "2026-09-30T06:52:32.508321",
+      "finishedAt": "2026-09-30T06:53:40.535265"
+    }
+  },
+  {
+    "name": "snake",
+    "id": "79aa169d4c9c48ceb093991ec15bbc2b",
+    "status": "ready",
+    "planningSeconds": 81.31,
+    "buildSeconds": 66.72,
+    "latestRun": {
+      "id": "9b3d17eaf6da45f6907bb869cd7e05bb",
+      "status": "done",
+      "phase": "build",
+      "error": null,
+      "startedAt": "2026-09-30T06:52:33.434828",
+      "finishedAt": "2026-09-30T06:53:38.913451"
+    }
+  }
+]

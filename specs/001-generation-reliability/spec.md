@@ -1,6 +1,6 @@
 # Specification: Reliable generation and acceptance
 
-Created: 2026-09-30 | Status: Implementation in progress
+Created: 2026-09-30 | Status: Implemented and deployed; measured limitations in evidence.md
 Input: Repair truncation recovery, 180-second deadline, stale activity, file tools and acceptance prerequisites; test, push and deploy under Spec Kit.
 
 ## User Scenarios & Testing

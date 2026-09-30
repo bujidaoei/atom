@@ -6,6 +6,7 @@
 - Real filesystem/Python/Pi write/read/edit/glob/grep roundtrip in two workspaces, traversal/junction rejection pre-cancel and running background-process cancellation verified (Windows MSYS process group termination).
 - `cd frontend && npm test`: 2 stream reducer tests and Chromium 145 prerequisite suite passed. Missing input, invalid selector and missing setup target fail as expected; fill/press and subsequent checks succeed, including while host preview tab is hidden.
 - Frontend TypeScript and production Vite build passed.
+- Follow-up Chromium regression: temporary 150ms button disable is awaited across setup and final clicks; permanently disabled controls still fail. Eight fixture outcomes match expectations.
 - Pi source hash verification passed: 1,905 files at upstream f07218c4d4bbc12bef056a7058c3dd49dfe41abe.
 
 ## Live model and browser evidence
@@ -26,3 +27,10 @@ Actual UI on http://127.0.0.1:5181: timeout notice survives reload, no stale Ale
 
 ## Limits
 These runs verify the listed scenarios, not a statistical guarantee for all models/prompts or zero defects. Existing test environment emits Starlette test-client deprecation and short test-secret warnings. Production remains single API worker; browser acceptance is client-reported. Deployment verification is tracked separately in deployment.md.
+
+## Production follow-up
+First deployed round: lottery ready in 72.47s, snake ready in 85.47s, calculator timed_out in 182.42s including transport/polling/cleanup. Browser checks: calculator 7/7 despite timeout (not counted completed), lottery 9/11, snake 9/10 with mobile overflow. Exact results retained in production-*.json. The calculator subsequently completed through the actual continue/cancel/reload/continue UI and persisted 7/7; publish returned 200 and unpublish returned 404. Failed lottery setup duplicated final triggers and snake contract demanded a prohibited reverse turn. Added explicit contract semantics, responsive constraints, and bounded enabled-control polling; these do not retroactively fix old generated contracts.
+
+Second deployed round (a814938): calculator ready in 74.57s, lottery ready in 69.96s, snake ready in 66.72s. Calculator passed 12/12 and lottery 9/9 immediately. Snake initially passed 7/10 with a null getContext runtime error; a real /revise request repaired the generated application in 51.03s, without changing its contract. Final browser results: 12/12, 9/9, 10/10; all HTTP 200, no page errors, no horizontal overflow at 390x844. Thus initial functional success was 2/3, final success after one explicit repair was 3/3. Original and final results are separate JSON files. Mobile screenshots were visually reviewed. The deployed workspace UI also persisted a new 12/12 acceptance record on the new calculator; the harness verifies the record ID changed, avoiding reuse of old results.
+
+Known boundary: static validation cannot detect all generated JavaScript runtime bugs. Model-generated apps can still need a follow-up repair or exceed the budget; the product exposes these outcomes rather than claiming guaranteed first-pass quality. Automated server-side browser certification is not implemented and is not claimed complete.

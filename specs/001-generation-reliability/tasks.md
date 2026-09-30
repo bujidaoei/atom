@@ -18,7 +18,7 @@
 ## Release
 - [x] T010 Full tests/build/Pi verification recorded in evidence.md.
 - [x] T011 Three live model/browser scenarios recorded in evidence.md.
-- [ ] T012 Commit/push, backup/deploy and production verification in deployment.md.
-- [ ] T014 Production follow-up: bounded enabled-control waits, explicit final-action semantics, valid game prerequisites and mobile generation constraints; retain failed production evidence and rerun.
+- [x] T012 Commit/push, backup/deploy and production verification in deployment.md.
+- [x] T014 Production follow-up: bounded enabled-control waits, explicit final-action semantics, valid game prerequisites and mobile generation constraints; retain failed production evidence and rerun.
 
 Dependencies: T001 -> T002 -> T003/T004/T007/T008 -> T005/T006/T009 -> T010 -> T011 -> T012. Tests can run concurrently. Source edits sequential. Check tasks only after validation; fault injection is distinct from live evidence.

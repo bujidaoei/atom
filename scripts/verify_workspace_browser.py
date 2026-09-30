@@ -22,11 +22,11 @@ with sync_playwright() as p:
     errors = []
     page.on("pageerror", lambda error: errors.append(str(error)))
     pid = row["project"]["id"]
-    page.goto(base + f"/app/p/{pid}")
+    page.goto(base + f"/app/p/{pid}", wait_until="domcontentloaded")
     detail = context.request.get(base + f"/api/projects/{pid}").json()["project"]
     if detail["status"] != "ready":
         page.get_by_role("button", name="继续生成", exact=True).wait_for()
-        page.reload()
+        page.reload(wait_until="domcontentloaded")
         page.get_by_role("button", name="继续生成", exact=True).wait_for()
         assert page.get_by_text("Alex 在跑", exact=True).count() == 0
         page.screenshot(path=str(root / ".logs/workspace-timeout.png"), full_page=True)
@@ -34,7 +34,7 @@ with sync_playwright() as p:
         page.get_by_role("button", name="停止", exact=True).wait_for()
         page.get_by_role("button", name="停止", exact=True).click()
         page.get_by_role("button", name="继续生成", exact=True).wait_for()
-        page.reload()
+        page.reload(wait_until="domcontentloaded")
         page.get_by_role("button", name="继续生成", exact=True).wait_for()
         assert page.get_by_text("Alex 在跑", exact=True).count() == 0
         detail = context.request.get(base + f"/api/projects/{pid}").json()["project"]
@@ -54,16 +54,18 @@ with sync_playwright() as p:
             if detail["status"] not in {"building", "cancelled"}:
                 break
         assert detail["status"] == "ready", detail["latestRun"]
-    page.reload()
+    previous_acceptance = (detail.get("acceptance") or {}).get("id")
+    page.reload(wait_until="domcontentloaded")
     page.get_by_role("tab", name="契约", exact=True).click()
     page.get_by_role("button", name="运行验收", exact=False).click()
     for _ in range(30):
         page.wait_for_timeout(1000)
         detail = context.request.get(base + f"/api/projects/{pid}").json()["project"]
-        if detail["acceptance"]:
+        if detail["acceptance"] and detail["acceptance"]["id"] != previous_acceptance:
             break
     assert (
         detail["acceptance"]
+        and detail["acceptance"]["id"] != previous_acceptance
         and detail["acceptance"]["passed"] == detail["acceptance"]["total"]
     ), detail["acceptance"]
     page.screenshot(path=str(root / ".logs/workspace-accepted.png"), full_page=True)

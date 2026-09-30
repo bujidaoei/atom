@@ -1,0 +1,13 @@
+{
+  "id": "79aa169d4c9c48ceb093991ec15bbc2b",
+  "status": "ready",
+  "seconds": 51.03,
+  "latestRun": {
+    "id": "7089abdcc6d542c3a2346597ae81bfa9",
+    "status": "done",
+    "phase": "revise",
+    "error": null,
+    "startedAt": "2026-09-30T06:55:10.435171",
+    "finishedAt": "2026-09-30T06:56:00.582694"
+  }
+}
