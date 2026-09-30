@@ -145,12 +145,12 @@ class RevisionRepository:
                 or run['project_id'] != workspace['project_id'] or run['heat_id'] != workspace['heat_id']):
             raise RevisionError('revision_conflict')
 
-    def _active(self, db, attempt, workspace):
+    def _active(self, db, attempt, workspace, *, registered_head=None):
         if (attempt['state'] != 'active' or attempt['termination_state'] != 'pending'
                 or attempt['deadline'] <= int(time.time())
                 or workspace['active_attempt_id'] != attempt['id']
                 or workspace['generation'] != attempt['generation']
-                or workspace['current_revision_id'] != attempt['base_revision_id']):
+                or workspace['current_revision_id'] != (registered_head or attempt['base_revision_id'])):
             raise RevisionError('revision_conflict')
         self._current_run(db, workspace, attempt['run_id'])
 
@@ -238,6 +238,17 @@ class RevisionRepository:
             attempt, workspace = self._attempt(db,owner,attempt_id)
             self._active(db,attempt,workspace)
             return self._view(db,attempt)
+
+    def completion(self, owner: str, attempt_id: str) -> Attempt:
+        """Reload checkpoint authority, including a committed but unclosed receipt."""
+        _identifiers(owner, attempt_id)
+        with self._transaction() as db:
+            attempt, workspace = self._attempt(db, owner, attempt_id)
+            receipt = self._receipt(db, attempt_id, workspace['id'])
+            self._active(db, attempt, workspace, registered_head=receipt.revision_id if receipt else None)
+            if attempt['broker_attempt_id'] is None:
+                raise RevisionError('revision_conflict')
+            return self._view(db, attempt)
 
     def bind(self, owner: str, attempt_id: str, broker_attempt_id: str) -> Attempt:
         """Bind one observed broker identity without granting fresh execution."""
@@ -342,7 +353,7 @@ class RevisionRepository:
                 db.execute("UPDATE revision_attempts SET state='cancel_requested',termination_state='unknown' WHERE id=?", (attempt_id,))
                 return
             receipt = db.execute('SELECT 1 FROM revision_receipts WHERE attempt_id=?', (attempt_id,)).fetchone()
-            if outcome == 'succeeded' and receipt is None:
+            if outcome == 'succeeded' and (receipt is None or attempt['state'] != 'active'):
                 raise RevisionError('revision_conflict')
             db.execute("""UPDATE revision_attempts SET state='closed',termination_state='confirmed',outcome=?,closed_at=?
                 WHERE id=?""", (outcome, int(time.time()), attempt_id))

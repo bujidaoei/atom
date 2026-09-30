@@ -38,6 +38,14 @@ class CheckpointAcknowledgement:
     revision: str
 
 
+@dataclass(frozen=True)
+class CheckpointState:
+    attempt_id: str
+    state: str
+    version: int
+    revision: str | None
+
+
 def _origin(value):
     try:
         if not isinstance(value, str) or any(ord(c) < 33 or ord(c) > 126 or c == '\\' for c in value):
@@ -186,6 +194,21 @@ class BrokerClient:
             raise BrokerClientError('invalid_broker_response')
         _snapshot(payload,revision)
         return CheckpointExport(identity,version,revision,payload)
+
+    async def checkpoint_status(self, grant: Grant, attempt_id: str) -> CheckpointState:
+        _identifier(attempt_id)
+        _, raw = await self._request('/v1/admin/checkpoints/status',
+            json.dumps({'attempt_id':attempt_id}).encode(), headers={
+                'content-type':'application/json', 'x-atom-grant':self._token(grant)})
+        value = _json(raw)
+        if (set(value) != {'attempt_id','state','version','revision'} or value['attempt_id'] != attempt_id
+                or value['state'] not in ('quiescing','checkpointed') or type(value['version']) is not int
+                or not 1 <= value['version'] <= 9223372036854775807
+                or (value['state'] == 'quiescing' and value['revision'] is not None)
+                or (value['state'] == 'checkpointed' and
+                    (not isinstance(value['revision'], str) or not _HASH.fullmatch(value['revision'])))):
+            raise BrokerClientError('invalid_broker_response')
+        return CheckpointState(value['attempt_id'],value['state'],value['version'],value['revision'])
 
     async def confirm(self, grant: Grant, exported: CheckpointExport, receipt: Receipt) -> CheckpointAcknowledgement:
         if not isinstance(exported,CheckpointExport) or not isinstance(receipt,Receipt):

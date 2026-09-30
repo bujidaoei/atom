@@ -107,3 +107,27 @@ def test_export_integrity_rejects_actual_malformed_network_responses(case):
         server.shutdown()
         server.server_close()
         thread.join(timeout=3)
+
+
+@pytest.mark.parametrize('change',[{'attempt_id':'b'*32},{'state':'ready'},{'version':True},
+    {'revision':None},{'state':'quiescing','revision':'b'*64}])
+def test_checkpoint_status_rejects_uncorrelated_network_evidence(change):
+    import time
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self,*args): pass
+        def do_POST(self):
+            self.rfile.read(int(self.headers['Content-Length']))
+            self.send_response(200);self.send_header('Content-Type','application/json');self.end_headers()
+            self.wfile.write(json.dumps({'attempt_id':'a'*32,'state':'checkpointed','version':4,
+                                        'revision':'b'*64,**change}).encode())
+    server=ThreadingHTTPServer(('127.0.0.1',0),Handler)
+    thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
+    async def scenario():
+        now=int(time.time())
+        grant=Grant('g','o','p','r','a',1,'b'*64,now,now+120)
+        async with BrokerClient(f'http://127.0.0.1:{server.server_port}',secrets.token_urlsafe(32),GrantCodec(b'k'*32)) as client:
+            with pytest.raises(BrokerClientError,match='invalid_broker_response'):
+                await client.checkpoint_status(grant,'a'*32)
+    try: asyncio.run(scenario())
+    finally:
+        server.shutdown();server.server_close();thread.join(timeout=3)

@@ -378,7 +378,7 @@ def coordinator_source_bundle():
     return base64.b64encode(result.getvalue()).decode()
 
 
-@pytest.mark.parametrize('failure', ['none','missing','cancel'])
+@pytest.mark.parametrize('failure', ['none','missing','cancel','registered','acknowledged','storage'])
 def test_prepare_coordinator_with_real_linux_store_and_http(tmp_path, failure):
     path = tmp_path / 'api.db'
     create_api_database(path)
@@ -397,7 +397,7 @@ from app.revisions import RevisionRepository,RevisionError
 from app.migrations import migrate
 from app.execution import ExecutionCoordinator
 from app.sandbox.client import BrokerClient
-from app.sandbox.grants import GrantCodec
+from app.sandbox.grants import GrantCodec,Grant
 import httpx,struct
 async def main():
     async def relay(reader,writer):
@@ -471,8 +471,38 @@ async def main():
                 response=await runtime.get(origin+'/v1/attempts/'+lease.attempt_id,
                     headers={'Authorization':'Bearer '+lease.grant})
                 assert response.status_code==200 and response.json()['state']=='ready'
-            state=await coordinator.cancel('owner','attempt')
-            assert state.state=='closed' and state.outcome=='cancelled'
+                response=await runtime.post(origin+'/v1/attempts/'+lease.attempt_id+'/files',
+                    headers={'Authorization':'Bearer '+lease.grant},json={'operation_id':'write',
+                    'tool_call_id':'tool','operation':{'op':'write','path':'result.txt','content':'actual coordinator output'}})
+                assert response.status_code==200
+            if inputs['failure'] in ('registered','acknowledged'):
+                grant=Grant(intent.grant_id,'owner',intent.project_id,intent.run_id,intent.id,
+                            intent.generation,intent.base_revision,intent.issued_at,intent.deadline)
+                exported=await client.export(grant,lease.attempt_id)
+                artifact=store.put(exported.payload)
+                receipt=repo.register('owner','attempt',lease.attempt_id,intent.grant_id,artifact)
+                if inputs['failure']=='acknowledged': await client.confirm(grant,exported,receipt)
+                coordinator=ExecutionCoordinator(RevisionRepository(path),client)
+            if inputs['failure']=='storage':
+                import fcntl,os
+                lock=os.open(store_path,os.O_RDONLY|os.O_DIRECTORY);fcntl.flock(lock,fcntl.LOCK_EX)
+                try:
+                    try: await coordinator.complete('owner','attempt',store)
+                    except ArtifactError: pass
+                    else: raise AssertionError('failed storage accepted')
+                finally:
+                    fcntl.flock(lock,fcntl.LOCK_UN);os.close(lock)
+                state=repo.recovery('owner','attempt')
+                assert state.state=='closed' and state.outcome=='failed' and state.receipt is None
+                with sqlite3.connect(path) as db:
+                    assert db.execute('SELECT current_revision_id FROM revision_workspaces').fetchone()==(intent.base_revision_id,)
+            else:
+                state=await coordinator.complete('owner','attempt',store)
+                assert state.state=='closed' and state.outcome=='succeeded' and state.receipt is not None
+                assert b'actual coordinator output' in store.read(state.receipt.artifact_key)
+                assert await coordinator.complete('owner','attempt',store)==state
+                with sqlite3.connect(path) as db:
+                    assert db.execute('SELECT COUNT(*) FROM revision_outbox').fetchone()==(1,)
     proxy.close();await proxy.wait_closed()
     print(json.dumps({'state':state.state,'outcome':state.outcome}))
 asyncio.run(main())
@@ -490,7 +520,7 @@ asyncio.run(main())
             assert status==0,err.decode()
             assert json.loads(out)['state']=='closed'
             worker=lifecycle.registry.find_grant('target')
-            if failure != 'none': assert worker is None
+            if failure in ('missing','cancel'): assert worker is None
             else: assert worker.state=='terminated' and lifecycle.driver.inspect(worker) is None
         finally:
             # Exact unique infrastructure name; never touch unrelated containers.

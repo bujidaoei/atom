@@ -250,6 +250,20 @@ def create_app(config: BrokerConfig | None = None) -> FastAPI:
             attempt = await control(lifecycle.seed, grant, payload)
             return JSONResponse({"attempt_id": attempt.id, "state": attempt.state, "deadline": attempt.deadline})
 
+    @app.post("/v1/admin/checkpoints/status")
+    async def checkpoint_status(request: Request):
+        authenticate(request)
+        grant = signed_header(request, "x-atom-grant")
+        async with transfer() as lifecycle:
+            attempt_id = await _body(request, "attempt_id")
+            if not re.fullmatch(r"[0-9a-f]{32}", attempt_id):
+                raise ServiceError(400, "invalid_request")
+            attempt = await control(lifecycle.registry.checkpoint_status, grant)
+            if attempt.id != attempt_id:
+                raise ServiceError(409, "ownership_conflict")
+            return {"attempt_id": attempt.id, "state": attempt.state, "version": attempt.version,
+                    "revision": attempt.checkpoint_revision}
+
     @app.post("/v1/admin/checkpoints/export")
     async def export_checkpoint(request: Request):
         authenticate(request)

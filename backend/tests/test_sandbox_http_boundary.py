@@ -64,8 +64,9 @@ def test_runtime_grant_and_duplicate_authorization_cannot_administer(config):
         Grant("g", "o", "p", "r", "a", 1, "a" * 64, now, now + 30))
     for headers in ({}, {"authorization": "Bearer " + token},
                     [("authorization", "Bearer " + config.admin_token), ("authorization", "Bearer " + config.admin_token)]):
-        response = client.post("/v1/admin/provision", content=b"x" * 20000, headers=headers)
-        assert response.status_code == 401
+        for route in ('/v1/admin/provision','/v1/admin/checkpoints/status'):
+            response = client.post(route, content=b"x" * 20000, headers=headers)
+            assert response.status_code == 401
     assert not config.registry_path.exists()
 
 
@@ -87,3 +88,12 @@ def test_stalled_stream_has_a_real_read_deadline():
         asyncio.run(_body(request, "grant"))
     assert error.value.status == 408
     assert 4 <= time.monotonic() - started < 8
+
+
+def test_checkpoint_status_requires_independent_signed_grant(config):
+    client=TestClient(create_app(config))
+    for token in ('','invalid'):
+        response=client.post('/v1/admin/checkpoints/status',json={'attempt_id':'a'*32},
+            headers={'authorization':'Bearer '+config.admin_token,'x-atom-grant':token})
+        assert response.status_code==403
+    assert not config.registry_path.exists()

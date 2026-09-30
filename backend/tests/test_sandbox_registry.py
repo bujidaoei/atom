@@ -331,3 +331,20 @@ def test_orphan_observation_is_durable_versioned_and_not_an_attempt(registry):
     assert reopened.pending_orphans() == []
     with pytest.raises(RegistryError, match="orphan_identity_conflict"):
         reopened.observe_orphan(done.id, done.attempt_id)
+
+
+def test_checkpoint_status_is_read_only_and_keeps_scope_revocation_expiry_checks(registry, grant):
+    attempt=ready(registry,grant)
+    with pytest.raises(RegistryError): registry.checkpoint_status(grant)
+    attempt=registry.transition(grant,attempt.version,'quiescing')
+    assert registry.checkpoint_status(grant)==attempt
+    with pytest.raises(RegistryError): registry.checkpoint_status(replace(grant,attempt='other'))
+    attempt=registry.confirm_checkpoint(grant,attempt.version,'b'*64)
+    assert registry.checkpoint_status(grant)==attempt
+    expired=Registry(registry.path,clock=lambda:grant.exp)
+    with pytest.raises(RegistryError,match='grant_expired'): expired.checkpoint_status(grant)
+    assert registry.find(attempt.id)==attempt
+    registry.revoke(grant.jti)
+    revoked=registry.find(attempt.id)
+    with pytest.raises(RegistryError,match='grant_revoked'): registry.checkpoint_status(grant)
+    assert registry.find(attempt.id)==revoked

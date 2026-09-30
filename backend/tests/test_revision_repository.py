@@ -505,10 +505,31 @@ def test_cancel_commit_race_has_one_durable_order_and_old_cancel_preserves_succe
             cancelled.result(timeout=10)
         receipt = repo.receipt('owner', attempt_id, 'broker-' + attempt_id, 'grant-' + attempt_id)
         assert receipt == result
-        repo.observe_termination('owner', attempt_id, confirmed=True, outcome='succeeded' if receipt else 'cancelled')
+        with pytest.raises(RevisionError, match='revision_conflict'):
+            repo.observe_termination('owner', attempt_id, confirmed=True, outcome='succeeded')
+        repo.observe_termination('owner', attempt_id, confirmed=True, outcome='cancelled')
     successor = allocate(repo, main, attempt='successor')
     repo.cancel('owner', 'attempt-0')
     with pytest.raises(RevisionError, match='revision_not_found'):
         repo.receipt('stranger','attempt-0','broker-attempt-0','grant-attempt-0')
     with sqlite3.connect(path) as db:
         assert db.execute('SELECT active_attempt_id,generation FROM revision_workspaces WHERE id=?',(main,)).fetchone() == ('successor',successor.generation)
+
+
+def test_completion_authority_survives_registration_but_not_cancel_or_successor(repository):
+    repo,path,main,heat=repository
+    repo.bootstrap('owner',main,BASE)
+    bound=allocate(repo,main)
+    assert repo.completion('owner','attempt')==bound
+    receipt=register(repo)
+    assert RevisionRepository(path).completion('owner','attempt')==bound
+    with pytest.raises(RevisionError,match='revision_conflict'): repo.execution('owner','attempt')
+    with pytest.raises(RevisionError,match='revision_not_found'): repo.completion('stranger','attempt')
+    repo.cancel('owner','attempt')
+    with pytest.raises(RevisionError,match='revision_conflict'): repo.completion('owner','attempt')
+    with pytest.raises(RevisionError,match='revision_conflict'):
+        repo.observe_termination('owner','attempt',confirmed=True,outcome='succeeded')
+    repo.observe_termination('owner','attempt',confirmed=True,outcome='cancelled')
+    allocate(repo,main,attempt='successor')
+    with pytest.raises(RevisionError,match='revision_conflict'): repo.completion('owner','attempt')
+    assert repo.recovery('owner','attempt').receipt==receipt

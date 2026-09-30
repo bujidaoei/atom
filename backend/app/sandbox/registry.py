@@ -241,6 +241,14 @@ class Registry:
                 raise RegistryError("attempt_not_exportable")
             return attempt
 
+    def checkpoint_status(self, grant: Grant) -> Attempt:
+        """Read checkpoint evidence without changing execution authority."""
+        with self._transaction() as db:
+            attempt = self._owned(db, grant)
+            if attempt.state not in {'quiescing', 'checkpointed'}:
+                raise RegistryError('attempt_not_exportable')
+            return attempt
+
     @staticmethod
     def _version(attempt: Attempt, expected: int) -> None:
         if type(expected) is not int or expected != attempt.version:
