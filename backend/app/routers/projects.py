@@ -14,6 +14,7 @@ from ..config import get_settings
 from ..deps import CurrentUser, DbSession, OwnedProject
 from ..errors import AtomError
 from ..events import bus
+from ..revision_http import project_revision_view
 from ..models import AcceptanceRun, Message, Project, Race, RaceHeat, Requirement
 from ..serialize import acceptance_json, project_detail, project_summary, race_json
 from ..services.orchestrator import orchestrator
@@ -115,14 +116,23 @@ async def delete_project(project: OwnedProject, session: DbSession) -> dict[str,
 
 
 @router.get("/{project_id}/files/{path:path}", response_class=PlainTextResponse)
-def read_file(project: OwnedProject, path: str) -> PlainTextResponse:
-    target = storage.resolve_within(storage.workspace_dir(project.id), path)
+def read_file(project: OwnedProject, path: str, request: Request) -> PlainTextResponse:
+    if get_settings().sandbox_mode == 'broker':
+        with project_revision_view(request, project) as view:
+            return _read_text(view.path, path, revision_id=view.revision.revision_id)
+    return _read_text(storage.workspace_dir(project.id), path)
+
+
+def _read_text(root, path: str, *, revision_id: str | None = None) -> PlainTextResponse:
+    target = storage.resolve_within(root, path)
     if target is None or not target.is_file():
         raise HTTPException(status.HTTP_404_NOT_FOUND, "文件不存在")
     if target.suffix.lower() not in _TEXT_SUFFIXES:
         raise HTTPException(status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, "该文件不是文本")
     try:
-        return PlainTextResponse(target.read_text("utf-8"))
+        return PlainTextResponse(target.read_text("utf-8"), headers={
+            'X-Atom-Revision':revision_id, 'Cache-Control':'no-store'
+        } if revision_id is not None else None)
     except (UnicodeDecodeError, OSError):
         raise HTTPException(
             status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, "该文件不是文本"

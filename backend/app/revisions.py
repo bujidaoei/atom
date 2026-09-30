@@ -177,6 +177,19 @@ class RevisionRepository:
             db.execute('INSERT INTO revision_artifacts VALUES (?,?,?,?)',
                        (artifact.key, artifact.revision, artifact.size, int(time.time())))
 
+    def find_workspace(self, owner: str, project_id: str, heat_id: str | None = None) -> str:
+        _identifiers(owner, project_id)
+        if heat_id is not None:
+            _identifiers(heat_id)
+        with self._transaction() as db:
+            row = db.execute('''SELECT w.id FROM revision_workspaces w
+                JOIN projects p ON p.id=w.project_id
+                WHERE p.user_id=? AND w.project_id=? AND w.heat_id IS ?''',
+                             (owner, project_id, heat_id)).fetchone()
+            if row is None:
+                raise RevisionError('revision_not_found')
+            return row['id']
+
     def current_revision(self, owner: str, workspace_id: str) -> WorkspaceRevision | None:
         _identifiers(owner, workspace_id)
         with self._transaction() as db:

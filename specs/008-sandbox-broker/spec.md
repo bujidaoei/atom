@@ -93,3 +93,5 @@ FR-005 startup recovery: before broker-backed API admission, interrupted attempt
 FR-007 application startup: production requires broker mode and explicit separate broker/completion credentials. The API must hold exclusive host-local database ownership while recovering and serving, refuse unsafe or unmigrated databases, expose scoped completion/cancellation only after recovery, and reject dispatch without a prepared lease. Health must include authenticated broker readiness.
 
 FR-006 committed read identity: validation and preview must identify the registered immutable revision whose bytes they read. Owner-scoped reads must not silently fall back to the old mutable workspace. An explicitly expected revision mismatch is a conflict; temporary read extraction must be cleaned on normal and exceptional exit.
+
+FR-006 preview/file adoption: broker-mode preview and source-file routes must read committed artifacts and identify the revision in response headers. Missing service/version or corrupt artifacts must not fall back to mutable files. Draft previews, including heats, require ownership even when the project has a published slug.
