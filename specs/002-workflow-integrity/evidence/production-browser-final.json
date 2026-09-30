@@ -1,0 +1,152 @@
+[
+  {
+    "name": "minesweeper",
+    "id": "6464331bce3e443b910ebacf0bb7540b",
+    "status": "ready",
+    "http": 200,
+    "errors": [],
+    "checks": [
+      {
+        "key": "start-and-board",
+        "checkIndex": 0,
+        "passed": true,
+        "note": "匹配到 [data-testid='start-btn']"
+      },
+      {
+        "key": "start-and-board",
+        "checkIndex": 1,
+        "passed": true,
+        "note": "匹配到 [data-testid='board']"
+      },
+      {
+        "key": "start-and-board",
+        "checkIndex": 2,
+        "passed": true,
+        "note": "包含「开始」"
+      },
+      {
+        "key": "status-display",
+        "checkIndex": 0,
+        "passed": true,
+        "note": "匹配到 [data-testid='mine-count']"
+      },
+      {
+        "key": "status-display",
+        "checkIndex": 1,
+        "passed": true,
+        "note": "匹配到 [data-testid='timer']"
+      },
+      {
+        "key": "status-display",
+        "checkIndex": 2,
+        "passed": true,
+        "note": "匹配到 [data-testid='restart-btn']"
+      },
+      {
+        "key": "first-click-safe",
+        "checkIndex": 0,
+        "passed": true,
+        "note": "点击后出现了 [data-testid='cell-0-0'][data-state='revealed'][data-mine='false']"
+      },
+      {
+        "key": "flag-and-restart",
+        "checkIndex": 0,
+        "passed": true,
+        "note": "点击后出现了 [data-testid='cell-0-0'][data-state='flagged']"
+      },
+      {
+        "key": "flag-and-restart",
+        "checkIndex": 1,
+        "passed": true,
+        "note": "包含「9」"
+      },
+      {
+        "key": "flag-and-restart",
+        "checkIndex": 2,
+        "passed": true,
+        "note": "点击后出现了 [data-testid='cell-0-0'][data-state='hidden']"
+      }
+    ],
+    "passed": 10,
+    "total": 10,
+    "mobileOverflow": false
+  },
+  {
+    "name": "match3",
+    "id": "2d99f535fea34e5fa40c1c7623655340",
+    "status": "ready",
+    "http": 200,
+    "errors": [],
+    "checks": [
+      {
+        "key": "board-grid",
+        "checkIndex": 0,
+        "passed": true,
+        "note": "匹配到 [data-testid='board']"
+      },
+      {
+        "key": "board-grid",
+        "checkIndex": 1,
+        "passed": true,
+        "note": "匹配到 [data-testid='tile-0-0']"
+      },
+      {
+        "key": "board-grid",
+        "checkIndex": 2,
+        "passed": true,
+        "note": "匹配到 [data-testid='tile-7-7']"
+      },
+      {
+        "key": "hud-score-restart",
+        "checkIndex": 0,
+        "passed": true,
+        "note": "匹配到 [data-testid='score']"
+      },
+      {
+        "key": "hud-score-restart",
+        "checkIndex": 1,
+        "passed": true,
+        "note": "包含「分数：0」"
+      },
+      {
+        "key": "hud-score-restart",
+        "checkIndex": 2,
+        "passed": true,
+        "note": "匹配到 [data-testid='restart-btn']"
+      },
+      {
+        "key": "swap-match-score",
+        "checkIndex": 0,
+        "passed": true,
+        "note": "匹配到 [data-testid='fixture-btn']"
+      },
+      {
+        "key": "swap-match-score",
+        "checkIndex": 1,
+        "passed": true,
+        "note": "点击后出现了 [data-testid='match-popup']"
+      },
+      {
+        "key": "restart-reset",
+        "checkIndex": 0,
+        "passed": true,
+        "note": "匹配到 [data-testid='restart-btn']"
+      },
+      {
+        "key": "restart-reset",
+        "checkIndex": 1,
+        "passed": true,
+        "note": "点击后出现了 [data-testid='board-reset']"
+      },
+      {
+        "key": "restart-reset",
+        "checkIndex": 2,
+        "passed": true,
+        "note": "包含「分数：0」"
+      }
+    ],
+    "passed": 11,
+    "total": 11,
+    "mobileOverflow": false
+  }
+]

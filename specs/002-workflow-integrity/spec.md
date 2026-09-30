@@ -1,5 +1,5 @@
 # Specification: Workflow integrity
-Created: 2026-09-30 | Status: implemented and locally verified; production verification pending
+Created: 2026-09-30 | Status: implemented, deployed and verified for the documented scope
 
 ## User Scenarios & Testing
 ### US1 Trust project actions (P1)
