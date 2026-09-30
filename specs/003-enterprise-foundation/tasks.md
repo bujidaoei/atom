@@ -126,3 +126,5 @@ T027 continuation: cancellation cleanup now survives cancellation of API request
 T027 continuation: actual release/acceptance authority audit and refreshed official product research are recorded in feature 008 contracts/revision-release.md. Its T014 design audit is complete; T015–T019 migration, implementation and acceptance remain open.
 
 T027 / feature008 T015 continuation: baseline/v1 backup prerequisite now preserves exact version under writer exclusion with real WAL/restore and Linux tests. Release schema upgrade remains unimplemented and unchecked.
+
+T027 / feature008 T015: explicit offline v2 verification/release schema and migration component implemented and fault-tested; runtime remains v1-only. Adoption/full verifier identity/application cutover and enterprise release remain open.

@@ -244,7 +244,120 @@ def test_versioned_backup_denies_busy_writer_and_drift(legacy, tmp_path):
     assert not destination.exists()
 
 
-@pytest.mark.parametrize('version', [True, None, -1, 2, '1'])
+@pytest.mark.parametrize('version', [True, None, -1, 3, '1'])
 def test_backup_expected_version_is_explicit(legacy, version):
     with pytest.raises(MigrationError, match='invalid_backup_version'):
         verify_backup(legacy[0], expected_version=version)
+
+
+@pytest.mark.parametrize('source_version', [0, 1])
+def test_release_migration_preserves_backup_and_journal(legacy, tmp_path, source_version):
+    path, baseline = legacy
+    if source_version:
+        migrate(path, baseline)
+    backup = tmp_path / 'before-release.db'
+    result = migrate(path, backup, target_version=2)
+    assert result.version == 2 and verify(path) == 2
+    assert result.backup_sha256 == verify_backup(backup, expected_version=source_version)
+    assert not migrate(path, backup, target_version=2).applied
+    with sqlite3.connect(path) as db:
+        assert db.execute('SELECT version FROM atom_schema_migrations ORDER BY version').fetchall() == [(1,), (2,)]
+        assert db.execute('SELECT prompt FROM projects').fetchone() == ('actual preserved input',)
+        assert db.execute('SELECT count(*) FROM verification_requests').fetchone() == (0,)
+        assert db.execute('SELECT count(*) FROM release_records').fetchone() == (0,)
+    with pytest.raises(MigrationError, match='migration_downgrade_denied'):
+        migrate(path, tmp_path / 'downgrade.db')
+    assert not (tmp_path / 'downgrade.db').exists()
+    restored = tmp_path / 'restore-release.db'
+    with sqlite3.connect(backup) as src, sqlite3.connect(restored) as dst:
+        src.backup(dst)
+    assert verify(restored) == source_version
+
+
+def test_release_migration_failure_restores_v1_journal(legacy, tmp_path, monkeypatch):
+    from app.migrations import release_v2
+    path, baseline = legacy
+    migrate(path, baseline)
+    original = release_v2.apply
+    def fail(db):
+        original(db)
+        raise sqlite3.OperationalError('injected after journal rebuild')
+    monkeypatch.setattr(release_v2, 'apply', fail)
+    backup = tmp_path / 'before-v2.db'
+    with pytest.raises(MigrationError):
+        migrate(path, backup, target_version=2)
+    assert verify(path) == 1 and verify_backup(backup, expected_version=1)
+    with sqlite3.connect(path) as db:
+        assert db.execute('SELECT version FROM atom_schema_migrations').fetchall() == [(1,)]
+
+
+def test_release_evidence_scopes_and_immutability(legacy):
+    path, backup = legacy
+    migrate(path, backup, target_version=2)
+    with sqlite3.connect(path) as db:
+        db.execute('PRAGMA foreign_keys=ON')
+        main, = db.execute('SELECT id FROM revision_workspaces WHERE heat_id IS NULL').fetchone()
+        heat, = db.execute('SELECT id FROM revision_workspaces WHERE heat_id IS NOT NULL').fetchone()
+        # Schema fixtures only; these descriptors are not real accepted artifacts.
+        db.execute('INSERT INTO revision_artifacts VALUES (?,?,14,1)', ('a'*64, 'b'*64))
+        for name, workspace in [('root', main), ('heat-root', heat)]:
+            db.execute("INSERT INTO revision_records VALUES (?,?,'project',NULL,?,?,NULL,1)", (name, workspace, 'a'*64, 'b'*64))
+        request = "INSERT INTO verification_requests VALUES (?,?,?,? ,?,'[]',?,'runner-v1','user',10,20)"
+        args = ('check',main,'project','root','c'*64,'d'*64)
+        for invalid in [('foreign',main,'unknown','root','c'*64,'d'*64),
+                        ('wrong-root',main,'project','heat-root','c'*64,'d'*64)]:
+            with pytest.raises(sqlite3.IntegrityError): db.execute(request, invalid)
+        db.execute(request, args)
+        result = "INSERT INTO verification_results VALUES ('check',? ,?,?,? ,?,1,?,'[]',?)"
+        for values in [(main,'heat-root','c'*64,'d'*64,'passed',1,15),
+                       (main,'root','e'*64,'d'*64,'passed',1,15),
+                       (main,'root','c'*64,'d'*64,'passed',0,15),
+                       (main,'root','c'*64,'d'*64,'passed',1,21)]:
+            with pytest.raises(sqlite3.IntegrityError): db.execute(result, values)
+        db.execute(result, (main,'root','c'*64,'d'*64,'passed',1,15))
+        release = "INSERT INTO release_records VALUES (?,? ,?,'root','check',?,?,'owner','user',NULL,16)"
+        with pytest.raises(sqlite3.IntegrityError):
+            db.execute(release, ('foreign-release','unknown',main,'c'*64,'d'*64))
+        db.execute(release, ('release','project',main,'c'*64,'d'*64))
+        db.execute("INSERT INTO release_publications VALUES ('project','site','release',1,1)")
+        for table in ['verification_requests','verification_results','release_records']:
+            with pytest.raises(sqlite3.IntegrityError): db.execute(f'DELETE FROM {table}')
+        with pytest.raises(sqlite3.IntegrityError):
+            db.execute("UPDATE verification_results SET outcome='failed'")
+        assert not db.execute('PRAGMA foreign_key_check').fetchall()
+
+
+def test_failed_verification_cannot_back_release(legacy):
+    path, backup = legacy
+    migrate(path, backup, target_version=2)
+    with sqlite3.connect(path) as db:
+        db.execute('PRAGMA foreign_keys=ON')
+        main, = db.execute('SELECT id FROM revision_workspaces WHERE heat_id IS NULL').fetchone()
+        db.execute('INSERT INTO revision_artifacts VALUES (?,?,14,1)', ('a'*64,'b'*64))
+        db.execute("INSERT INTO revision_records VALUES ('root',?,'project',NULL,?,?,NULL,1)", (main,'a'*64,'b'*64))
+        db.execute("INSERT INTO verification_requests VALUES ('check',?,'project','root',?,'[]',?,'runner','user',10,20)", (main,'c'*64,'d'*64))
+        db.execute("INSERT INTO verification_results VALUES ('check',?,'root',?,?,'failed',1,0,'[]',15)", (main,'c'*64,'d'*64))
+        with pytest.raises(sqlite3.IntegrityError, match='release_requires_passing_evidence'):
+            db.execute("INSERT INTO release_records VALUES ('release','project',?,'root','check',?,?,'owner','user',NULL,16)", (main,'c'*64,'d'*64))
+
+
+def test_process_death_during_release_ddl_recovers_v1(legacy, tmp_path):
+    path, baseline = legacy
+    migrate(path, baseline)
+    backup = tmp_path / 'before-crash-v2.db'
+    script = '''
+import os,sys
+from pathlib import Path
+from app.migrations import migrate,release_v2
+original=release_v2.apply
+def crash(db):
+    original(db)
+    os._exit(42)
+release_v2.apply=crash
+migrate(Path(sys.argv[1]),Path(sys.argv[2]),target_version=2)
+'''
+    env = dict(os.environ, PYTHONPATH=str(Path(__file__).resolve().parents[1]))
+    result = subprocess.run([sys.executable,'-c',script,str(path),str(backup)], env=env, capture_output=True, timeout=30)
+    assert result.returncode == 42, result.stderr
+    assert verify(path) == 1 and verify_backup(backup, expected_version=1)
+    assert migrate(path,tmp_path/'after-release-crash.db',target_version=2).applied

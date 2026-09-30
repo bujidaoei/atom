@@ -47,19 +47,25 @@ def _open(path, *, readonly=False, timeout=3):
 
 def _schema(db):
     version = db.execute("PRAGMA user_version").fetchone()[0]
-    if version not in (0, 1):
+    if version not in (0, 1, 2):
         raise MigrationError("unsupported_schema")
+    expected = SCHEMA
+    hashes = [(1, MIGRATION_HASH)]
+    if version == 2:
+        from . import release_v2
+        expected = {**SCHEMA, **release_v2.SCHEMA}
+        hashes.append((2, release_v2.MIGRATION_HASH))
     rows = db.execute("SELECT type,name,sql FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' AND sql IS NOT NULL ORDER BY type,name").fetchall()
-    extension = {name: sql for kind, name, sql in rows if name in SCHEMA}
-    baseline = [(kind, name, sql) for kind, name, sql in rows if name not in SCHEMA]
+    extension = {name: sql for kind, name, sql in rows if name in expected}
+    baseline = [(kind, name, sql) for kind, name, sql in rows if name not in expected]
     digest = hashlib.sha256(json.dumps(baseline, separators=(",", ":")).encode()).hexdigest()
     if digest != BASELINE_HASH or (version == 0 and extension):
         raise MigrationError("unsupported_schema")
-    if version == 1:
-        if extension != SCHEMA:
+    if version:
+        if extension != expected:
             raise MigrationError("unsupported_schema")
-        journal = db.execute("SELECT version,migration_hash,backup_sha256 FROM atom_schema_migrations").fetchall()
-        if len(journal) != 1 or journal[0][:2] != (1, MIGRATION_HASH):
+        journal = db.execute("SELECT version,migration_hash FROM atom_schema_migrations ORDER BY version").fetchall()
+        if journal != hashes:
             raise MigrationError("unsupported_schema")
     return version
 
@@ -90,7 +96,7 @@ def _integrity(db):
 
 
 def verify_backup(path: Path, *, expected_version: int = 0) -> str:
-    if type(expected_version) is not int or expected_version not in (0, 1):
+    if type(expected_version) is not int or expected_version not in (0, 1, 2):
         raise MigrationError("invalid_backup_version")
     db = None
     try:
@@ -167,7 +173,9 @@ def backup_database(path: Path, backup: Path, *, lock_timeout: float = 3) -> Bac
             db.close()
 
 
-def migrate(path: Path, backup: Path, *, lock_timeout: float = 3) -> MigrationResult:
+def migrate(path: Path, backup: Path, *, lock_timeout: float = 3, target_version: int = 1) -> MigrationResult:
+    if type(target_version) is not int or target_version not in (1, 2):
+        raise MigrationError("invalid_target_version")
     if isinstance(lock_timeout, bool) or not isinstance(lock_timeout, (int, float)) or not 0 < lock_timeout <= 10:
         raise MigrationError("invalid_migration_timeout")
     db = None
@@ -179,18 +187,25 @@ def migrate(path: Path, backup: Path, *, lock_timeout: float = 3) -> MigrationRe
         db.execute("BEGIN IMMEDIATE")
         version = _schema(db)
         _integrity(db)
-        if version == 1:
-            digest = db.execute("SELECT backup_sha256 FROM atom_schema_migrations WHERE version=1").fetchone()[0]
+        if version > target_version:
+            raise MigrationError("migration_downgrade_denied")
+        if version == target_version:
+            digest = db.execute("SELECT backup_sha256 FROM atom_schema_migrations WHERE version=?", (version,)).fetchone()[0]
             db.execute("ROLLBACK")
-            return MigrationResult(1, False, digest)
-        digest = _backup(path, backup)
-        _apply_revision_schema(db)
-        db.execute("INSERT INTO atom_schema_migrations VALUES (1,?,?,?)", (MIGRATION_HASH, digest, int(time.time())))
-        db.execute("PRAGMA user_version=1")
+            return MigrationResult(version, False, digest)
+        digest = _backup(path, backup, expected_version=version)
+        if version == 0:
+            _apply_revision_schema(db)
+            db.execute("INSERT INTO atom_schema_migrations VALUES (1,?,?,?)", (MIGRATION_HASH, digest, int(time.time())))
+        if target_version == 2:
+            from . import release_v2
+            release_v2.apply(db)
+            db.execute("INSERT INTO atom_schema_migrations VALUES (2,?,?,?)", (release_v2.MIGRATION_HASH, digest, int(time.time())))
+        db.execute(f"PRAGMA user_version={target_version}")
         _schema(db)
         _integrity(db)
         db.execute("COMMIT")
-        return MigrationResult(1, True, digest)
+        return MigrationResult(target_version, True, digest)
     except (OSError, sqlite3.Error):
         raise MigrationError("migration_failed") from None
     finally:

@@ -54,3 +54,5 @@ Lovable documents explicit snapshot publishing, unpublished edits, audience and 
 Atom's proposed delivery record connects requirements, exact artifacts, independent verification, release and explicit recovery scope, with explainable stale/blocked states. This is a design direction, not an exclusivity or implementation claim.
 
 Migration prerequisite progress (2026-10-01): supported-version backup/verification now handles v1 under writer exclusion, with real WAL/restore and Linux evidence. v1 schema remains locked. Journal version CHECK and producing-attempt-only revision constraints must be explicitly migrated before new release/adoption behavior; no new schema is enabled.
+
+Offline schema progress: v2 provides structural request/result/release/publication identities, composite revision/contract/policy scope, immutable evidence and passing-result constraints. It does not supply verifier authentication, environment identity, head adoption or atomic repository APIs. Those requirements remain mandatory before release acceptance. Existing application rejects v2 until integration is complete.

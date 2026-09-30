@@ -83,3 +83,5 @@ Run test_lifecycle.py::test_cancel_waiter_disconnect_does_not_interrupt_cleanup 
 Release acceptance is not runnable yet. Follow the migration, repository, pinned serving/verifier and publish/rollback test order in contracts/revision-release.md. Existing publish API success is not enterprise acceptance.
 
 Offline Python API: backup_database(absolute_source, new_absolute_backup) returns version/sha256; verify_backup(backup, expected_version=result.version) verifies exact schema/integrity and digest. Stop application writers and protect parent directories first. Restore via SQLite backup into a new file, then verify schema and business records. This does not upgrade the schema or run against production automatically.
+
+Disposable/offline databases only: python -m app.migrations ABSOLUTE_DATABASE --backup NEW_ABSOLUTE_BACKUP --target-version 2. Default stays 1. Backups retain source version; verify_backup requires that expected version. Current RevisionRepository intentionally rejects v2, so do not migrate a serving database. Linux fixture exercises v2 crash/retry and snapshot verification.

@@ -70,3 +70,5 @@ Cancellation ownership is process-local in the orchestrator cancellation-task ma
 Planned extension: immutable verification executions/evidence, releases, publication generation/pointer and adoption provenance. Schema remains unimplemented; legacy records must not receive inferred trusted identities. See contracts/revision-release.md.
 
 BackupResult contains the verified source version and file SHA-256. It introduces no business rows or schema version. The v1 migration journal remains immutable; v2 upgrade has not been implemented.
+
+Offline v2 currently adds verification_requests (revision/contract/policy/runner/initiator/deadline), verification_results (immutable terminal counts/report), release_records (evidence, audience owner/public, previous release), and release_publications (scoped pointer/generation/live). Composite foreign keys prevent evidence identity substitution; passing counts/deadline and immutable triggers add structural constraints. DDL does not authenticate a verifier or prove that report contents are true. Environment identity, adoption provenance and transactional repository behavior remain open.
