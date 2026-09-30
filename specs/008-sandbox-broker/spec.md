@@ -103,3 +103,5 @@ FR-007 application dispatch: after committing the current Run, broker orchestrat
 FR-005 active-model interruption: the runtime must distinguish explicit cancellation from its own elapsed deadline in error status, never emit a result for either, and allow independent cleanup to finish. API Run and single-project planning/build status must preserve cancelled/timed_out rather than collapse them to ordinary failure. Unregistered writes must not replace the last committed version.
 
 A deadline observed after durable artifact registration but before the runtime response MUST prevent a successful Run/project outcome. The already committed revision and receipt remain valid; execution cleanup success is distinct from timely run completion.
+
+Cancellation request lifetime MUST NOT own cancellation cleanup. Disconnecting either the initiating caller or a duplicate waiter must not send another cancellation into the run cleanup. Shutdown must await owned cleanup even after the run job has left its job map.

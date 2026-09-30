@@ -64,3 +64,5 @@ Dispatch initialization uses fresh UUID attempt/grant IDs bound to the already c
 Interruption status distinction: runtime error lines now carry failed/cancelled/timed_out. API Run and planning/build Project retain cancelled or timed_out; the execution ledger may legitimately record cancelled for both because the completion cancellation capability revokes the work. No revision receipt exists for the interrupted unregistered write. These fields describe different observed boundaries, not successful product acceptance.
 
 Post-registration deadline: execution may remain closed/confirmed/succeeded with its receipt and advanced head while Run/project become timed_out. These records describe different facts and must not be collapsed into a fabricated successful acceptance or rolled-back registration.
+
+Cancellation ownership is process-local in the orchestrator cancellation-task map; it is not a durable distributed lease. Persisted Run/project terminal states and broker execution reconciliation retain their separate roles after process death.

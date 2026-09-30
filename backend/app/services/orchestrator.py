@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import time
 from contextlib import aclosing
 from collections.abc import Callable
@@ -65,6 +66,7 @@ class Orchestrator:
         self._client = client or runtime_client
         self._jobs: dict[str, asyncio.Task[None]] = {}
         self._stopping: set[str] = set()
+        self._cancellations: dict[str, asyncio.Task[None]] = {}
         self.execution: ExecutionResources | None = None
 
     # ---------------------------------------------------------------- public
@@ -122,25 +124,38 @@ class Orchestrator:
         )
 
     async def cancel(self, project_id: str) -> None:
+        cleanup = self._cancellations.get(project_id)
+        if cleanup is not None:
+            await asyncio.shield(cleanup)
+            return
         task = self._jobs.get(project_id)
         if task is None or task.done():
             return
-        if project_id in self._stopping:
-            await asyncio.gather(task, return_exceptions=True)
-            return
         self._stopping.add(project_id)
+        cleanup = asyncio.create_task(self._stop_job(project_id, task), name=f"cancel:{project_id}")
+        self._cancellations[project_id] = cleanup
+        cleanup.add_done_callback(self._observe_cancellation)
+        await asyncio.shield(cleanup)
+
+    @staticmethod
+    def _observe_cancellation(task: asyncio.Task[None]) -> None:
+        if not task.cancelled() and (error := task.exception()) is not None:
+            logging.getLogger(__name__).error("Project cancellation failed: %s", type(error).__name__)
+
+    async def _stop_job(self, project_id: str, task: asyncio.Task[None]) -> None:
         try:
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
             # Covers cancellation before _guard has entered its try block.
             await self._terminate(project_id, "cancelled", "任务已取消，已有文件已保留")
         finally:
+            self._cancellations.pop(project_id, None)
             self._stopping.discard(project_id)
             if self._jobs.get(project_id) is task:
                 self._jobs.pop(project_id, None)
 
     async def shutdown(self) -> None:
-        await asyncio.gather(*(self.cancel(key) for key in list(self._jobs)))
+        await asyncio.gather(*(self.cancel(key) for key in set(self._jobs) | set(self._cancellations)))
 
     async def _cancel_remote(self, run_id: str) -> None:
         try:

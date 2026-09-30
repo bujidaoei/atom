@@ -449,3 +449,12 @@ Final verification after the late-completion guard:
 interruption-complete-final: 6 tests, 0 failures, 0 errors, 0 skips, 65.401 seconds
 interruption-regression-final: 32 tests, 0 failures, 0 errors, 0 skips, 2.516 seconds
 The six-case integration run supersedes the earlier partial integration reports and exercises the final source including all three start_build interruption cases. Spec Kit prerequisites and git diff --check pass. No push or deployment was performed.
+
+## Continuation — cancellation request lifetime ownership (2026-10-01)
+Baseline 2f2f8b6; previous turn was progress. Inspection showed cancel awaited the run directly through gather; cancellation of either caller could send another cancellation into cleanup. Two initial controlled tests failed with project admission already released while cleanup remained blocked. Added one strongly held orchestrator cleanup task per project, shielded request waiters, exception observation by type, and shutdown coverage for outstanding cleanup even after job removal. Existing independent broker reconciliation still governs process failure; this is not a distributed ownership guarantee.
+
+Final tests invoke the real authenticated FastAPI cancel route with ASGI transport and a scripted runtime whose cleanup waits on an explicit event. Both initiating and duplicate request tasks are cancelled only after entering the relevant path. Cleanup ownership/admission survives, shutdown waits, one remote cancellation completes, durable Run/project states are cancelled and a repeated HTTP request returns 200. The duplicate case synchronizes entry explicitly rather than relying on scheduling sleeps. This is request-task interruption, not real TCP disconnect evidence. The existing actual Node/Pi/broker cancellation scenario was separately rerun successfully with the current source; it does not combine API request interruption with that physical sandbox.
+
+cancel-waiter-routes-final: 34 tests, 0 failures, 0 errors, 0 skips, 2.718 seconds
+cancel-ownership-linux: 1 tests, 0 failures, 0 errors, 0 skips, 10.232 seconds
+Reports are in .logs. Existing Starlette/httpx deprecation remains. No Pi edits, production data, real credentials, push or deployment. Spec/plan/tasks/contracts/data model/quickstart and parent progress synchronized; no acceptance checkbox closed. Physical streaming/TCP cancellation, continuous recovery, revision-bound acceptance, publication/adoption and enterprise rollout remain open.

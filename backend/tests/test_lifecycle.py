@@ -160,6 +160,69 @@ def test_cancel_before_job_starts(signed_in):
         assert session.get(Project, pid).status == "cancelled"
 
 
+@pytest.mark.parametrize('disconnect_second_waiter', [False, True])
+def test_cancel_waiter_disconnect_does_not_interrupt_cleanup(signed_in, monkeypatch, disconnect_second_waiter):
+    pid, uid = seed()
+
+    async def scenario():
+        started = asyncio.Event()
+        cleaning = asyncio.Event()
+        release = asyncio.Event()
+        second_waiting = asyncio.Event()
+
+        class ObservedOrchestrator(Orchestrator):
+            async def cancel(self, project_id):
+                if project_id in self._cancellations:
+                    second_waiting.set()
+                await super().cancel(project_id)
+
+        class BlockingCleanupRuntime(ScriptedRuntime):
+            async def run(self, **kwargs):
+                started.set()
+                async for line in super().run(**kwargs):
+                    yield line
+
+            async def cancel(self, run_id):
+                cleaning.set()
+                await release.wait()
+                await super().cancel(run_id)
+
+        runtime = BlockingCleanupRuntime('silent')
+        o = ObservedOrchestrator(runtime)
+        from app.main import app
+        from app.routers import projects
+        from httpx import ASGITransport, AsyncClient
+        monkeypatch.setattr(projects, 'orchestrator', o)
+        await o.start_build(pid, uid, None)
+        await asyncio.wait_for(started.wait(), 1)
+        async with AsyncClient(transport=ASGITransport(app), base_url='http://testserver',
+                               cookies=signed_in.cookies) as client:
+            first = asyncio.create_task(client.post(f'/api/projects/{pid}/cancel'))
+            await asyncio.wait_for(cleaning.wait(), 1)
+            disconnected = asyncio.create_task(client.post(f'/api/projects/{pid}/cancel')) if disconnect_second_waiter else first
+            if disconnect_second_waiter:
+                await asyncio.wait_for(second_waiting.wait(), 1)
+            disconnected.cancel()
+            await asyncio.gather(disconnected, return_exceptions=True)
+            try:
+                assert o.active(pid), 'request cancellation interrupted owned cleanup'
+            finally:
+                release.set()
+                await asyncio.wait_for(o.shutdown(), 1)
+                await asyncio.gather(first, return_exceptions=True)
+            response = await client.post(f'/api/projects/{pid}/cancel')
+            assert response.status_code == 200 and response.json() == {'ok': True}
+        assert len(runtime.cancelled) == 1
+        assert not o.active(pid)
+        assert not o._cancellations and not o._stopping
+
+    asyncio.run(scenario())
+    with session_scope() as session:
+        assert session.get(Project, pid).status == 'cancelled'
+        run = session.scalar(select(Run).where(Run.project_id == pid))
+        assert run.status == 'cancelled' and run.finished_at is not None
+
+
 def test_race_all_fail_and_cancellation_converge(signed_in):
     from app.models import Race, RaceHeat
 
