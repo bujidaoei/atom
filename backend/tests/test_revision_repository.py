@@ -47,12 +47,98 @@ def repository(tmp_path):
 
 
 def allocate(repo, workspace, *, attempt='attempt', run='run', deadline=None):
-    return repo.allocate('owner', workspace, run, attempt, 'broker-' + attempt, 'grant-' + attempt,
-                         deadline or int(time.time()) + 120)
+    repo.reserve('owner', workspace, run, attempt, 'grant-' + attempt, deadline or int(time.time()) + 120)
+    return repo.bind('owner',attempt,'broker-' + attempt)
+
+
+def test_reservation_survives_restart_and_binds_once(repository, monkeypatch):
+    repo, path, main, heat = repository
+    root = repo.bootstrap('owner',main,BASE)
+    deadline = int(time.time())+120
+    pending = repo.reserve('owner',main,'run','attempt','grant-attempt',deadline)
+    assert pending.broker_attempt_id is None and pending.base_revision_id == root
+    assert pending.project_id == 'p' and pending.base_artifact_key == BASE.key and pending.base_revision == BASE.revision
+    assert pending.issued_at < pending.deadline and pending.generation == 1
+    reopened = RevisionRepository(path)
+    monkeypatch.setattr('app.revisions.time.time',lambda: pending.issued_at+2)
+    assert reopened.execution('owner','attempt') == pending
+    assert reopened.reserve('owner',main,'run','attempt','grant-attempt',deadline) == pending
+    with pytest.raises(RevisionError,match='revision_conflict'):
+        register(repo)
+    bound = reopened.bind('owner','attempt','broker-attempt')
+    assert bound.issued_at == pending.issued_at and bound.generation == 1
+    assert reopened.bind('owner','attempt','broker-attempt') == bound
+    with pytest.raises(RevisionError,match='revision_conflict'):
+        reopened.bind('owner','attempt','other')
+
+
+@pytest.mark.parametrize('reason',['cancel','expiry','uncertain'])
+def test_unbound_reservation_rejects_late_binding_and_replacement(repository, monkeypatch, reason):
+    repo, path, main, heat = repository
+    repo.bootstrap('owner',main,BASE)
+    pending = repo.reserve('owner',main,'run','attempt','grant-attempt',int(time.time())+120)
+    if reason == 'cancel':
+        repo.cancel('owner','attempt')
+    elif reason == 'expiry':
+        monkeypatch.setattr('app.revisions.time.time',lambda: pending.deadline)
+    else:
+        repo.observe_termination('owner','attempt',confirmed=False,outcome='failed')
+    with pytest.raises(RevisionError,match='revision_conflict'):
+        repo.bind('owner','attempt','broker-attempt')
+    with pytest.raises(RevisionError,match='revision_conflict'):
+        repo.execution('owner','attempt')
+    with pytest.raises(RevisionError,match='revision_conflict'):
+        repo.reserve('owner',main,'run','next','grant-next',int(time.time())+120)
+    repo.observe_termination('owner','attempt',confirmed=True,outcome='cancelled')
+    assert repo.reserve('owner',main,'run','next','grant-next',int(time.time())+120).generation == 2
+
+
+@pytest.mark.parametrize('race',['bind','cancel'])
+def test_binding_competition_preserves_one_identity_and_cancellation(repository, race):
+    repo, path, main, heat = repository
+    repo.bootstrap('owner',main,BASE)
+    repo.reserve('owner',main,'run','attempt','grant-attempt',int(time.time())+120)
+    barrier = threading.Barrier(2)
+    def bind(identity):
+        barrier.wait(timeout=5)
+        try:
+            return repo.bind('owner','attempt',identity)
+        except RevisionError as error:
+            assert error.code == 'revision_conflict'
+            return None
+    def cancel():
+        barrier.wait(timeout=5)
+        repo.cancel('owner','attempt')
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(bind,'broker-first')
+        second = pool.submit(bind,'broker-second') if race == 'bind' else pool.submit(cancel)
+        values = [first.result(timeout=10),second.result(timeout=10)]
+    with sqlite3.connect(path) as db:
+        identity,state,generation = db.execute('SELECT broker_attempt_id,state,generation FROM revision_attempts').fetchone()
+        assert generation == 1
+    if race == 'bind':
+        successes = [value for value in values if value is not None]
+        assert len(successes) == 1 and identity == successes[0].broker_attempt_id and state == 'active'
+    else:
+        assert state == 'cancel_requested' and identity in (None,'broker-first')
+        with pytest.raises(RevisionError,match='revision_conflict'):
+            register(repo)
+        with pytest.raises(RevisionError,match='revision_conflict'):
+            repo.bind('owner','attempt','broker-first')
 
 
 def register(repo, attempt='attempt', artifact=OUTPUT, owner='owner'):
     return repo.register(owner, attempt, 'broker-' + attempt, 'grant-' + attempt, artifact)
+
+
+@pytest.mark.parametrize('grant_id',['_invalid','g'*65])
+def test_reservation_rejects_identity_that_broker_cannot_revoke(repository, grant_id):
+    repo, path, main, heat = repository
+    repo.bootstrap('owner',main,BASE)
+    with pytest.raises(RevisionError,match='invalid_revision_request'):
+        repo.reserve('owner',main,'run','attempt',grant_id,int(time.time())+120)
+    with sqlite3.connect(path) as db:
+        assert db.execute('SELECT COUNT(*) FROM revision_attempts').fetchone() == (0,)
 
 
 def test_bootstrap_requires_owner_and_is_exactly_idempotent(repository):

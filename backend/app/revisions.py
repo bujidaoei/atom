@@ -18,6 +18,7 @@ from .migrations import MigrationError, _schema, verify
 from .snapshots import MAX_ARCHIVE_BYTES
 
 _ID = re.compile(r'[A-Za-z0-9_-]{1,128}\Z')
+_GRANT_ID = re.compile(r'[A-Za-z0-9][A-Za-z0-9_-]{0,63}\Z')
 _HASH = re.compile(r'[0-9a-f]{64}\Z')
 
 
@@ -35,8 +36,12 @@ class Attempt:
     generation: int
     base_revision_id: str
     deadline: int
-    broker_attempt_id: str
+    broker_attempt_id: str | None
     grant_id: str
+    issued_at: int
+    project_id: str
+    base_artifact_key: str
+    base_revision: str
 
 
 @dataclass(frozen=True)
@@ -166,9 +171,22 @@ class RevisionRepository:
             db.execute('UPDATE revision_workspaces SET current_revision_id=? WHERE id=?', (revision, workspace_id))
             return revision
 
-    def allocate(self, owner: str, workspace_id: str, run_id: str, attempt_id: str,
-                 broker_attempt_id: str, grant_id: str, deadline: int) -> Attempt:
-        _identifiers(owner, workspace_id, run_id, attempt_id, broker_attempt_id, grant_id)
+    @staticmethod
+    def _view(db, attempt):
+        base = db.execute('SELECT artifact_key,snapshot_revision FROM revision_records WHERE id=? AND workspace_id=?',
+                          (attempt['base_revision_id'],attempt['workspace_id'])).fetchone()
+        if base is None or type(attempt['created_at']) is not int:
+            raise RevisionError('revision_conflict')
+        return Attempt(attempt['id'],attempt['workspace_id'],attempt['run_id'],attempt['generation'],
+            attempt['base_revision_id'],attempt['deadline'],attempt['broker_attempt_id'],attempt['grant_id'],
+            attempt['created_at'],attempt['project_id'],base['artifact_key'],base['snapshot_revision'])
+
+    def reserve(self, owner: str, workspace_id: str, run_id: str, attempt_id: str,
+                grant_id: str, deadline: int) -> Attempt:
+        """Persist dispatch identity before the coordinator requests a worker."""
+        _identifiers(owner, workspace_id, run_id, attempt_id, grant_id)
+        if any(not _GRANT_ID.fullmatch(value) for value in (run_id,attempt_id,grant_id)):
+            raise RevisionError('invalid_revision_request')
         if type(deadline) is not int:
             raise RevisionError('invalid_revision_request')
         with self._transaction() as db:
@@ -176,14 +194,16 @@ class RevisionRepository:
             if not now < deadline <= now + 7200:
                 raise RevisionError('revision_conflict')
             workspace = self._workspace(db, owner, workspace_id)
+            if not _GRANT_ID.fullmatch(workspace['project_id']):
+                raise RevisionError('invalid_revision_request')
             self._current_run(db, workspace, run_id)
             existing = db.execute('SELECT * FROM revision_attempts WHERE id=?', (attempt_id,)).fetchone()
             if existing is not None:
-                if tuple(existing[key] for key in ('workspace_id','run_id','broker_attempt_id','grant_id','deadline')) != (
-                        workspace_id, run_id, broker_attempt_id, grant_id, deadline):
+                if tuple(existing[key] for key in ('workspace_id','run_id','grant_id','deadline')) != (
+                        workspace_id, run_id, grant_id, deadline):
                     raise RevisionError('revision_conflict')
                 self._active(db, existing, workspace)
-                return Attempt(**{key: existing[key] for key in Attempt.__dataclass_fields__})
+                return self._view(db, existing)
             if (workspace['current_revision_id'] is None or workspace['active_attempt_id'] is not None
                     or workspace['generation'] >= 9223372036854775807):
                 raise RevisionError('revision_conflict')
@@ -192,10 +212,31 @@ class RevisionRepository:
                 (id,workspace_id,project_id,run_id,generation,base_revision_id,broker_attempt_id,grant_id,
                  deadline,state,termination_state,created_at) VALUES (?,?,?,?,?,?,?,?,?,'active','pending',?)''',
                 (attempt_id,workspace_id,workspace['project_id'],run_id,generation,workspace['current_revision_id'],
-                 broker_attempt_id,grant_id,deadline,now))
+                 None,grant_id,deadline,now))
             db.execute('UPDATE revision_workspaces SET generation=?,active_attempt_id=? WHERE id=?',
                        (generation, attempt_id, workspace_id))
-            return Attempt(attempt_id,workspace_id,run_id,generation,workspace['current_revision_id'],deadline,broker_attempt_id,grant_id)
+            return self._view(db,db.execute('SELECT * FROM revision_attempts WHERE id=?',(attempt_id,)).fetchone())
+
+    def execution(self, owner: str, attempt_id: str) -> Attempt:
+        """Reload exact persisted dispatch inputs, only while still authorized."""
+        _identifiers(owner,attempt_id)
+        with self._transaction() as db:
+            attempt, workspace = self._attempt(db,owner,attempt_id)
+            self._active(db,attempt,workspace)
+            return self._view(db,attempt)
+
+    def bind(self, owner: str, attempt_id: str, broker_attempt_id: str) -> Attempt:
+        """Bind one observed broker identity without granting fresh execution."""
+        _identifiers(owner,attempt_id,broker_attempt_id)
+        with self._transaction() as db:
+            attempt, workspace = self._attempt(db,owner,attempt_id)
+            self._active(db,attempt,workspace)
+            if attempt['broker_attempt_id'] is not None:
+                if attempt['broker_attempt_id'] != broker_attempt_id:
+                    raise RevisionError('revision_conflict')
+                return self._view(db,attempt)
+            db.execute('UPDATE revision_attempts SET broker_attempt_id=? WHERE id=?', (broker_attempt_id,attempt_id))
+            return self._view(db,db.execute('SELECT * FROM revision_attempts WHERE id=?',(attempt_id,)).fetchone())
 
     @staticmethod
     def _insert_outbox(db, workspace_id, revision_id, now):
