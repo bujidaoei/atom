@@ -34,6 +34,8 @@ FR-005 cancellation ordering: committed API cancellation MUST precede administra
 
 FR-005 recovery visibility: trusted owner-checked cleanup reads MUST remain available after cancellation, expiry, registration and closure without granting dispatch, releasing ownership or changing any persisted outcome. Cancellation returns committed cleanup identity; closed-attempt retries preserve successor state.
 
+FR-005 terminal recovery: the coordinator MUST durably decide its intended outcome before releasing the worker. A pending decision is not a terminal result and retains ownership; recovery repeats verified termination before closure. Explicit cancellation may override nonclosed success intent.
+
 FR-006 completion recovery: persisted receipt recovery MUST compare the current broker checkpoint digest and actual immutable artifact before skipping export/confirmation. A cancellation committed before final success closure MUST prevent succeeded outcome even when a revision already exists.
 
 FR-006 registration semantics: a durable checkpoint, a successfully terminated execution and independently accepted product output are separate facts. A later failed/cancelled run must preserve any committed revision without being reported successful. Lost acknowledgements must resolve an immutable receipt; retries must not advance a newer head. Unknown termination retains ownership until reconciliation confirms release.

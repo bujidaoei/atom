@@ -40,7 +40,11 @@ class ExecutionCoordinator:
             # A concurrent finalizer may already have recorded a different outcome.
             current = await asyncio.to_thread(self.repository.recovery, owner, attempt_id)
             if current.state != 'closed':
-                raise
+                if current.outcome is None or current.outcome == outcome:
+                    raise
+                await asyncio.to_thread(self.repository.observe_termination, owner, attempt_id,
+                                        confirmed=confirmed, outcome=current.outcome)
+                return await asyncio.to_thread(self.repository.recovery, owner, attempt_id)
             return current
         return await asyncio.to_thread(self.repository.recovery, owner, attempt_id)
 
@@ -49,14 +53,10 @@ class ExecutionCoordinator:
         return await self._stop(owner, attempt_id, 'cancelled')
 
     async def _stop(self, owner: str, attempt_id: str, outcome: str) -> Recovery:
-        if outcome == 'succeeded':
-            intent = await asyncio.to_thread(self.repository.recovery, owner, attempt_id)
-            if intent.state != 'active' and intent.state != 'closed':
-                return await self._stop(owner, attempt_id, 'cancelled')
-        else:
-            intent = await asyncio.to_thread(self.repository.cancel, owner, attempt_id)
+        intent = await asyncio.to_thread(self.repository.decide_termination, owner, attempt_id, outcome)
         if intent.state == 'closed':
             return intent
+        outcome = intent.outcome
         try:
             await self.broker.revoke(intent.grant_id)
         except asyncio.CancelledError:
@@ -120,6 +120,8 @@ class ExecutionCoordinator:
             previous = await asyncio.to_thread(self.repository.recovery, owner, attempt_id)
             if previous.state == 'closed':
                 return previous
+            if previous.outcome is not None:
+                return await self._stop(owner, attempt_id, previous.outcome)
             try:
                 intent = await asyncio.to_thread(self.repository.completion, owner, attempt_id)
                 grant = Grant(intent.grant_id, owner, intent.project_id, intent.run_id, intent.id,

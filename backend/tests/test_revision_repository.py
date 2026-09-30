@@ -84,7 +84,7 @@ def test_recovery_remains_readable_without_dispatch_or_database_effects(reposito
         'cancel_requested' if state in ('cancelled','unknown') else 'active')
     assert recovered.termination_state == ('confirmed' if state == 'closed' else
         'unknown' if state == 'unknown' else 'pending')
-    assert recovered.outcome == ('succeeded' if state == 'closed' else None)
+    assert recovered.outcome == ('succeeded' if state == 'closed' else 'cancelled' if state == 'cancelled' else None)
     assert not hasattr(recovered,'issued_at') and not hasattr(recovered,'base_revision')
     if state != 'reserved':
         with pytest.raises(RevisionError,match='revision_conflict'):
@@ -173,13 +173,13 @@ def test_coordinator_cancel_persists_intent_before_actual_transport(repository, 
             assert requests[0][0:2] == ('/v1/admin/revoke',{'grant_id':'grant-attempt'})
             assert requests[0][2].state == 'cancel_requested'
             if mode == 'concurrent_close':
-                repo.observe_termination('owner','attempt',confirmed=True,outcome='failed')
+                repo.observe_termination('owner','attempt',confirmed=True,outcome='cancelled')
             if mode == 'cancel_task':
                 task.cancel()
             release.set()
             if mode == 'concurrent_close':
                 result = await task
-                assert result.state == 'closed' and result.outcome == 'failed'
+                assert result.state == 'closed' and result.outcome == 'cancelled'
                 assert await coordinator.cancel('owner','attempt') == result
                 assert len(requests) == 1
             else:
@@ -382,7 +382,7 @@ def test_failure_after_registration_preserves_revision_without_claiming_success(
     with pytest.raises(RevisionError, match='revision_conflict'):
         repo.observe_termination('owner','attempt',confirmed=True,outcome='succeeded')
     receipt = register(repo)
-    repo.cancel('owner','attempt')
+    repo.decide_termination('owner','attempt','failed')
     repo.observe_termination('owner','attempt',confirmed=False,outcome='failed')
     repo.observe_termination('owner','attempt',confirmed=True,outcome='failed')
     assert repo.receipt('owner','attempt','broker-attempt','grant-attempt') == receipt
@@ -533,3 +533,34 @@ def test_completion_authority_survives_registration_but_not_cancel_or_successor(
     allocate(repo,main,attempt='successor')
     with pytest.raises(RevisionError,match='revision_conflict'): repo.completion('owner','attempt')
     assert repo.recovery('owner','attempt').receipt==receipt
+
+
+def test_terminal_decision_is_durable_fences_dispatch_and_survives_unknown(repository):
+    repo,path,main,heat=repository
+    repo.bootstrap('owner',main,BASE)
+    allocate(repo,main)
+    with pytest.raises(RevisionError,match='revision_conflict'):
+        repo.decide_termination('owner','attempt','succeeded')
+    receipt=register(repo)
+    intent=repo.decide_termination('owner','attempt','succeeded')
+    assert intent.state!='closed' and intent.outcome=='succeeded' and intent.receipt==receipt
+    assert RevisionRepository(path).recovery('owner','attempt')==intent
+    assert repo.decide_termination('owner','attempt','failed')==intent
+    with pytest.raises(RevisionError,match='revision_conflict'): repo.completion('owner','attempt')
+    repo.observe_termination('owner','attempt',confirmed=False,outcome='succeeded')
+    assert repo.recovery('owner','attempt').outcome=='succeeded'
+    repo.observe_termination('owner','attempt',confirmed=True,outcome='succeeded')
+    assert repo.recovery('owner','attempt').state=='closed'
+
+
+def test_cancel_overrides_pending_success_without_erasing_receipt(repository):
+    repo,path,main,heat=repository
+    repo.bootstrap('owner',main,BASE)
+    allocate(repo,main)
+    receipt=register(repo)
+    repo.decide_termination('owner','attempt','succeeded')
+    intent=repo.cancel('owner','attempt')
+    assert intent.outcome=='cancelled' and intent.receipt==receipt
+    with pytest.raises(RevisionError,match='revision_conflict'):
+        repo.observe_termination('owner','attempt',confirmed=True,outcome='succeeded')
+    repo.observe_termination('owner','attempt',confirmed=True,outcome='cancelled')

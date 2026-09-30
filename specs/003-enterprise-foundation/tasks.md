@@ -84,3 +84,5 @@ T027 continuation: child 008 now has an actual cancellation coordinator connecti
 T027 continuation: child 008 now prepares actual sandbox leases from reserved intent and immutable stored inputs; real Linux coordinator/store/database and HTTP broker integration passes. Runtime server adoption, successful completion, durable scheduling/ownership and enterprise release remain open.
 
 T027 continuation: child 008 completion coordination now connects actual export, immutable storage, fenced registration, checkpoint acknowledgement and verified worker release; receipt/acknowledgement recovery and storage failure have real Linux/HTTP scenarios. Runtime completion hooks, durable scheduling/ownership, application adoption and enterprise acceptance remain open.
+
+T027 continuation: child 008 now persists terminal decisions before release and recovers real process loss before/after container revocation. Pending decisions are not completion; cancellation remains authoritative until confirmed closure. Production scheduling, runtime lease/completion integration and enterprise acceptance remain open.

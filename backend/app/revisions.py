@@ -146,7 +146,7 @@ class RevisionRepository:
             raise RevisionError('revision_conflict')
 
     def _active(self, db, attempt, workspace, *, registered_head=None):
-        if (attempt['state'] != 'active' or attempt['termination_state'] != 'pending'
+        if (attempt['state'] != 'active' or attempt['termination_state'] != 'pending' or attempt['outcome'] is not None
                 or attempt['deadline'] <= int(time.time())
                 or workspace['active_attempt_id'] != attempt['id']
                 or workspace['generation'] != attempt['generation']
@@ -332,8 +332,31 @@ class RevisionRepository:
         with self._transaction() as db:
             attempt, _ = self._attempt(db, owner, attempt_id)
             if attempt['state'] != 'closed':
-                db.execute("UPDATE revision_attempts SET state='cancel_requested' WHERE id=?", (attempt_id,))
+                db.execute("UPDATE revision_attempts SET state='cancel_requested',outcome='cancelled' WHERE id=?", (attempt_id,))
                 attempt = db.execute('SELECT * FROM revision_attempts WHERE id=?', (attempt_id,)).fetchone()
+            return self._recovery(db, attempt)
+
+    def decide_termination(self, owner: str, attempt_id: str, outcome: str) -> Recovery:
+        """Persist a terminal decision; confirmation is still a separate fact."""
+        _identifiers(owner, attempt_id)
+        if outcome not in ('succeeded','failed','cancelled','timed_out'):
+            raise RevisionError('invalid_revision_request')
+        with self._transaction() as db:
+            attempt, workspace = self._attempt(db, owner, attempt_id)
+            if attempt['state'] == 'closed':
+                return self._recovery(db, attempt)
+            if workspace['active_attempt_id'] != attempt_id or workspace['generation'] != attempt['generation']:
+                raise RevisionError('revision_conflict')
+            if attempt['outcome'] is not None and outcome != 'cancelled':
+                return self._recovery(db, attempt)
+            if outcome == 'succeeded':
+                receipt = self._receipt(db, attempt_id, workspace['id'])
+                if receipt is None:
+                    raise RevisionError('revision_conflict')
+                self._active(db, attempt, workspace, registered_head=receipt.revision_id)
+            state = 'active' if outcome == 'succeeded' else 'cancel_requested'
+            db.execute('UPDATE revision_attempts SET state=?,outcome=? WHERE id=?', (state,outcome,attempt_id))
+            attempt = db.execute('SELECT * FROM revision_attempts WHERE id=?', (attempt_id,)).fetchone()
             return self._recovery(db, attempt)
 
     def observe_termination(self, owner: str, attempt_id: str, *, confirmed: bool, outcome: str) -> None:
@@ -349,11 +372,14 @@ class RevisionRepository:
                 return
             if workspace['active_attempt_id'] != attempt_id or workspace['generation'] != attempt['generation']:
                 raise RevisionError('revision_conflict')
+            if attempt['outcome'] is not None and attempt['outcome'] != outcome:
+                raise RevisionError('revision_conflict')
             if not confirmed:
                 db.execute("UPDATE revision_attempts SET state='cancel_requested',termination_state='unknown' WHERE id=?", (attempt_id,))
                 return
             receipt = db.execute('SELECT 1 FROM revision_receipts WHERE attempt_id=?', (attempt_id,)).fetchone()
-            if outcome == 'succeeded' and (receipt is None or attempt['state'] != 'active'):
+            if outcome == 'succeeded' and (receipt is None or
+                    (attempt['state'] != 'active' and attempt['outcome'] != 'succeeded')):
                 raise RevisionError('revision_conflict')
             db.execute("""UPDATE revision_attempts SET state='closed',termination_state='confirmed',outcome=?,closed_at=?
                 WHERE id=?""", (outcome, int(time.time()), attempt_id))

@@ -378,7 +378,7 @@ def coordinator_source_bundle():
     return base64.b64encode(result.getvalue()).decode()
 
 
-@pytest.mark.parametrize('failure', ['none','missing','cancel','registered','acknowledged','storage'])
+@pytest.mark.parametrize('failure', ['none','missing','cancel','registered','acknowledged','storage','decision','released'])
 def test_prepare_coordinator_with_real_linux_store_and_http(tmp_path, failure):
     path = tmp_path / 'api.db'
     create_api_database(path)
@@ -475,13 +475,38 @@ async def main():
                     headers={'Authorization':'Bearer '+lease.grant},json={'operation_id':'write',
                     'tool_call_id':'tool','operation':{'op':'write','path':'result.txt','content':'actual coordinator output'}})
                 assert response.status_code==200
-            if inputs['failure'] in ('registered','acknowledged'):
+            if inputs['failure'] in ('registered','acknowledged','decision','released'):
                 grant=Grant(intent.grant_id,'owner',intent.project_id,intent.run_id,intent.id,
                             intent.generation,intent.base_revision,intent.issued_at,intent.deadline)
                 exported=await client.export(grant,lease.attempt_id)
                 artifact=store.put(exported.payload)
                 receipt=repo.register('owner','attempt',lease.attempt_id,intent.grant_id,artifact)
-                if inputs['failure']=='acknowledged': await client.confirm(grant,exported,receipt)
+                if inputs['failure'] in ('acknowledged','decision','released'):
+                    await client.confirm(grant,exported,receipt)
+                if inputs['failure'] in ('decision','released'):
+                    child = r'''
+import asyncio,json,os,sys
+from pathlib import Path
+data=json.loads(sys.stdin.buffer.read());sys.path.insert(0,'/tmp/code')
+from app.revisions import RevisionRepository
+from app.sandbox.client import BrokerClient
+from app.sandbox.grants import GrantCodec
+async def main():
+    repo=RevisionRepository(Path('/workspace/api.db'))
+    intent=repo.decide_termination('owner','attempt','succeeded')
+    if data['release']:
+        async with BrokerClient(data['origin'],data['admin'],GrantCodec(data['key'].encode())) as broker:
+            assert await broker.revoke(intent.grant_id)=='terminated'
+    os._exit(57)
+asyncio.run(main())
+'''
+                    process=await asyncio.create_subprocess_exec(sys.executable,'-I','-c',child,
+                        stdin=asyncio.subprocess.PIPE,stdout=asyncio.subprocess.PIPE,stderr=asyncio.subprocess.PIPE)
+                    out,err=await asyncio.wait_for(process.communicate(json.dumps({'origin':origin,
+                        'admin':inputs['admin'],'key':inputs['key'],'release':inputs['failure']=='released'}).encode()),10)
+                    assert process.returncode==57,err.decode()
+                    pending=RevisionRepository(path).recovery('owner','attempt')
+                    assert pending.state!='closed' and pending.outcome=='succeeded'
                 coordinator=ExecutionCoordinator(RevisionRepository(path),client)
             if inputs['failure']=='storage':
                 import fcntl,os
