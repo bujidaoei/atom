@@ -164,3 +164,49 @@ class VerificationRepository:
                         request.contract.digest,request.policy_digest,outcome,report.total,report.passed,canonical,completed_at))
             return VerificationResult(request_id,request.revision_id,request.contract.digest,outcome,
                                       report.total,report.passed,report.canonical,completed_at)
+
+    def terminate(self, *, owner: str, request_id: str, outcome: str) -> VerificationResult:
+        """Persist interruption without inventing per-check observations."""
+        if outcome not in ('cancelled', 'timed_out') or any(
+            not isinstance(value, str) or re.fullmatch(r'[A-Za-z0-9_.-]{1,128}', value) is None
+            for value in (owner, request_id)
+        ):
+            raise VerificationError('invalid_verification_request')
+        with self._transaction() as db:
+            row = db.execute('''SELECT v.* FROM verification_requests v
+                JOIN projects p ON p.id=v.project_id WHERE v.id=? AND p.user_id=?''', (request_id,owner)).fetchone()
+            if row is None:
+                raise VerificationError('verification_not_found')
+            request = self._decode(row)
+            previous = db.execute('SELECT * FROM verification_results WHERE request_id=?', (request_id,)).fetchone()
+            if previous is not None:
+                if previous['outcome'] != outcome:
+                    raise VerificationError('verification_conflict')
+                return VerificationResult(request_id,request.revision_id,request.contract.digest,outcome,
+                    previous['total'],previous['passed'],previous['report_json'].encode('utf-8'),previous['completed_at'])
+            now = int(time.time())
+            if now < request.created_at or (outcome == 'timed_out' and now <= request.deadline):
+                raise VerificationError('verification_not_expired')
+            # Interrupted reports explicitly omit check observations. Zero passed
+            # is not a claim that every check executed and failed.
+            report = json.dumps({'format':'atom-verification-interruption-v1',
+                'contractDigest':request.contract.digest,'outcome':outcome},sort_keys=True,separators=(',',':'))
+            total = len(request.contract.checks)
+            db.execute('''INSERT INTO verification_results
+                (request_id,workspace_id,revision_id,contract_digest,policy_digest,outcome,total,passed,report_json,completed_at)
+                VALUES (?,?,?,?,?,?,?,0,?,?)''', (request_id,request.workspace_id,request.revision_id,
+                    request.contract.digest,request.policy_digest,outcome,total,report,now))
+            return VerificationResult(request_id,request.revision_id,request.contract.digest,outcome,total,0,report.encode('utf-8'),now)
+
+    def expired(self, *, limit: int = 100) -> tuple[tuple[str, str], ...]:
+        """Trusted recovery inventory; returns owner/request IDs, not authority."""
+        if type(limit) is not int or not 1 <= limit <= 1000:
+            raise VerificationError('invalid_verification_request')
+        with self._transaction() as db:
+            rows = db.execute('''SELECT p.user_id,v.id FROM verification_requests v
+                JOIN projects p ON p.id=v.project_id LEFT JOIN verification_results r ON r.request_id=v.id
+                WHERE r.request_id IS NULL AND v.deadline<? ORDER BY v.deadline,v.id LIMIT ?''',
+                (int(time.time()),limit+1)).fetchall()
+            if len(rows) > limit:
+                raise VerificationError('verification_recovery_capacity')
+            return tuple((row[0],row[1]) for row in rows)

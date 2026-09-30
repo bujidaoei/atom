@@ -117,3 +117,5 @@ Verification contract identity includes ordered requirements/checks/setup, title
 Verification intent reservation must capture the stored project contract under the same writer transaction as owner/current-head/idle checks. Exact request replay preserves original identity and deadline; replay is historical evidence, not renewed dispatch permission.
 
 Verification result registration derives outcome/counts from exact complete coverage of the captured contract. A first report outside the original time interval is rejected. Exact historical replay retains the original timestamp; changed report content conflicts. Persisting a report does not publish or prove verifier authority.
+
+Verification interruption must persist cancelled/timed_out separately from observed check results. A report and interruption racing for the same request can commit only one immutable terminal result. Expiry inventory must be bounded and reject capacity overflow without partial mutation.

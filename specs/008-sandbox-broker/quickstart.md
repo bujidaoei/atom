@@ -91,3 +91,5 @@ Codec verification: python -m pytest backend/tests/test_verification_contract.py
 Run tests/test_verification_repository.py with tests/test_verification_contract.py for actual SQLite reservation/concurrent retry, durable reopen, foreign/stale input denial, expired historical replay, active-run rejection, bounded lock contention and schema drift. Tests use synthetic ledger artifact descriptors; they are not physical artifact or browser acceptance.
 
 Verification repository tests now include actual concurrent report writes, exact/conflicting replay, missing/foreign/invalid report rejection, expiry/clock-reversal rejection, changed current contract, and a child process exiting after insertion but before commit. These use synthetic reports and do not prove DOM execution.
+
+Verification tests cover durable cancellation/timeout with no fabricated check results, premature timeout rejection, exact deadline boundary, bounded non-mutating expiry inventory, foreign cancellation denial and synchronized report/cancel race. Browser lifecycle and automatic recovery are not covered.

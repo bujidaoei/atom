@@ -134,3 +134,5 @@ T027 / feature008 T016: canonical contract and complete report content validatio
 T027 / feature008 T016: immutable verification-intent reservation and exact replay now pass real SQLite concurrency/scope/drift tests. Verifier execution, result registration and release integration remain unfinished.
 
 T027 / feature008 T016: transactional captured-contract report registration and crash/replay tests pass; trusted verifier execution and actual publication integration remain unfinished.
+
+T027 / feature008 T016: verification cancellation/timeout ledger and bounded expiry inventory now tested, including simultaneous report/cancel. Browser lifecycle and automatic reconciliation remain unimplemented; no enterprise completion claim.

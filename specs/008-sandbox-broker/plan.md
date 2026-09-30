@@ -106,3 +106,5 @@ T016 prerequisite implemented in app/verification_contract.py: immutable canonic
 T016 reservation component implemented in verification_repository.py, requiring exact v2 schema on open and every transaction. BEGIN IMMEDIATE protects stored-contract capture and owner/head/idle validation; schema drift and writer contention fail closed. No application wiring or verifier dispatch is enabled.
 
 T016 result component: trusted internal record_report resolves owner-scoped intent, reloads its canonical contract, validates complete strict results and inserts atomically under the existing bounded writer transaction. Passing/failed status is computed, not accepted as an input. No public endpoint is added before verifier authentication.
+
+T016 terminal component: terminate records explicit interruption under writer exclusion; expired returns bounded owner/request pairs for trusted recovery. Timed-out decisions require current time strictly after the inclusive report deadline. No background sweeper or browser stop is implied by a ledger decision.

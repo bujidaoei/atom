@@ -166,3 +166,64 @@ repository.record_report(owner='user',request_id='verification',results=[{'key':
     with sqlite3.connect(path) as db:
         assert db.execute('SELECT count(*) FROM verification_results').fetchone() == (0,)
     assert repository.record_report(owner='user',request_id=request.id,results=report()).outcome == 'passed'
+
+
+@pytest.mark.parametrize('outcome', ['cancelled','timed_out'])
+def test_interruption_is_durable_without_fabricated_observations(ledger, monkeypatch, outcome):
+    path, repository, arguments = ledger
+    request = repository.reserve(**arguments)
+    if outcome == 'timed_out':
+        with pytest.raises(VerificationError, match='verification_not_expired'):
+            repository.terminate(owner='user',request_id=request.id,outcome=outcome)
+        monkeypatch.setattr('app.verification_repository.time.time',lambda:request.deadline+1)
+    value = repository.terminate(owner='user',request_id=request.id,outcome=outcome)
+    assert value.outcome == outcome and value.passed == 0 and value.total == 1
+    assert 'results' not in json.loads(value.report)
+    assert VerificationRepository(path).terminate(owner='user',request_id=request.id,outcome=outcome) == value
+    with pytest.raises(VerificationError, match='verification_conflict'):
+        repository.record_report(owner='user',request_id=request.id,results=report())
+    assert repository.expired() == ()
+
+
+def test_expired_inventory_is_bounded_and_does_not_mutate(ledger, monkeypatch):
+    path, repository, arguments = ledger
+    one = repository.reserve(**arguments)
+    two = repository.reserve(**(arguments | {'request_id':'verification2'}))
+    monkeypatch.setattr('app.verification_repository.time.time',lambda:max(one.deadline,two.deadline))
+    assert repository.expired() == ()
+    monkeypatch.setattr('app.verification_repository.time.time',lambda:max(one.deadline,two.deadline)+1)
+    with pytest.raises(VerificationError, match='verification_recovery_capacity'):
+        repository.expired(limit=1)
+    assert set(repository.expired(limit=2)) == {('user',one.id),('user',two.id)}
+    with sqlite3.connect(path) as db:
+        assert db.execute('SELECT count(*) FROM verification_results').fetchone() == (0,)
+    for owner, request_id in repository.expired(limit=2):
+        repository.terminate(owner=owner,request_id=request_id,outcome='timed_out')
+    assert repository.expired() == ()
+
+
+def test_cancel_and_report_race_has_one_terminal_winner(ledger):
+    from threading import Barrier
+    path, repository, arguments = ledger
+    request = repository.reserve(**arguments)
+    barrier = Barrier(2)
+    def submit(cancel):
+        barrier.wait(timeout=3)
+        try:
+            return repository.terminate(owner='user',request_id=request.id,outcome='cancelled') if cancel else repository.record_report(owner='user',request_id=request.id,results=report())
+        except VerificationError as error:
+            assert str(error) == 'verification_conflict'
+            return None
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        values = list(pool.map(submit,[True,False]))
+    assert sum(value is not None for value in values) == 1
+    with sqlite3.connect(path) as db:
+        assert db.execute('SELECT outcome FROM verification_results').fetchall() == [(next(value.outcome for value in values if value is not None),)]
+
+
+def test_foreign_cancellation_cannot_terminate_request(ledger):
+    path, repository, arguments = ledger
+    request = repository.reserve(**arguments)
+    with pytest.raises(VerificationError, match='verification_not_found'):
+        repository.terminate(owner='foreign',request_id=request.id,outcome='cancelled')
+    assert repository.record_report(owner='user',request_id=request.id,results=report()).outcome == 'passed'
