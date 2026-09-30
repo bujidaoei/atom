@@ -29,6 +29,8 @@ Duplicate creates, same identity/different grant, lost create response, worker o
 - FR-008: Real integration, fault injection and deployment migration evidence MUST precede acceptance. No component test may close whole feature.
 
 ## Key Entities
+File-operation retries must bind an operation ID to the exact request and current authorized attempt. Completed responses may be reused within bounded durable storage; uncertain effects must not be replayed. Revocation/expiry deny late completion and recovery retires prior workers before new dispatch (contracts/operation-receipts.md). This component does not establish end-to-end runtime acceptance.
+
 Grant, broker attempt registry, operation receipt, immutable snapshot, registered revision, terminal outcome with termination status.
 
 ## Success Criteria

@@ -3,11 +3,16 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 import os
+import hashlib
+import json
 from pathlib import Path
+import re
 import threading
 
 from .docker_driver import DockerDriver, DriverError, OwnedContainer
 from .grants import Grant
+from .file_helper import FileError, validate
+from .file_ops import FileOperations
 from .registry import Attempt, Registry, RegistryError
 
 
@@ -186,6 +191,66 @@ class Lifecycle:
         with self._exclusive():
             attempt = self.registry.find_grant(grant_id)
             return self._stop(attempt.id) if attempt else None
+
+    def _retire_operation(self, attempt: Attempt):
+        self._ready = False
+        try:
+            self.registry.revoke(attempt.grant_id)
+            self._stop(attempt.id)
+        except (RegistryError, LifecycleError, DriverError):
+            # Losing database access cannot justify leaving a possibly-mutating
+            # helper alive. Persisted running intent will be reconciled later.
+            try:
+                self.driver.terminate(attempt)
+            except DriverError:
+                pass
+
+    def file_operation(self, grant: Grant, attempt_id: str, operation_id: str,
+                       tool_call_id: str, operation: dict) -> dict:
+        """Trusted verified-grant entry; never retry an uncertain external effect."""
+        try:
+            validate(operation)
+            if not isinstance(tool_call_id, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}", tool_call_id):
+                raise FileError("invalid_tool_call_id")
+            encoded = json.dumps({"tool_call_id": tool_call_id, "operation": operation},
+                                 sort_keys=True, ensure_ascii=True, allow_nan=False, separators=(",", ":"))
+            # Detach from caller-owned mutable dictionaries before hashing/IO.
+            operation = json.loads(encoded)["operation"]
+        except (ValueError, TypeError, RecursionError):
+            raise FileError("invalid_operation") from None
+        fingerprint = hashlib.sha256(encoded.encode("ascii")).hexdigest()
+        reservation = {"read_bytes": 12 * 1024 * 1024, "write": 4096}.get(operation["op"], 2 * 1024 * 1024)
+        with self._exclusive():
+            if not self.ready:
+                raise LifecycleError("broker_not_ready")
+            attempt = self.registry.authorize(grant)
+            receipt, fresh = self.registry.begin_operation(grant, attempt_id, operation_id, fingerprint, reservation)
+            if not fresh:
+                if receipt.state == "completed":
+                    try:
+                        return json.loads(receipt.result_json)
+                    except (TypeError, ValueError):
+                        self._retire_operation(attempt)
+                        raise LifecycleError("invalid_operation_receipt") from None
+                self._retire_operation(attempt)
+                raise LifecycleError("operation_outcome_unknown")
+            try:
+                # Recheck after durable admission and before the external effect.
+                attempt = self.registry.authorize(grant)
+                try:
+                    data = FileOperations(self.driver).execute(attempt, operation)
+                    outcome = {"ok": True, "data": data}
+                except FileError as error:
+                    if operation["op"] == "write" and str(error) != "file_conflict":
+                        raise
+                    outcome = {"ok": False, "error": str(error)}
+                self.registry.complete_operation(grant, attempt_id, operation_id, outcome)
+                return outcome
+            except BaseException as error:
+                self._retire_operation(attempt)
+                if not isinstance(error, Exception):
+                    raise
+                raise LifecycleError("operation_outcome_unknown") from None
 
     def close(self):
         if self._closed:

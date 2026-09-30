@@ -5,6 +5,8 @@ from pathlib import Path
 import subprocess
 import sys
 import time
+import threading
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
@@ -12,10 +14,110 @@ from app.sandbox.docker_driver import DockerDriver, DriverError
 from app.sandbox.grants import Grant
 from app.sandbox.lifecycle import Lifecycle, LifecycleError
 from app.sandbox.registry import Registry, RegistryError
+from app.sandbox.file_ops import FileOperations
 
 
 IMAGE = os.environ.get("ATOM_TEST_DOCKER_IMAGE")
 pytestmark = pytest.mark.skipif(not IMAGE, reason="requires explicit pinned local Docker test image")
+
+
+def test_operation_retry_does_not_repeat_real_write(environment):
+    registry, driver, grant = environment
+    with Lifecycle(registry, driver) as lifecycle:
+        lifecycle.start()
+        attempt = lifecycle.provision(grant)
+        # Component fixture only: production ready requires snapshot seeding.
+        attempt = registry.transition(grant, attempt.version, "ready")
+        first = {"op": "write", "path": "a.txt", "content": "first"}
+        result = lifecycle.file_operation(grant, attempt.id, "one", "tool", first)
+        lifecycle.file_operation(grant, attempt.id, "two", "tool", {**first, "content": "second"})
+        assert lifecycle.file_operation(grant, attempt.id, "one", "tool", first) == result
+        with pytest.raises(RegistryError, match="operation_conflict"):
+            lifecycle.file_operation(grant, attempt.id, "one", "tool", {**first, "content": "changed"})
+        assert FileOperations(driver).execute(attempt, {"op": "read_lines", "path": "a.txt", "start": 1, "limit": 10})["text"].endswith("second")
+        with pytest.raises(RegistryError, match="attempt_scope_mismatch"):
+            lifecycle.file_operation(grant, "f" * 32, "wrong", "tool", first)
+        assert registry.find_operation(attempt.id, "wrong") is None
+
+
+def test_failed_receipt_commit_retires_real_mutated_worker(environment, monkeypatch):
+    registry, driver, grant = environment
+    with Lifecycle(registry, driver) as lifecycle:
+        lifecycle.start()
+        attempt = lifecycle.provision(grant)
+        attempt = registry.transition(grant, attempt.version, "ready")
+        def fail_commit(*args):
+            data = FileOperations(driver).execute(attempt, {"op": "read_bytes", "path": "a.txt"})
+            assert data["base64"] == "d3JpdHRlbg=="
+            raise RegistryError("registry_unavailable")
+        monkeypatch.setattr(registry, "complete_operation", fail_commit)
+        with pytest.raises(LifecycleError, match="operation_outcome_unknown"):
+            lifecycle.file_operation(grant, attempt.id, "one", "tool", {"op": "write", "path": "a.txt", "content": "written"})
+        assert registry.find_operation(attempt.id, "one").state == "unknown"
+        assert registry.find(attempt.id).state == "terminated"
+        assert driver.inspect(attempt) is None
+        assert not lifecycle.ready
+
+
+def test_process_death_after_real_write_never_replays(environment):
+    registry, driver, grant = environment
+    script = """
+import json,os,sys
+from pathlib import Path
+from app.sandbox.registry import Registry
+from app.sandbox.docker_driver import DockerDriver
+from app.sandbox.grants import Grant
+from app.sandbox.lifecycle import Lifecycle
+r=Registry(Path(sys.argv[1]));d=DockerDriver(r.broker_id,sys.argv[2]);l=Lifecycle(r,d)
+l.start();g=Grant(**json.loads(sys.stdin.read()));a=l.provision(g)
+a=r.transition(g,a.version,'ready')
+print(a.id,flush=True)
+r.complete_operation=lambda *args: os._exit(29)
+l.file_operation(g,a.id,'one','tool',{'op':'write','path':'a.txt','content':'written'})
+"""
+    child = subprocess.run([sys.executable, "-c", script, str(registry.path), IMAGE],
+        input=json.dumps(asdict(grant)), text=True, capture_output=True, timeout=30,
+        cwd=Path(__file__).resolve().parents[2])
+    assert child.returncode == 29, child.stderr
+    attempt = registry.find(child.stdout.strip())
+    assert registry.find_operation(attempt.id, "one").state == "running"
+    assert FileOperations(driver).execute(attempt, {"op": "read_bytes", "path": "a.txt"})["base64"] == "d3JpdHRlbg=="
+    with Lifecycle(Registry(registry.path), driver) as restarted:
+        restarted.start()
+        assert registry.find_operation(attempt.id, "one").state == "unknown"
+        assert driver.inspect(attempt) is None
+        with pytest.raises(RegistryError, match="grant_revoked"):
+            restarted.file_operation(grant, attempt.id, "one", "tool", {"op": "write", "path": "a.txt", "content": "written"})
+
+
+def test_revoke_during_operation_denies_late_success(environment, monkeypatch):
+    registry, driver, grant = environment
+    executed, release = threading.Event(), threading.Event()
+    original = FileOperations.execute
+    def delayed(self, attempt, operation):
+        result = original(self, attempt, operation)
+        executed.set()
+        assert release.wait(15)
+        return result
+    monkeypatch.setattr(FileOperations, "execute", delayed)
+    with Lifecycle(registry, driver) as lifecycle:
+        lifecycle.start()
+        attempt = lifecycle.provision(grant)
+        attempt = registry.transition(grant, attempt.version, "ready")
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            pending = pool.submit(lifecycle.file_operation, grant, attempt.id, "one", "tool",
+                                  {"op": "write", "path": "a.txt", "content": "written"})
+            try:
+                assert executed.wait(15)
+                with pytest.raises(LifecycleError, match="broker_busy"):
+                    lifecycle.revoke(grant.jti)
+                assert registry.find_operation(attempt.id, "one").state == "unknown"
+            finally:
+                release.set()
+            with pytest.raises(LifecycleError, match="operation_outcome_unknown"):
+                pending.result(timeout=20)
+        assert registry.find(attempt.id).state == "terminated"
+        assert driver.inspect(attempt) is None
 
 
 @pytest.fixture

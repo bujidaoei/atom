@@ -9,6 +9,7 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
+import json
 import re
 import sqlite3
 import time
@@ -37,10 +38,16 @@ _SCHEMA_V1 = {
         PRIMARY KEY(org,project,run))""",
     "revocations": """CREATE TABLE revocations (grant_id TEXT PRIMARY KEY, revoked_at REAL NOT NULL)""",
 }
-_SCHEMA = {**_SCHEMA_V1, "orphans": """CREATE TABLE orphans (
+_SCHEMA_V2 = {**_SCHEMA_V1, "orphans": """CREATE TABLE orphans (
     id TEXT PRIMARY KEY, attempt_id TEXT NOT NULL,
     state TEXT NOT NULL CHECK(state IN ('observed','termination_unknown','terminated')),
     version INTEGER NOT NULL CHECK(version>0), created_at REAL NOT NULL, updated_at REAL NOT NULL)"""}
+_SCHEMA = {**_SCHEMA_V2, "operations": """CREATE TABLE operations (
+    attempt_id TEXT NOT NULL REFERENCES attempts(id), operation_id TEXT NOT NULL,
+    request_hash TEXT NOT NULL, attempt_version INTEGER NOT NULL CHECK(attempt_version>0),
+    state TEXT NOT NULL CHECK(state IN ('running','completed','unknown')), result_json TEXT,
+    reserved_bytes INTEGER NOT NULL CHECK(reserved_bytes>=0), result_bytes INTEGER NOT NULL CHECK(result_bytes>=0),
+    created_at REAL NOT NULL, updated_at REAL NOT NULL, PRIMARY KEY(attempt_id,operation_id))"""}
 
 
 class RegistryError(RuntimeError):
@@ -79,6 +86,20 @@ class Orphan:
     updated_at: float
 
 
+@dataclass(frozen=True)
+class Operation:
+    attempt_id: str
+    operation_id: str
+    request_hash: str
+    attempt_version: int
+    state: str
+    result_json: str | None
+    reserved_bytes: int
+    result_bytes: int
+    created_at: float
+    updated_at: float
+
+
 class Registry:
     def __init__(self, path: Path, *, clock: Callable[[], float] = time.time, lock_timeout: float = 3):
         self.path = Path(path)
@@ -96,17 +117,19 @@ class Registry:
                 for statement in _SCHEMA.values():
                     db.execute(statement)
                 db.execute("INSERT INTO broker_meta VALUES (1,?)", (uuid.uuid4().hex,))
-                db.execute("PRAGMA user_version=2")
+                db.execute("PRAGMA user_version=3")
             else:
                 normalize = lambda sql: " ".join(sql.split()).casefold()
-                expected_schema = _SCHEMA_V1 if version == 1 else _SCHEMA
-                if version not in (1, 2) or set(schema) != set(expected_schema) or any(
+                expected_schema = {1: _SCHEMA_V1, 2: _SCHEMA_V2, 3: _SCHEMA}.get(version, {})
+                if version not in (1, 2, 3) or set(schema) != set(expected_schema) or any(
                     normalize(schema[name]) != normalize(expected) for name, expected in expected_schema.items()
                 ):
                     raise RegistryError("unsupported_schema")
                 if version == 1:
                     db.execute(_SCHEMA["orphans"])
-                    db.execute("PRAGMA user_version=2")
+                if version < 3:
+                    db.execute(_SCHEMA["operations"])
+                    db.execute("PRAGMA user_version=3")
             identity = db.execute("SELECT broker_id FROM broker_meta WHERE singleton=1").fetchone()
             if identity is None or not isinstance(identity[0], str) or not re.fullmatch(r"[0-9a-f]{32}", identity[0]):
                 raise RegistryError("invalid_registry_identity")
@@ -224,6 +247,8 @@ class Registry:
             return self._by_id(db, attempt.id)
 
     def _terminate(self, db: sqlite3.Connection, attempt: Attempt) -> Attempt:
+        db.execute("UPDATE operations SET state='unknown',reserved_bytes=0,updated_at=? WHERE attempt_id=? AND state='running'",
+                   (self._clock(), attempt.id))
         if attempt.state not in {"terminating", "termination_unknown", "terminated"}:
             db.execute("UPDATE attempts SET state='terminating',version=version+1,updated_at=? WHERE id=?",
                        (self._clock(), attempt.id))
@@ -257,6 +282,8 @@ class Registry:
     def expire_due(self) -> int:
         with self._transaction() as db:
             now = self._clock()
+            db.execute("""UPDATE operations SET state='unknown',reserved_bytes=0,updated_at=? WHERE state='running'
+                AND attempt_id IN (SELECT id FROM attempts WHERE deadline<=?)""", (now, now))
             return db.execute("""UPDATE attempts SET state='terminating',version=version+1,updated_at=?
                 WHERE deadline<=? AND state NOT IN ('terminating','termination_unknown','terminated')""", (now, now)).rowcount
 
@@ -318,3 +345,61 @@ class Registry:
         with self._connection() as db:
             return [Orphan(**dict(row)) for row in db.execute(
                 "SELECT * FROM orphans WHERE state!='terminated' ORDER BY updated_at,id LIMIT ?", (limit,))]
+
+    @staticmethod
+    def _operation(db: sqlite3.Connection, attempt_id: str, operation_id: str) -> Operation | None:
+        row = db.execute("SELECT * FROM operations WHERE attempt_id=? AND operation_id=?", (attempt_id, operation_id)).fetchone()
+        return Operation(**dict(row)) if row else None
+
+    def find_operation(self, attempt_id: str, operation_id: str) -> Operation | None:
+        """Trusted administrative evidence lookup; not workload authorization."""
+        with self._connection() as db:
+            return self._operation(db, attempt_id, operation_id)
+
+    def _operation_owner(self, db: sqlite3.Connection, grant: Grant, attempt_id: str) -> Attempt:
+        attempt = self._owned(db, grant)
+        if attempt.id != attempt_id:
+            raise RegistryError("attempt_scope_mismatch")
+        if attempt.state != "ready":
+            raise RegistryError("attempt_not_ready")
+        return attempt
+
+    def begin_operation(self, grant: Grant, attempt_id: str, operation_id: str,
+                        request_hash: str, reserved_bytes: int) -> tuple[Operation, bool]:
+        if (not isinstance(operation_id, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", operation_id)
+                or not isinstance(request_hash, str) or not _REVISION.fullmatch(request_hash)
+                or type(reserved_bytes) is not int or not 1 <= reserved_bytes <= 12 * 1024 * 1024):
+            raise RegistryError("invalid_operation_identity")
+        with self._transaction() as db:
+            attempt = self._operation_owner(db, grant, attempt_id)
+            existing = self._operation(db, attempt_id, operation_id)
+            if existing:
+                if existing.request_hash != request_hash:
+                    raise RegistryError("operation_conflict")
+                return existing, False
+            count, used = db.execute("SELECT COUNT(*),COALESCE(SUM(reserved_bytes+result_bytes),0) FROM operations WHERE attempt_id=?",
+                                     (attempt_id,)).fetchone()
+            if count >= 1024 or used + reserved_bytes > 64 * 1024 * 1024:
+                raise RegistryError("operation_capacity")
+            now = self._clock()
+            db.execute("INSERT INTO operations VALUES (?,?,?,?,'running',NULL,?,0,?,?)",
+                       (attempt_id, operation_id, request_hash, attempt.version, reserved_bytes, now, now))
+            return self._operation(db, attempt_id, operation_id), True
+
+    def complete_operation(self, grant: Grant, attempt_id: str, operation_id: str, outcome: dict) -> Operation:
+        if not isinstance(outcome, dict):
+            raise RegistryError("invalid_operation_result")
+        try:
+            encoded = json.dumps(outcome, ensure_ascii=True, allow_nan=False, sort_keys=True, separators=(",", ":"))
+        except (TypeError, ValueError, RecursionError):
+            raise RegistryError("invalid_operation_result") from None
+        with self._transaction() as db:
+            attempt = self._operation_owner(db, grant, attempt_id)
+            operation = self._operation(db, attempt_id, operation_id)
+            if operation is None or operation.state != "running" or operation.attempt_version != attempt.version:
+                raise RegistryError("operation_not_running")
+            if len(encoded) > operation.reserved_bytes:
+                raise RegistryError("operation_result_limit")
+            db.execute("""UPDATE operations SET state='completed',result_json=?,result_bytes=?,reserved_bytes=0,updated_at=?
+                WHERE attempt_id=? AND operation_id=?""", (encoded, len(encoded), self._clock(), attempt_id, operation_id))
+            return self._operation(db, attempt_id, operation_id)

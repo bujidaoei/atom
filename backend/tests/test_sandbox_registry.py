@@ -140,11 +140,11 @@ def test_unknown_schema_is_not_overwritten(tmp_path):
 
 def test_tampered_or_newer_schema_rejected(registry):
     with sqlite3.connect(registry.path) as db:
-        db.execute("PRAGMA user_version=3")
+        db.execute("PRAGMA user_version=4")
     with pytest.raises(RegistryError, match="unsupported_schema"):
         Registry(registry.path)
     with sqlite3.connect(registry.path) as db:
-        db.execute("PRAGMA user_version=2")
+        db.execute("PRAGMA user_version=3")
         db.execute("ALTER TABLE attempts ADD COLUMN unexpected TEXT")
     with pytest.raises(RegistryError, match="unsupported_schema"):
         Registry(registry.path)
@@ -224,6 +224,7 @@ def test_v1_migration_preserves_identity_ownership_and_revocations(registry, gra
     attempt = registry.admit(grant)
     registry.revoke("revoked-before-admission")
     with sqlite3.connect(registry.path) as db:
+        db.execute("DROP TABLE operations")
         db.execute("DROP TABLE orphans")
         db.execute("PRAGMA user_version=1")
         before = {table: db.execute(f"SELECT * FROM {table}").fetchall()
@@ -234,13 +235,14 @@ def test_v1_migration_preserves_identity_ownership_and_revocations(registry, gra
     with pytest.raises(RegistryError, match="grant_revoked"):
         reopened.admit(replace(grant, jti="revoked-before-admission", run="new"))
     with sqlite3.connect(registry.path) as db:
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 2
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 3
         assert all(db.execute(f"SELECT * FROM {table}").fetchall() == rows for table, rows in before.items())
     assert reopened.pending_orphans() == []
 
 
 def test_failed_v1_migration_rolls_back_ddl_and_version(registry):
     with sqlite3.connect(registry.path) as db:
+        db.execute("DROP TABLE operations")
         db.execute("DROP TABLE orphans")
         db.execute("PRAGMA user_version=1")
         db.execute("UPDATE broker_meta SET broker_id='invalid'")

@@ -16,6 +16,8 @@ PASS for incremental implementation: specifications/tasks/evidence precede code;
 6. HTTP boundary: separate administrative service credential for control-plane admission/revocation; runtime presents bearer grant for scoped operations only. Bounded request/stream deadlines. Standalone config/service and loopback-only entry point expose only implemented control/health operations under contracts/service.md; lifespan schedules recovery and confirmed normal-shutdown cleanup. Runtime file/snapshot routes remain unexposed until T007…T009. Production readiness requires broker and reconciliation; migration keeps old data until verified import and pointer switch.
 
 ## Phases
+Operation receipt continuation: schema v3 migrates exact v1/v2 transactionally. Lifecycle admits a durable running receipt before helper execution, reauthorizes before effects and completion, caches bounded completed results, and retires uncertain attempts without replay. Revocation persists even while the control lock is occupied and invalidates outstanding receipts. Contract: contracts/operation-receipts.md. HTTP exposure and production snapshot-seeded ready transitions remain dependent work.
+
 Grant validation → registry/reconciliation → Docker/file helpers → HTTP and structured runtime adapter → snapshot registration/migration → real fault/acceptance. Do not expose incomplete endpoints. Grant library can be tested independently while remaining tasks stay open.
 
 ## Validation
