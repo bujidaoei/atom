@@ -3,7 +3,7 @@
 - [x] T001 Record evidence-supported scope/design in specs/008-sandbox-broker/spec.md and plan.md.
 - [x] T002 Implement strict signed grant schema/validation and negative tests in backend/app/sandbox/grants.py and backend/tests/test_sandbox_grants.py (FR-001 codec only; 36 new cases passed, HTTP zero-effects gate remains T004).
 ## US1 — authorized ownership
-- [ ] T003 [US1] Implement versioned durable registry, idempotent admission, revocation and fence checks in backend/app/sandbox/registry.py with backend/tests/test_sandbox_registry.py (FR-003).
+- [x] T003 [US1] Implement versioned durable registry, idempotent admission, revocation and fence checks in backend/app/sandbox/registry.py with backend/tests/test_sandbox_registry.py (FR-003 registry component; 17 real SQLite tests passed, no driver termination claim).
 - [ ] T004 [US1] Implement independent broker configuration/authentication and bounded HTTP schemas in backend/app/sandbox/config.py and service.py; prove denied requests have zero driver effects (FR-001/002).
 ## US2 — bounded/recoverable lifecycle
 - [ ] T005 [US2] Implement fixed-profile Docker driver and real integration tests in backend/app/sandbox/docker_driver.py and backend/tests/integration/test_sandbox_driver.py (FR-004).

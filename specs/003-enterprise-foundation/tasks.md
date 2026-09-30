@@ -40,7 +40,7 @@ Goal: controlled enterprise repository integration. Independent test: role matri
 ## Final phase: readiness and delivery
 - [x] T029 [US1] Reproduce and fix post-acquisition runtime cleanup gaps in specs/007-sandbox-lifecycle/tasks.md; real Pi/file-tool regression and lock verification passed. Adapter release is not broker termination acceptance.
 - [x] T026 [US1] Implement and locally verify snapshot component specs/006-sandbox-snapshots/tasks.md. No runtime call site exists yet; this closes only the transfer foundation, not SEC-05.
-- [ ] T027 [US1] Complete broker grant/lifecycle and snapshot/file-tool integration under specs/008-sandbox-broker/tasks.md, with real cancel/crash/quiesce/export and fenced revision tests. Child T001/T002 complete (design and grant codec); registry/HTTP/Docker/runtime/migration remain open.
+- [ ] T027 [US1] Complete broker grant/lifecycle and snapshot/file-tool integration under specs/008-sandbox-broker/tasks.md, with real cancel/crash/quiesce/export and fenced revision tests. Child T001…T003 complete (design, grant codec, local registry); HTTP/Docker/reconciliation/runtime/migration remain open.
 - [x] T024 [US1] Implement and locally verify specs/005-configuration-guards/tasks.md; no missing-token authorization or signing-secret fallback. Commit 050faba and scoped test evidence recorded; parent production delivery remains T019.
 - [ ] T017 Run Spec Kit cross-artifact analysis and replace staged tasks with concrete implementation/debug/test/acceptance tasks in specs/003-enterprise-foundation/tasks.md.
 - [ ] T018 Implement and validate accepted increments with evidence in specs/003-enterprise-foundation/evidence.md; this umbrella task must be split before coding and cannot close by prose alone.
