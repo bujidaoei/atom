@@ -5,8 +5,9 @@ import time
 
 from .docker_driver import DockerDriver, DriverError, run_bounded
 from .registry import Attempt
+from ..snapshots import MAX_ARCHIVE_BYTES
 
-MAX_SEED_BYTES = 65 * 1024 * 1024 + 13
+MAX_SEED_BYTES = MAX_ARCHIVE_BYTES
 _SNAPSHOT_SOURCE = Path(__file__).parents[1].joinpath("snapshots.py").read_text(encoding="utf-8")
 _ENTRY = r'''
 import fcntl, signal

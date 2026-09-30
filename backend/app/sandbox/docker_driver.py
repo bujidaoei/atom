@@ -9,6 +9,7 @@ import re
 import time
 
 from .registry import Attempt
+from ..snapshots import MAX_ARCHIVE_BYTES
 
 _ID = re.compile(r"[0-9a-f]{32}\Z")
 _IMAGE = re.compile(r"sha256:[0-9a-f]{64}\Z")
@@ -97,9 +98,9 @@ def run_bounded(args: list[str], *, timeout: float = 15, output_limit: int = 256
     """Synchronous broker worker-thread helper. CLI termination is not container termination."""
     if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or not 0 < timeout <= 30:
         raise DriverError("invalid_driver_timeout")
-    if type(output_limit) is not int or not 1 <= output_limit <= 12 * 1024 * 1024:
+    if type(output_limit) is not int or not 1 <= output_limit <= MAX_ARCHIVE_BYTES:
         raise DriverError("invalid_driver_output_limit")
-    if input_data is not None and (not isinstance(input_data, bytes) or len(input_data) > 65 * 1024 * 1024 + 13):
+    if input_data is not None and (not isinstance(input_data, bytes) or len(input_data) > MAX_ARCHIVE_BYTES):
         raise DriverError("invalid_driver_input")
     return asyncio.run(_bounded(args, timeout, output_limit, input_data))
 

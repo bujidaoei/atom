@@ -107,7 +107,7 @@ def test_seed_denials_do_not_admit_or_execute(environment):
         created = client.post("/v1/admin/provision", json={"grant": token}, headers=admin)
         attempt_id = created.json()["attempt_id"]
         seed_headers = {**admin, "x-atom-grant": token, "content-type": "application/octet-stream"}
-        oversized = client.post("/v1/admin/seed", content=b"x" * (65 * 1024 * 1024 + 14), headers=seed_headers)
+        oversized = client.post("/v1/admin/seed", content=b"x" * (65 * 1024 * 1024 + 15), headers=seed_headers)
         assert oversized.status_code == 413
         assert Registry(config.registry_path).find(attempt_id).state == "provisioning"
         assert client.post("/v1/admin/seed", content=archive, headers=seed_headers).status_code == 200

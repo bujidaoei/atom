@@ -24,3 +24,5 @@ Receiver uses an unpredictable private staging directory and exclusive creates; 
 
 ## Delivery Strategy
 US1 codec/staging → US2 Linux export and adversarial tests → review/evidence. Broker/runtime/cancel/recovery remain open in parent 003.
+
+Broker integration continuation (feature 008): added verify_snapshot for bounded in-memory verification using the shared manifest parser and file digests, plus MAX_ARCHIVE_BYTES for the default format bound. This function creates no artifact or revision. Existing receive_snapshot retains private staging/materialization behavior; broker checkpoints use verification before returning output bytes. Integration scope and evidence remain governed by specs/008-sandbox-broker/contracts/checkpoint-export.md and evidence.md.

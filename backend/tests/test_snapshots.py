@@ -11,7 +11,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from app.snapshots import Limits, SnapshotError, export_snapshot, receive_snapshot
+from app.snapshots import Limits, SnapshotError, export_snapshot, receive_snapshot, verify_snapshot
 
 
 def entry(path: str, data: bytes = b"x") -> dict:
@@ -41,6 +41,17 @@ class SnapshotTests(unittest.TestCase):
             self.assertEqual(caught.exception.code, code)
         self.assertEqual(set(self.parent.iterdir()), before)
         self.assertEqual(self.canary.read_bytes(), b"unchanged")
+        if code != "io_error":  # Filesystem failure is specific to materialization.
+            with self.assertRaises(SnapshotError):
+                verify_snapshot(io.BytesIO(payload), **kwargs)
+
+    def test_verify_without_host_artifacts_matches_receive(self):
+        payload = wire([entry("a", b""), entry("nested/中文.bin", b"\x00\xff")], b"\x00\xff")
+        received = receive_snapshot(io.BytesIO(payload), self.parent)
+        with patch("app.snapshots.tempfile.mkdtemp", side_effect=AssertionError("verification must not stage files")):
+            verified = verify_snapshot(io.BytesIO(payload))
+        self.assertEqual(verified.revision, received.revision)
+        self.assertEqual(verified.files, received.files)
 
     def test_receive_binary_empty_and_identity(self):
         files = [entry("a", b""), entry("nested/中文.bin", b"\x00\xff")]

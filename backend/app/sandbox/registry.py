@@ -234,6 +234,13 @@ class Registry:
                 raise RegistryError("attempt_not_provisioning")
             return attempt
 
+    def authorize_checkpoint(self, grant: Grant) -> Attempt:
+        with self._transaction() as db:
+            attempt = self._owned(db, grant)
+            if attempt.state not in {"ready", "quiescing"}:
+                raise RegistryError("attempt_not_exportable")
+            return attempt
+
     @staticmethod
     def _version(attempt: Attempt, expected: int) -> None:
         if type(expected) is not int or expected != attempt.version:

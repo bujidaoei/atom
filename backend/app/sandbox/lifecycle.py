@@ -15,6 +15,7 @@ from .file_helper import FileError, validate
 from .file_ops import FileOperations
 from .registry import Attempt, Registry, RegistryError
 from .seeding import MAX_SEED_BYTES, SeedOperations
+from .checkpoints import CheckpointExport, CheckpointOperations
 
 
 class LifecycleError(RuntimeError):
@@ -202,6 +203,25 @@ class Lifecycle:
                 if not isinstance(error, Exception):
                     raise
                 raise LifecycleError("seed_outcome_unknown") from None
+
+    def export_checkpoint(self, grant: Grant) -> CheckpointExport:
+        with self._exclusive():
+            if not self.ready:
+                raise LifecycleError("broker_not_ready")
+            attempt = self.registry.authorize_checkpoint(grant)
+            if attempt.state == "ready":
+                attempt = self.registry.transition(grant, attempt.version, "quiescing")
+            try:
+                exported = CheckpointOperations(self.driver).execute(attempt)
+                current = self.registry.authorize_checkpoint(grant)
+                if current.version != attempt.version or current.state != "quiescing":
+                    raise LifecycleError("checkpoint_ownership_changed")
+                return exported
+            except BaseException as error:
+                self._retire_operation(attempt)
+                if not isinstance(error, Exception):
+                    raise
+                raise LifecycleError("checkpoint_outcome_unknown") from None
 
     def revoke(self, grant_id: str) -> Attempt | None:
         # Persist cancellation even if a bounded control operation currently holds the lock.

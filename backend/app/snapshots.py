@@ -60,6 +60,15 @@ class Entry:
     sha256: str
 
 
+MAX_ARCHIVE_BYTES = Limits().max_total_bytes + Limits().max_manifest_bytes + len(_MAGIC) + 4
+
+
+@dataclass(frozen=True)
+class VerifiedSnapshot:
+    revision: str
+    files: tuple[Entry, ...]
+
+
 @dataclass(frozen=True)
 class ReceivedSnapshot:
     revision: str
@@ -178,16 +187,40 @@ def _write(stream: BinaryIO, data: bytes) -> None:
         remaining = remaining[count:]
 
 
+def _manifest(stream: BinaryIO, limits: Limits) -> tuple[tuple[Entry, ...], bytes]:
+    if _read(stream, len(_MAGIC)) != _MAGIC:
+        raise SnapshotError("invalid_magic")
+    length = struct.unpack(">I", _read(stream, 4))[0]
+    if length > limits.max_manifest_bytes:
+        raise SnapshotError("limit_exceeded")
+    return _parse(_read(stream, length), limits)
+
+
+def verify_snapshot(stream: BinaryIO, limits: Limits = Limits()) -> VerifiedSnapshot:
+    """Verify bounded framing and all content without creating host artifacts."""
+    try:
+        entries, canonical = _manifest(stream, limits)
+        for entry in entries:
+            remaining = entry.size
+            digest = hashlib.sha256()
+            while remaining:
+                chunk = _read(stream, min(remaining, _CHUNK))
+                digest.update(chunk)
+                remaining -= len(chunk)
+            if digest.hexdigest() != entry.sha256:
+                raise SnapshotError("digest_mismatch")
+        if stream.read(1) != b"":
+            raise SnapshotError("trailing_data")
+        return VerifiedSnapshot(hashlib.sha256(canonical).hexdigest(), entries)
+    except OSError:
+        raise SnapshotError("io_error") from None
+
+
 def receive_snapshot(stream: BinaryIO, parent: Path, limits: Limits = Limits()) -> ReceivedSnapshot:
     """Verify into a new directory; never replace existing work or register a revision."""
     staging = None
     try:
-        if _read(stream, len(_MAGIC)) != _MAGIC:
-            raise SnapshotError("invalid_magic")
-        length = struct.unpack(">I", _read(stream, 4))[0]
-        if length > limits.max_manifest_bytes:
-            raise SnapshotError("limit_exceeded")
-        entries, canonical = _parse(_read(stream, length), limits)
+        entries, canonical = _manifest(stream, limits)
         parent = Path(parent)
         if parent.is_symlink() or not parent.is_dir():
             raise SnapshotError("invalid_parent")
