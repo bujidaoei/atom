@@ -14,4 +14,6 @@ Cancelled heat metrics retain actual file counts and usage. Retry elapsed displa
 Spec/task/evidence tracking, real tests, immutable Pi and secret exclusion satisfied. Existing user edits preserved. Additive table is backward-compatible; backup and image rollback required.
 
 ## Validation
+Production follow-up: an unresolved Google Fonts stylesheet blocked the inline theme script, body parsing and application mounting. Bundle pinned Fontsource IBM Plex Sans/Mono faces via Vite, preserving typography with font-display swap. Validate same-origin font requests and browser startup before redeploying after active test jobs finish.
+
 Backend receipt/race tests; actual Pi read continuation and absolute grep; real browser delayed navigation, multi-tab startup, stale stream and action errors; build/hash checks; production minesweeper/match-three smoke. Record actual failures as well as passes.

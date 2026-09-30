@@ -36,6 +36,13 @@ with sync_playwright() as p:
     browser = p.chromium.launch()
     page = browser.new_page(viewport={"width": 1440, "height": 900})
     errors = []
+    external_fonts = []
+    # A hanging third-party stylesheet must never be needed to mount the app.
+    def hold_external_font(route):
+        external_fonts.append(route.request.url)
+
+    page.route("https://fonts.googleapis.com/**", hold_external_font)
+    page.route("https://fonts.gstatic.com/**", hold_external_font)
     page.on("pageerror", lambda e: errors.append(str(e)))
     page.add_init_script("""window.sources=[]; window.EventSource=class {
       constructor(url){this.url=url;this.events={};window.sources.push(this);setTimeout(()=>this.emit('open',{}),20)}
@@ -86,6 +93,7 @@ with sync_playwright() as p:
 
     page.route("**/api/**", route)
     page.goto(base + "/app/p/A", wait_until="domcontentloaded")
+    assert not external_fonts, external_fonts
     page.get_by_role("link", name="Project B").click()
     page.get_by_role("heading", name="Project B", exact=True).wait_for()
     for r, snapshot in delayed:

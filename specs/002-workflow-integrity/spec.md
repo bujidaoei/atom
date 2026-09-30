@@ -16,6 +16,7 @@ Choose an explicit 3, 6 or 10 minute per-candidate budget. After a candidate tim
 - FR004 Read parameters and continuation hints agree; workspace absolute and relative paths resolve consistently, without permitting escapes.
 - FR005 Race budgets are explicit and bounded; retry preserves candidate files, model and contract. Failed candidate details and next actions remain visible.
 - FR006 Preserve existing data and historical evidence. Test real UI navigation and real tool invocations, plus controlled faults, before deployment.
+- FR007 Application startup must not depend on third-party font availability. Serve existing font faces with application assets and verify a real browser can load without external font requests.
 
 ## Success Criteria
 No duplicate runs in simultaneous startup/lost-response tests; no cross-project state in delayed-response/navigation tests; long-read continuation and confined absolute search pass; candidate retry changes only selected candidate and terminal status survives reload. Real minesweeper/match-three flows are exercised and failures reported honestly.

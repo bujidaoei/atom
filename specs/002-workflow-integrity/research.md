@@ -4,3 +4,4 @@
 - Production read_file error: offset rejected by schema immediately after native Pi output recommended offset. Grep error: absolute workspace path rejected. Normalize adapter contract; preserve Pi hashes.
 - 180s timeouts represent actual budget exhaustion. Provide explicit bounded budgets and per-heat continuation, not silently extending or marking partial work done.
 - Spec Kit research subagent independently confirmed route-state and request-race defects. Durable command receipts preferred over frontend-only suppression.
+- Production browser tracing confirmed Google Fonts stylesheet blocked parsing before root existed. Same-family self-hosted faces avoid this availability dependency; pinned packages and Vite imports follow [Fontsource installation documentation](https://fontsource.org/docs/getting-started/install). Font licenses ship in public/font-licenses.

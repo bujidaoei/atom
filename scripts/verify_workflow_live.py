@@ -13,8 +13,13 @@ password = "Workflow-test-2026"
 with sync_playwright() as p:
     browser = p.chromium.launch()
     context = browser.new_context(viewport={"width": 1440, "height": 900})
+    resume = "--resume" in sys.argv
+    saved = json.loads(output.read_text(encoding="utf-8")) if resume else []
+    if saved:
+        email, password = saved[0]["email"], saved[0]["password"]
     response = context.request.post(
-        base + "/api/auth/register", data={"email": email, "password": password}
+        base + ("/api/auth/login" if saved else "/api/auth/register"),
+        data={"email": email, "password": password},
     )
     assert response.ok, response.text()
     rows = []
@@ -29,9 +34,13 @@ with sync_playwright() as p:
             "帮我开发一个消消乐游戏，支持相邻交换、三消、分数和重开，手机可用。",
         ),
     ]:
-        project = context.request.post(
-            base + "/api/projects", data={"prompt": prompt}
-        ).json()["project"]
+        project = (
+            next(row["project"] for row in saved if row["name"] == name)
+            if saved
+            else context.request.post(
+                base + "/api/projects", data={"prompt": prompt}
+            ).json()["project"]
+        )
         page = context.new_page()
         page.goto(base + "/app/p/" + project["id"], wait_until="domcontentloaded")
         pages.append(page)
@@ -48,7 +57,7 @@ with sync_playwright() as p:
 
     def detail(i):
         return context.request.get(
-            base + "/api/projects/" + rows[i]["project"]["id"]
+            base + "/api/projects/" + rows[i]["project"]["id"], max_retries=2
         ).json()["project"]
 
     def wait(predicate, seconds=650):
