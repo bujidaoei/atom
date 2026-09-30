@@ -581,3 +581,48 @@ def test_completion_capability_must_match_persisted_binding(repository,field,val
     with pytest.raises(RevisionError,match='revision_not_found'):
         repo.authorize_capability('stranger','attempt',**binding)
     assert repo.execution('owner','attempt')==attempt
+
+
+@pytest.mark.parametrize('mode',['missing','wrong','uncommitted'])
+def test_runtime_broker_result_requires_matching_durable_success(repository, mode):
+    from app.execution import ExecutionLease
+    from app.services.runtime_client import RuntimeClient,GatewayConfig
+    from app.errors import RuntimeUnavailable
+    repo,path,main,heat=repository
+    repo.bootstrap('owner',main,BASE)
+    repo.reserve('owner',main,'run','attempt','grant-attempt',int(time.time())+120)
+    repo.bind('owner','attempt','a'*32)
+    deadline=repo.execution('owner','attempt').deadline
+    lease=ExecutionLease('run',main,'a'*32,deadline,'attempt','grant-attempt','sandbox.token.value','completion.token.value')
+    requests=[]
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self,*args): pass
+        def do_POST(self):
+            request=json.loads(self.rfile.read(int(self.headers['Content-Length'])))
+            requests.append(request)
+            self.send_response(200);self.send_header('Content-Type','application/x-ndjson');self.end_headers()
+            receipt={'attempt_id':'attempt','workspace_id':main,'revision_id':'c'*32,
+                     'artifact_key':'c'*64,'snapshot_revision':'d'*64}
+            if mode != 'uncommitted':
+                from dataclasses import asdict
+                receipt=asdict(repo.register('owner','attempt','a'*32,'grant-attempt',OUTPUT))
+                repo.observe_termination('owner','attempt',confirmed=True,outcome='succeeded')
+            if mode=='wrong': receipt['workspace_id']='other'
+            result={'kind':'result','resultText':'untrusted'}
+            if mode!='missing': result['revisionReceipt']=receipt
+            self.wfile.write((json.dumps(result)+'\n').encode())
+    server=ThreadingHTTPServer(('127.0.0.1',0),Handler)
+    thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
+    async def scenario():
+        client=RuntimeClient();client._base_url=f'http://127.0.0.1:{server.server_port}'
+        with pytest.raises(RuntimeUnavailable):
+            async for line in client.run(run_id='run',role='alex',prompt='test',workspace_path=Path('.'),
+                session_path=Path('session'),agent_dir=Path('.'),gateway=GatewayConfig('https://invalid','test','model'),
+                execution_lease=lease,execution_repository=repo,execution_owner='owner'):
+                assert line.kind!='result'
+    try: asyncio.run(scenario())
+    finally:
+        server.shutdown();server.server_close();thread.join(timeout=3)
+    assert requests[0]['lease']=={'runId':'run','workspaceId':main,'attemptId':'a'*32,
+        'executionId':'attempt','grantId':'grant-attempt','deadline':deadline,
+        'grant':'sandbox.token.value','completionGrant':'completion.token.value'}

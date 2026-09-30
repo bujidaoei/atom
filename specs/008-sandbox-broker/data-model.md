@@ -44,3 +44,5 @@ withExecution returns the operation value plus the verified completion receipt o
 ExternalSandboxScope is trusted transient run/workspace/sandbox identity, constructor-supplied and immutable inside ProductAgentRuntime. It is not a grant or persisted ownership record; outer lifecycle must acquire/validate it and owns checkpoint/cleanup. Request run mismatch is denied before host directory/session creation.
 
 Authenticated RunBody may contain a trusted ready lease combining BrokerLease and ExecutionBinding. Broker mode requires runId equality and both client validators; API receipt is returned on the final result as revisionReceipt. Endpoint origins come from process configuration, never request-supplied routing. No database schema changes.
+
+RuntimeClient leased calls carry explicit repository/owner alongside ExecutionLease internally; these are never sent as runtime-selected authority. Terminal NDJSON revisionReceipt must equal the persisted owner-scoped Receipt, with closed/confirmed/succeeded status and matching workspace/broker/grant. No schema changes.

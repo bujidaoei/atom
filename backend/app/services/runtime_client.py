@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import json
+import asyncio
 from collections.abc import AsyncIterator
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import Any
 
@@ -10,6 +11,8 @@ import httpx
 
 from ..config import get_settings
 from ..errors import RuntimeUnavailable
+from ..execution import ExecutionLease
+from ..revisions import RevisionRepository, RevisionError
 
 
 @dataclass(frozen=True)
@@ -71,6 +74,9 @@ class RuntimeClient:
         context: str | None = None,
         budget_seconds: float | None = None,
         enable_tools: bool | None = None,
+        execution_lease: ExecutionLease | None = None,
+        execution_repository: RevisionRepository | None = None,
+        execution_owner: str | None = None,
     ) -> AsyncIterator[RuntimeLine]:
         """Stream one agent turn. Yields every line until a terminal one."""
         body: dict[str, Any] = {
@@ -101,9 +107,26 @@ class RuntimeClient:
             body["systemPromptSuffix"] = context
         if enable_tools is not None:
             body["enableTools"] = enable_tools
+        if execution_lease is not None:
+            if (not isinstance(execution_lease, ExecutionLease) or execution_repository is None
+                    or execution_owner is None or execution_lease.run_id != run_id):
+                raise RuntimeUnavailable('无效的执行租约配置')
+            try:
+                current = await asyncio.to_thread(execution_repository.execution,execution_owner,execution_lease.execution_id)
+            except RevisionError:
+                raise RuntimeUnavailable('执行租约已失效') from None
+            if (current.run_id,current.workspace_id,current.broker_attempt_id,current.grant_id,current.deadline) != (
+                    run_id,execution_lease.workspace_id,execution_lease.attempt_id,execution_lease.grant_id,execution_lease.deadline):
+                raise RuntimeUnavailable('执行租约不匹配')
+            body['lease'] = {'runId':run_id,'workspaceId':execution_lease.workspace_id,
+                'attemptId':execution_lease.attempt_id,'executionId':execution_lease.execution_id,
+                'grantId':execution_lease.grant_id,'deadline':execution_lease.deadline,
+                'grant':execution_lease.grant,'completionGrant':execution_lease.completion_grant}
+        elif execution_repository is not None or execution_owner is not None:
+            raise RuntimeUnavailable('缺少执行租约')
 
         try:
-            async with httpx.AsyncClient(timeout=self._timeout) as client:
+            async with httpx.AsyncClient(timeout=self._timeout,trust_env=False,follow_redirects=False) as client:
                 async with client.stream(
                     "POST",
                     f"{self._base_url}/v1/runs",
@@ -111,15 +134,23 @@ class RuntimeClient:
                     headers=self._headers,
                 ) as response:
                     if response.status_code != 200:
-                        detail = (await response.aread()).decode("utf-8", "replace")[
-                            :400
-                        ]
-                        raise RuntimeUnavailable(
-                            f"运行时返回 {response.status_code}：{detail}"
-                        )
+                        raise RuntimeUnavailable(f"运行时返回 {response.status_code}")
                     async for line in response.aiter_lines():
                         parsed = _parse_line(line)
                         if parsed is not None:
+                            if execution_lease is not None and parsed.kind == 'result':
+                                try:
+                                    terminal = await asyncio.to_thread(execution_repository.recovery,
+                                        execution_owner,execution_lease.execution_id)
+                                except RevisionError:
+                                    raise RuntimeUnavailable('无法确认执行结果') from None
+                                if (terminal.state != 'closed' or terminal.termination_state != 'confirmed'
+                                        or terminal.outcome != 'succeeded' or terminal.receipt is None
+                                        or terminal.broker_attempt_id != execution_lease.attempt_id
+                                        or terminal.grant_id != execution_lease.grant_id
+                                        or terminal.workspace_id != execution_lease.workspace_id
+                                        or parsed.payload.get('revisionReceipt') != asdict(terminal.receipt)):
+                                    raise RuntimeUnavailable('运行时结果缺少匹配的已登记版本')
                             yield parsed
                             if parsed.is_terminal:
                                 return

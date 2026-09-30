@@ -98,3 +98,5 @@ T027 continuation: child 008 has tested outer Node execution lifecycle ownership
 T027 continuation: actual ProductAgentRuntime now supports trusted external sandbox ownership across recovery, validated with real Pi sessions/local file IO and synthetic model protocol. Production server wiring and enterprise acceptance remain open.
 
 T027 continuation: child 008 production-mode Node server now uses validated broker leases and checkpoint-before-release lifecycle. Real server/Pi/Docker/Linux registration evidence passed; API orchestrator lease delivery, production mounting and enterprise release remain open.
+
+T027 continuation: API runtime transport can now deliver prepared leases and reject unverified terminal receipts using the ledger. Main orchestrator lease creation/adoption and positive whole-API acceptance remain open.

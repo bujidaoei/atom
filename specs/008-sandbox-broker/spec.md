@@ -81,3 +81,5 @@ FR-007 lifecycle ownership: one sandbox acquisition and one final checkpoint MUS
 FR-007 external scope: ProductAgentRuntime MUST reject a different run before session effects and MUST NOT destroy a sandbox owned by an outer execution lifecycle during internal recovery or failure.
 
 FR-007 production selection: production runtime MUST require broker mode, configured trusted origins and matching ready leases, with no local fallback. Terminal result delivery must follow registered completion and expose the verified revision receipt.
+
+FR-007 API acknowledgement: leased runtime success MUST match an owner-scoped durable confirmed successful receipt before the API yields the terminal result. Missing, mismatched or uncommitted runtime receipts must be rejected.
