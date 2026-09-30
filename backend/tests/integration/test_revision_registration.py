@@ -19,7 +19,10 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from app.models import Base, User, Project, Run
-from app.revisions import Receipt
+from app.revisions import Receipt, RevisionRepository
+from app.artifacts import Artifact
+from app.execution import ExecutionCoordinator
+from app.migrations import migrate
 from app.sandbox.client import BrokerClient, BrokerClientError
 from app.sandbox.config import BrokerConfig
 from app.sandbox.docker_driver import DockerDriver, run_bounded
@@ -60,10 +63,7 @@ def running_broker(path):
     assert not thread.is_alive()
 
 
-@pytest.mark.parametrize('cancel_before_ack,cancel_before_provision', [(False,False),(True,False),(False,True)])
-def test_real_export_storage_registration_then_confirmed_release(tmp_path, cancel_before_ack, cancel_before_provision):
-    root = Path(__file__).resolve().parents[3]
-    path = tmp_path / 'api.db'
+def create_api_database(path):
     engine = create_engine('sqlite:///' + path.as_posix())
     Base.metadata.create_all(engine)
     with Session(engine) as s:
@@ -74,6 +74,91 @@ def test_real_export_storage_registration_then_confirmed_release(tmp_path, cance
         s.add(Run(id='run',project_id='p',role='alex',model='fixture',status='running'))
         s.commit()
     engine.dispose()
+
+
+@pytest.mark.parametrize('state', ['unbound','bound','registered'])
+def test_coordinator_cancels_actual_broker_and_releases_only_its_slot(tmp_path, state):
+    root = Path(__file__).resolve().parents[3]
+    path = tmp_path / 'api.db'
+    create_api_database(path)
+    migrate(path,tmp_path / 'backup.db')
+    repo = RevisionRepository(path)
+    with sqlite3.connect(path) as db:
+        workspace = db.execute('SELECT id FROM revision_workspaces').fetchone()[0]
+    manifest = b'{"files":[],"version":1}'
+    seed = b'ATOMSNAP1\n' + struct.pack('>I',len(manifest)) + manifest
+    registry = Registry(tmp_path / 'broker.db')
+    driver = DockerDriver(registry.broker_id,IMAGE)
+    with running_broker(registry.path) as (lifecycle, client, runner):
+        now = int(time.time())
+        ledger_grant = Grant('storage','owner','storage','storage','storage',1,
+                             hashlib.sha256(manifest).hexdigest(),now,now+180)
+        ledger = driver.inspect(lifecycle.provision(ledger_grant))
+        sources = {name: (root / f'backend/app/{name}.py').read_text(encoding='utf-8')
+                   for name in ('snapshots','artifacts')}
+        script = '''
+import base64,json,sys,types
+from pathlib import Path
+from dataclasses import asdict
+data=json.loads(sys.stdin.buffer.read())
+app=types.ModuleType('app');app.__path__=[];sys.modules['app']=app
+for name in ('snapshots','artifacts'):
+    module=types.ModuleType('app.'+name);sys.modules[module.__name__]=module;setattr(app,name,module)
+    exec(compile(data['sources'][name],name+'.py','exec'),module.__dict__)
+root=Path('/workspace/artifacts');root.mkdir(mode=0o700)
+store=app.artifacts.ArtifactStore(root)
+payload=base64.b64decode(data['seed'])
+artifact=store.put(payload)
+assert store.read(artifact.key)==payload
+print(json.dumps(asdict(artifact)))
+'''
+        status, out, err = run_bounded([driver.executable,'exec','-i',ledger.id,'python3','-I','-c',script],
+            input_data=json.dumps({'sources':sources,'seed':base64.b64encode(seed).decode()}).encode(),timeout=25)
+        assert status == 0, err.decode()
+        base = Artifact(**json.loads(out))
+        repo.bootstrap('owner',workspace,base)
+        intent = repo.reserve('owner',workspace,'run','attempt','target',int(time.time())+120)
+        grant = Grant(intent.grant_id,'owner',intent.project_id,intent.run_id,intent.id,intent.generation,
+                      intent.base_revision,intent.issued_at,intent.deadline)
+        worker = None
+        receipt = None
+        if state != 'unbound':
+            observed = runner.run(client.provision(grant))
+            worker = registry.find(observed.attempt_id)
+            repo.bind('owner','attempt',worker.id)
+            runner.run(client.seed(grant,worker.id,seed))
+            assert driver.inspect(worker).running
+        if state == 'registered':
+            # A real unchanged snapshot is a valid no-op revision, not generated output.
+            receipt = repo.register('owner','attempt',worker.id,grant.jti,base)
+        coordinator = ExecutionCoordinator(repo,client)
+        async def cancel_twice():
+            return await asyncio.gather(coordinator.cancel('owner','attempt'),coordinator.cancel('owner','attempt'))
+        first, second = runner.run(cancel_twice())
+        assert first == second == repo.recovery('owner','attempt')
+        assert first.state == 'closed' and first.termination_state == 'confirmed' and first.outcome == 'cancelled'
+        assert first.receipt == receipt
+        if worker is not None:
+            assert registry.find(worker.id).state == 'terminated' and driver.inspect(worker) is None
+        else:
+            assert registry.find_grant(grant.jti) is None
+            with pytest.raises(BrokerClientError) as denied:
+                runner.run(client.provision(grant))
+            assert denied.value.status == 409
+        successor = repo.reserve('owner',workspace,'run','successor','next-grant',int(time.time())+120)
+        assert successor.generation == 2
+        assert runner.run(coordinator.cancel('owner','attempt')) == first
+        assert repo.execution('owner','successor') == successor
+        assert runner.run(coordinator.cancel('owner','successor')).state == 'closed'
+        assert driver.inspect(lifecycle.registry.find_grant(ledger_grant.jti)).running
+    assert not driver.owned_inventory()
+
+
+@pytest.mark.parametrize('cancel_before_ack,cancel_before_provision', [(False,False),(True,False),(False,True)])
+def test_real_export_storage_registration_then_confirmed_release(tmp_path, cancel_before_ack, cancel_before_provision):
+    root = Path(__file__).resolve().parents[3]
+    path = tmp_path / 'api.db'
+    create_api_database(path)
     with sqlite3.connect(path) as db:
         schema = '\n'.join(db.iterdump())
     sources = {name: (root / f'backend/app/{name}.py').read_text(encoding='utf-8')

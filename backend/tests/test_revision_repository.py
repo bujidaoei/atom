@@ -6,6 +6,10 @@ import subprocess
 import sys
 import threading
 import time
+import asyncio
+import json
+import secrets
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 from sqlalchemy import create_engine
@@ -133,6 +137,65 @@ def test_recovery_checks_current_owner_but_does_not_require_running_run(reposito
     with pytest.raises(RevisionError,match='revision_not_found'):
         repo.recovery('owner','attempt')
     assert repo.recovery('new-owner','attempt') == expected
+
+
+@pytest.mark.parametrize('mode', ['disconnect', 'cancel_task', 'concurrent_close'])
+def test_coordinator_cancel_persists_intent_before_actual_transport(repository, mode):
+    from app.execution import ExecutionCoordinator
+    from app.sandbox.client import BrokerClient, BrokerClientError
+    from app.sandbox.grants import GrantCodec
+    repo, path, main, heat = repository
+    repo.bootstrap('owner',main,BASE)
+    allocate(repo,main)
+    arrived, release = threading.Event(), threading.Event()
+    requests = []
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self,*args):
+            pass
+        def do_POST(self):
+            body = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
+            requests.append((self.path,body,repo.recovery('owner','attempt')))
+            arrived.set()
+            release.wait(timeout=5)
+            self.close_connection = True  # Actual lost response; no fake success.
+    server = ThreadingHTTPServer(('127.0.0.1',0),Handler)
+    thread = threading.Thread(target=server.serve_forever,daemon=True)
+    thread.start()
+    async def scenario():
+        async with BrokerClient(f'http://127.0.0.1:{server.server_port}',secrets.token_urlsafe(32),
+                                GrantCodec(b'k'*32),timeout=3) as client:
+            coordinator = ExecutionCoordinator(repo,client)
+            with pytest.raises(RevisionError,match='revision_not_found'):
+                await coordinator.cancel('stranger','attempt')
+            assert not requests
+            task = asyncio.create_task(coordinator.cancel('owner','attempt'))
+            assert await asyncio.to_thread(arrived.wait,3)
+            assert requests[0][0:2] == ('/v1/admin/revoke',{'grant_id':'grant-attempt'})
+            assert requests[0][2].state == 'cancel_requested'
+            if mode == 'concurrent_close':
+                repo.observe_termination('owner','attempt',confirmed=True,outcome='failed')
+            if mode == 'cancel_task':
+                task.cancel()
+            release.set()
+            if mode == 'concurrent_close':
+                result = await task
+                assert result.state == 'closed' and result.outcome == 'failed'
+                assert await coordinator.cancel('owner','attempt') == result
+                assert len(requests) == 1
+            else:
+                with pytest.raises(asyncio.CancelledError if mode == 'cancel_task' else BrokerClientError):
+                    await task
+                recovered = repo.recovery('owner','attempt')
+                assert recovered.state == 'cancel_requested' and recovered.termination_state == 'unknown'
+                with pytest.raises(RevisionError,match='revision_conflict'):
+                    allocate(repo,main,attempt='successor')
+    try:
+        asyncio.run(scenario())
+    finally:
+        release.set()
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
 
 
 def test_reservation_survives_restart_and_binds_once(repository, monkeypatch):

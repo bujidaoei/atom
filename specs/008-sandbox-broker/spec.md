@@ -28,6 +28,8 @@ Duplicate creates, same identity/different grant, lost create response, worker o
 - FR-007: Own runtime and existing file tools MUST use the broker; production MUST fail closed without it. Explicit development local mode remains visibly non-isolated.
 - FR-008: Real integration, fault injection and deployment migration evidence MUST precede acceptance. No component test may close whole feature.
 
+FR-005 cancellation ordering: committed API cancellation MUST precede administrative revocation; confirmed closure MUST follow verified broker termination. Transport uncertainty or caller cancellation must not release the active slot. Concurrent already-closed outcomes and receipts remain unchanged.
+
 FR-005 recovery visibility: trusted owner-checked cleanup reads MUST remain available after cancellation, expiry, registration and closure without granting dispatch, releasing ownership or changing any persisted outcome. Cancellation returns committed cleanup identity; closed-attempt retries preserve successor state.
 
 FR-006 registration semantics: a durable checkpoint, a successfully terminated execution and independently accepted product output are separate facts. A later failed/cancelled run must preserve any committed revision without being reported successful. Lost acknowledgements must resolve an immutable receipt; retries must not advance a newer head. Unknown termination retains ownership until reconciliation confirms release.
