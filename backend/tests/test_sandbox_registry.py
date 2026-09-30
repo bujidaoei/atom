@@ -140,11 +140,11 @@ def test_unknown_schema_is_not_overwritten(tmp_path):
 
 def test_tampered_or_newer_schema_rejected(registry):
     with sqlite3.connect(registry.path) as db:
-        db.execute("PRAGMA user_version=2")
+        db.execute("PRAGMA user_version=3")
     with pytest.raises(RegistryError, match="unsupported_schema"):
         Registry(registry.path)
     with sqlite3.connect(registry.path) as db:
-        db.execute("PRAGMA user_version=1")
+        db.execute("PRAGMA user_version=2")
         db.execute("ALTER TABLE attempts ADD COLUMN unexpected TEXT")
     with pytest.raises(RegistryError, match="unsupported_schema"):
         Registry(registry.path)
@@ -218,3 +218,53 @@ def test_revocation_wins_over_concurrent_admission(registry, grant):
 def test_invalid_page_limits(registry, value):
     with pytest.raises(RegistryError, match="invalid_page_size"):
         registry.unterminated(limit=value)
+
+
+def test_v1_migration_preserves_identity_ownership_and_revocations(registry, grant):
+    attempt = registry.admit(grant)
+    registry.revoke("revoked-before-admission")
+    with sqlite3.connect(registry.path) as db:
+        db.execute("DROP TABLE orphans")
+        db.execute("PRAGMA user_version=1")
+        before = {table: db.execute(f"SELECT * FROM {table}").fetchall()
+                  for table in ("broker_meta", "attempts", "heads", "revocations")}
+    reopened = Registry(registry.path, clock=lambda: 1000)
+    assert reopened.broker_id == registry.broker_id
+    assert reopened.admit(grant) == attempt
+    with pytest.raises(RegistryError, match="grant_revoked"):
+        reopened.admit(replace(grant, jti="revoked-before-admission", run="new"))
+    with sqlite3.connect(registry.path) as db:
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 2
+        assert all(db.execute(f"SELECT * FROM {table}").fetchall() == rows for table, rows in before.items())
+    assert reopened.pending_orphans() == []
+
+
+def test_failed_v1_migration_rolls_back_ddl_and_version(registry):
+    with sqlite3.connect(registry.path) as db:
+        db.execute("DROP TABLE orphans")
+        db.execute("PRAGMA user_version=1")
+        db.execute("UPDATE broker_meta SET broker_id='invalid'")
+    with pytest.raises(RegistryError, match="invalid_registry_identity"):
+        Registry(registry.path)
+    with sqlite3.connect(registry.path) as db:
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 1
+        assert db.execute("SELECT name FROM sqlite_master WHERE name='orphans'").fetchone() is None
+
+
+def test_orphan_observation_is_durable_versioned_and_not_an_attempt(registry):
+    observed = registry.observe_orphan("a" * 64, "b" * 32)
+    assert registry.observe_orphan(observed.id, observed.attempt_id) == observed
+    reopened = Registry(registry.path, clock=lambda: 1000)
+    assert reopened.pending_orphans() == [observed]
+    assert reopened.find(observed.attempt_id) is None
+    with pytest.raises(RegistryError, match="orphan_identity_conflict"):
+        reopened.observe_orphan(observed.id, "c" * 32)
+    unknown = reopened.record_orphan_termination(observed.id, observed.version, confirmed=False)
+    assert unknown.state == "termination_unknown"
+    with pytest.raises(RegistryError, match="version_conflict"):
+        reopened.record_orphan_termination(observed.id, observed.version, confirmed=True)
+    done = reopened.record_orphan_termination(unknown.id, unknown.version, confirmed=True)
+    assert done.state == "terminated"
+    assert reopened.pending_orphans() == []
+    with pytest.raises(RegistryError, match="orphan_identity_conflict"):
+        reopened.observe_orphan(done.id, done.attempt_id)

@@ -18,7 +18,7 @@ from .grants import Grant
 
 _REVISION = re.compile(r"[0-9a-f]{64}\Z")
 _EDGES = {"intent": "provisioning", "provisioning": "ready", "ready": "quiescing", "quiescing": "checkpointed"}
-_SCHEMA = {
+_SCHEMA_V1 = {
     "broker_meta": """CREATE TABLE broker_meta (
         singleton INTEGER PRIMARY KEY CHECK(singleton=1), broker_id TEXT NOT NULL)""",
     "attempts": """CREATE TABLE attempts (
@@ -37,6 +37,10 @@ _SCHEMA = {
         PRIMARY KEY(org,project,run))""",
     "revocations": """CREATE TABLE revocations (grant_id TEXT PRIMARY KEY, revoked_at REAL NOT NULL)""",
 }
+_SCHEMA = {**_SCHEMA_V1, "orphans": """CREATE TABLE orphans (
+    id TEXT PRIMARY KEY, attempt_id TEXT NOT NULL,
+    state TEXT NOT NULL CHECK(state IN ('observed','termination_unknown','terminated')),
+    version INTEGER NOT NULL CHECK(version>0), created_at REAL NOT NULL, updated_at REAL NOT NULL)"""}
 
 
 class RegistryError(RuntimeError):
@@ -65,6 +69,16 @@ class Attempt:
     updated_at: float
 
 
+@dataclass(frozen=True)
+class Orphan:
+    id: str
+    attempt_id: str
+    state: str
+    version: int
+    created_at: float
+    updated_at: float
+
+
 class Registry:
     def __init__(self, path: Path, *, clock: Callable[[], float] = time.time, lock_timeout: float = 3):
         self.path = Path(path)
@@ -82,13 +96,17 @@ class Registry:
                 for statement in _SCHEMA.values():
                     db.execute(statement)
                 db.execute("INSERT INTO broker_meta VALUES (1,?)", (uuid.uuid4().hex,))
-                db.execute("PRAGMA user_version=1")
+                db.execute("PRAGMA user_version=2")
             else:
                 normalize = lambda sql: " ".join(sql.split()).casefold()
-                if version != 1 or set(schema) != set(_SCHEMA) or any(
-                    normalize(schema[name]) != normalize(expected) for name, expected in _SCHEMA.items()
+                expected_schema = _SCHEMA_V1 if version == 1 else _SCHEMA
+                if version not in (1, 2) or set(schema) != set(expected_schema) or any(
+                    normalize(schema[name]) != normalize(expected) for name, expected in expected_schema.items()
                 ):
                     raise RegistryError("unsupported_schema")
+                if version == 1:
+                    db.execute(_SCHEMA["orphans"])
+                    db.execute("PRAGMA user_version=2")
             identity = db.execute("SELECT broker_id FROM broker_meta WHERE singleton=1").fetchone()
             if identity is None or not isinstance(identity[0], str) or not re.fullmatch(r"[0-9a-f]{32}", identity[0]):
                 raise RegistryError("invalid_registry_identity")
@@ -263,3 +281,40 @@ class Registry:
     def has_pending_termination(self) -> bool:
         with self._connection() as db:
             return db.execute("SELECT 1 FROM attempts WHERE state IN ('terminating','termination_unknown') LIMIT 1").fetchone() is not None
+
+    def observe_orphan(self, container_id: str, attempt_id: str) -> Orphan:
+        """Persist discovery, not ownership proof. Must precede external removal."""
+        if (not isinstance(container_id, str) or not _REVISION.fullmatch(container_id)
+                or not isinstance(attempt_id, str) or not re.fullmatch(r"[0-9a-f]{32}", attempt_id)):
+            raise RegistryError("invalid_orphan_identity")
+        with self._transaction() as db:
+            now = self._clock()
+            db.execute("INSERT INTO orphans VALUES (?,?,'observed',1,?,?) ON CONFLICT(id) DO NOTHING",
+                       (container_id, attempt_id, now, now))
+            orphan = Orphan(**dict(db.execute("SELECT * FROM orphans WHERE id=?", (container_id,)).fetchone()))
+            if orphan.attempt_id != attempt_id or orphan.state == "terminated":
+                raise RegistryError("orphan_identity_conflict")
+            return orphan
+
+    def record_orphan_termination(self, container_id: str, expected_version: int, *, confirmed: bool) -> Orphan:
+        if type(confirmed) is not bool:
+            raise RegistryError("invalid_termination_result")
+        with self._transaction() as db:
+            row = db.execute("SELECT * FROM orphans WHERE id=?", (container_id,)).fetchone()
+            if row is None:
+                raise RegistryError("orphan_not_found")
+            orphan = Orphan(**dict(row))
+            if type(expected_version) is not int or expected_version != orphan.version:
+                raise RegistryError("version_conflict")
+            if orphan.state == "terminated":
+                raise RegistryError("invalid_transition")
+            db.execute("UPDATE orphans SET state=?,version=version+1,updated_at=? WHERE id=?",
+                       ("terminated" if confirmed else "termination_unknown", self._clock(), container_id))
+            return Orphan(**dict(db.execute("SELECT * FROM orphans WHERE id=?", (container_id,)).fetchone()))
+
+    def pending_orphans(self, *, limit: int = 100) -> list[Orphan]:
+        if type(limit) is not int or not 1 <= limit <= 1000:
+            raise RegistryError("invalid_page_size")
+        with self._connection() as db:
+            return [Orphan(**dict(row)) for row in db.execute(
+                "SELECT * FROM orphans WHERE state!='terminated' ORDER BY updated_at,id LIMIT ?", (limit,))]

@@ -123,7 +123,7 @@ def test_unreachable_daemon_keeps_unknown_and_blocks_dispatch(environment, monke
         assert driver.inspect(attempt) is None
 
 
-def test_unrecorded_owned_container_blocks_readiness_without_deletion(environment):
+def test_unrecorded_owned_container_requires_durable_observation_before_deletion(environment, monkeypatch):
     registry, driver, grant = environment
     with Lifecycle(registry, driver) as lifecycle:
         lifecycle.start()
@@ -134,14 +134,109 @@ def test_unrecorded_owned_container_blocks_readiness_without_deletion(environmen
                          container_name=f"atom-sbox-{registry.broker_id[:12]}-{orphan_id}")
         driver.ensure(orphan)
         try:
-            with pytest.raises(LifecycleError, match="orphan_recovery_required"):
-                lifecycle.sweep()
-            assert not lifecycle.ready
-            assert driver.inspect(orphan).running
+            def unavailable(*args):
+                raise RegistryError("registry_unavailable")
+            with monkeypatch.context() as changed:
+                changed.setattr(registry, "observe_orphan", unavailable)
+                with pytest.raises(LifecycleError, match="reconciliation_failed"):
+                    lifecycle.sweep()
+                assert not lifecycle.ready
+                assert driver.inspect(orphan).running
+            lifecycle.sweep()
+            assert lifecycle.ready
+            assert driver.inspect(orphan) is None
+            assert registry.pending_orphans() == []
+            assert registry.find(orphan_id) is None
         finally:
             driver.terminate(orphan)
         lifecycle.sweep()
         assert lifecycle.ready
+
+
+def test_removed_orphan_without_committed_confirmation_is_recovered(environment, monkeypatch):
+    registry, driver, grant = environment
+    with Lifecycle(registry, driver) as lifecycle:
+        lifecycle.start()
+        registered = lifecycle.provision(grant)
+        orphan_id = "d" * 32
+        orphan = replace(registered, id=orphan_id,
+                         container_name=f"atom-sbox-{registry.broker_id[:12]}-{orphan_id}")
+        driver.ensure(orphan)
+        def unavailable(*args, **kwargs):
+            raise RegistryError("registry_unavailable")
+        with monkeypatch.context() as changed:
+            changed.setattr(registry, "record_orphan_termination", unavailable)
+            with pytest.raises(RegistryError, match="registry_unavailable"):
+                lifecycle.sweep()
+        assert not lifecycle.ready
+        assert driver.inspect(orphan) is None
+        assert len(Registry(registry.path).pending_orphans()) == 1
+        lifecycle.sweep()
+        assert lifecycle.ready
+        assert registry.pending_orphans() == []
+
+
+def test_orphan_with_conflicting_ownership_is_not_removed(environment):
+    registry, driver, grant = environment
+
+    class ConflictingLabels(DockerDriver):
+        def _labels(self, attempt):
+            return {**super()._labels(attempt), "atom.attempt": "f" * 32}
+
+    with Lifecycle(registry, driver) as lifecycle:
+        lifecycle.start()
+        registered = lifecycle.provision(grant)
+        orphan_id = "c" * 32
+        orphan = replace(registered, id=orphan_id,
+                         container_name=f"atom-sbox-{registry.broker_id[:12]}-{orphan_id}")
+        bad_driver = ConflictingLabels(registry.broker_id, IMAGE)
+        bad_driver.ensure(orphan)
+        container = next(item for item in driver.owned_inventory() if item.attempt_id == orphan_id)
+        try:
+            with pytest.raises(LifecycleError, match="orphan_recovery_required"):
+                lifecycle.sweep()
+            assert not lifecycle.ready
+            assert driver._present_id(container.id)
+            pending = registry.pending_orphans()
+            assert len(pending) == 1 and pending[0].state == "termination_unknown"
+            assert pending[0].id == container.id
+        finally:
+            # Test-created resource only; the production coordinator refuses it.
+            driver._run("container", "rm", "--force", container.id)
+        lifecycle.sweep()
+        assert lifecycle.ready
+        assert registry.pending_orphans() == []
+
+
+def test_process_exit_after_orphan_removal_recovers_confirmation(environment):
+    registry, driver, grant = environment
+    registered = registry.admit(grant)
+    orphan_id = "b" * 32
+    orphan = replace(registered, id=orphan_id,
+                     container_name=f"atom-sbox-{registry.broker_id[:12]}-{orphan_id}")
+    container = driver.ensure(orphan)
+    script = """
+import os,sys
+from pathlib import Path
+from app.sandbox.registry import Registry
+from app.sandbox.docker_driver import DockerDriver,OwnedContainer
+r=Registry(Path(sys.argv[1]));d=DockerDriver(r.broker_id,sys.argv[2])
+r.observe_orphan(sys.argv[3],sys.argv[4])
+d.terminate_orphan(OwnedContainer(sys.argv[3],sys.argv[4]))
+os._exit(27)
+"""
+    try:
+        child = subprocess.run([sys.executable, "-c", script, str(registry.path), IMAGE, container.id, orphan_id],
+            text=True, capture_output=True, timeout=30, cwd=Path(__file__).resolve().parents[2])
+        assert child.returncode == 27, child.stderr
+        assert not driver._present_id(container.id)
+        assert len(registry.pending_orphans()) == 1
+        with Lifecycle(Registry(registry.path), driver) as restarted:
+            restarted.start()
+            assert restarted.ready
+            assert registry.pending_orphans() == []
+    finally:
+        driver.terminate(orphan)
 
 
 def test_expiry_sweep_retires_attempt_and_preserves_peer(environment):

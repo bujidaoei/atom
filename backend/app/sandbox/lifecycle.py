@@ -1,4 +1,4 @@
-"""Known-attempt lifecycle coordination; HTTP scheduling and orphan recovery follow."""
+"""Durable lifecycle coordination; service scheduling and file operations follow."""
 from __future__ import annotations
 
 from contextlib import contextmanager
@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 import threading
 
-from .docker_driver import DockerDriver, DriverError
+from .docker_driver import DockerDriver, DriverError, OwnedContainer
 from .grants import Grant
 from .registry import Attempt, Registry, RegistryError
 
@@ -122,10 +122,21 @@ class Lifecycle:
             for container in inventory[:self._batch_size]:
                 recorded = self.registry.find(container.attempt_id)
                 if recorded is None or recorded.state == "terminated":
-                    # Do not erase an unknown orphan without durable ownership/outcome evidence.
-                    failure = "orphan_recovery_required"
+                    self.registry.observe_orphan(container.id, container.attempt_id)
         except (DriverError, RegistryError):
             failure = "reconciliation_failed"
+        # Include records absent from inventory: a prior process may have died
+        # after removal but before committing its confirmation.
+        for orphan in self.registry.pending_orphans(limit=self._batch_size):
+            try:
+                self.driver.terminate_orphan(OwnedContainer(orphan.id, orphan.attempt_id))
+            except DriverError:
+                self.registry.record_orphan_termination(orphan.id, orphan.version, confirmed=False)
+                failure = "orphan_recovery_required"
+            else:
+                self.registry.record_orphan_termination(orphan.id, orphan.version, confirmed=True)
+        if self.registry.pending_orphans(limit=1):
+            failure = failure or "reconciliation_incomplete"
         if self.registry.has_pending_termination() or (retire_all and self.registry.unterminated(limit=1)):
             failure = failure or "reconciliation_incomplete"
         if failure:

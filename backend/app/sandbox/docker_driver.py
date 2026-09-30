@@ -168,6 +168,50 @@ class DockerDriver:
             raise DriverError("invalid_deadline")
         return expected
 
+    def _present_id(self, container_id: str) -> bool:
+        if not isinstance(container_id, str) or not _CONTAINER.fullmatch(container_id):
+            raise DriverError("invalid_container_identity")
+        output = self._run("container", "ls", "--all", "--no-trunc", "--filter",
+                           f"id={container_id}", "--format", "{{.ID}}")
+        try:
+            identities = output.decode("utf-8").splitlines()
+        except UnicodeError:
+            raise DriverError("invalid_docker_response") from None
+        if identities not in ([], [container_id]):
+            raise DriverError("invalid_docker_response")
+        return bool(identities)
+
+    def terminate_orphan(self, container: OwnedContainer) -> None:
+        """Caller must persist an observation first; labels alone never admit work."""
+        if not isinstance(container.attempt_id, str) or not _ID.fullmatch(container.attempt_id):
+            raise DriverError("ownership_mismatch")
+        if not self._present_id(container.id):
+            return
+        try:
+            records = json.loads(self._run("container", "inspect", container.id))
+            if not isinstance(records, list) or len(records) != 1:
+                raise DriverError("invalid_docker_response")
+            record = records[0]
+            labels = record["Config"]["Labels"]
+            name = f"/atom-sbox-{self.broker_id[:12]}-{container.attempt_id}"
+            if (record["Id"] != container.id or record["Name"] != name
+                    or labels.get("atom.broker") != self.broker_id
+                    or labels.get("atom.attempt") != container.attempt_id
+                    or labels.get("atom.profile") != "files-v1"
+                    or not re.fullmatch(r"[0-9a-f]{64}", labels.get("atom.grant", ""))
+                    or not re.fullmatch(r"[0-9a-f]{64}", labels.get("atom.policy", ""))
+                    or not re.fullmatch(r"[1-9][0-9]{0,18}", labels.get("atom.deadline", ""))):
+                raise DriverError("ownership_mismatch")
+        except (ValueError, KeyError, TypeError, AttributeError):
+            raise DriverError("invalid_docker_response") from None
+        try:
+            self._run("container", "rm", "--force", container.id)
+        except DriverError:
+            if self._present_id(container.id):
+                raise
+        if self._present_id(container.id):
+            raise DriverError("termination_unconfirmed")
+
     def _labels(self, attempt: Attempt) -> dict[str, str]:
         return {"atom.broker": self.broker_id, "atom.attempt": attempt.id,
                 "atom.grant": attempt.grant_fingerprint, "atom.deadline": str(attempt.deadline),
