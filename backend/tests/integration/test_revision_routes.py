@@ -65,6 +65,7 @@ legacy=settings.projects_dir/'p'/'workspace';legacy.mkdir(parents=True)
 (legacy/'index.html').write_text('<h1>committed</h1>')
 (legacy/'style.css').write_text('body { color: blue; }')
 main=import_workspace(repo,store,owner='owner',project_id='p',source=legacy)
+original_payload=store.read(main.artifact.key)
 branch=Path('/tmp/branch');branch.mkdir();(branch/'index.html').write_text('<h1>branch</h1>')
 heat=import_workspace(repo,store,owner='owner',project_id='p',heat_id='heat',source=branch)
 (legacy/'index.html').write_text('<h1>uncommitted stale legacy</h1>')
@@ -126,6 +127,52 @@ async def main_test():
         app.state.execution=None
         assert (await client.get('/preview/p/',headers=headers)).status_code==503
 asyncio.run(main_test())
+target=store_root/(main.artifact.key+'.atomsnap');target.write_bytes(original_payload)
+migrate(settings.db_path,Path('/tmp/data/before-release.db'),target_version=2)
+from app.models import Requirement
+from app.verification_contract import capture_contract
+from app.verification_repository import VerificationRepository,VerificationError
+from app.release_repository import ReleaseRepository
+from app.release_view import materialized_release
+from app.artifacts import ArtifactError
+requirement={'key':'page','title':'Page','detail':'','checks':[{'type':'exists','selector':'h1'}]}
+with session_scope() as s:
+    s.add(Requirement(project_id='p',key='page',title='Page',detail='',checks_json=json.dumps(requirement['checks'])))
+verification=VerificationRepository(settings.db_path)
+request=verification.reserve(owner='owner',workspace_id=main.workspace_id,request_id='check',
+    expected_revision=main.revision_id,expected_contract=capture_contract([requirement]).digest,
+    policy_digest='c'*64,runner_version='fixture-runner',budget_seconds=60)
+# Fixture report only; this test verifies actual stored artifacts, not a browser verifier.
+verification.record_report(owner='owner',request_id=request.id,results=[{'key':'page','checkIndex':0,'passed':True,'note':'fixture'}])
+releases=ReleaseRepository(settings.db_path)
+releases.publish(owner='owner',project_id='p',release_id='published-release',verification_id=request.id,
+    expected_revision=main.revision_id,expected_generation=0,policy_digest='c'*64,runner_version='fixture-runner',audience='public',slug='site')
+for exceptional in (False,True):
+    try:
+        with materialized_release(releases,store,slug='site') as view:
+            saved_path=view.path
+            assert (view.path/'index.html').read_text()=='<h1>committed</h1>'
+            assert not (view.path/'legacy-only.txt').exists()
+            assert view.publication.revision_id==main.revision_id
+            if exceptional:raise RuntimeError('consumer failure')
+    except RuntimeError:
+        assert exceptional
+    assert not saved_path.exists() and not list(Path('/tmp').glob('atom-release-*'))
+target.write_bytes(b'corrupt')
+try:
+    with materialized_release(releases,store,slug='site'):raise AssertionError('corrupt artifact admitted')
+except ArtifactError:pass
+target.write_bytes(original_payload)
+read=store.read
+def revoke_during_read(key):
+    payload=read(key)
+    releases.unpublish(owner='owner',project_id='p',command_id='off',expected_release='published-release',expected_generation=1)
+    return payload
+store.read=revoke_during_read
+try:
+    with materialized_release(releases,store,slug='site'):raise AssertionError('revoked artifact admitted')
+except VerificationError as error:assert str(error)=='release_not_found'
+assert not list(Path('/tmp').glob('atom-release-*'))
 print(json.dumps({'routes':'verified','legacy':(legacy/'index.html').read_text()}))
 '''
     name='atom-revision-routes-'+uuid.uuid4().hex

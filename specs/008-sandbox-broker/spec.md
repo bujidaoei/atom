@@ -125,3 +125,5 @@ Release metadata promotion must recheck owner, idle main workspace, expected hea
 Unpublish must compare expected release and generation, atomically disable visibility and save an idempotency receipt, preserving artifact/history. Exact historical replay cannot disable a subsequently published release.
 
 Pinned published artifact lookup requires an active current publication and authorization under both the current release audience and the selected historical release audience. Unpublish denies even owner-facing publication paths; draft preview remains a separate route.
+
+Published materialization must verify actual immutable storage bytes against recorded semantic digest and size, never fall back to legacy directories, and clean private temporary output on normal/error exit. Recheck current visibility after storage IO before yielding a captured version.

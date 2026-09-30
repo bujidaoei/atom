@@ -142,3 +142,5 @@ T027 / feature008 T016: atomic release metadata/pointer/receipt and current-evid
 T027 / feature008 T016: fenced unpublish metadata/replay and publish competition pass real SQLite tests. Actual page/asset visibility enforcement and enterprise rollout remain open.
 
 T027 / feature008 T017: pinned publication metadata now honors current live state and both audience scopes. Database authorization tests pass; real HTTP/artifact/browser isolation and release acceptance remain open.
+
+T027 / feature008 T017: actual immutable release bytes and private cleanup now pass Linux integration, including corrupt storage and unpublish during read. HTTP/browser release acceptance remains open.

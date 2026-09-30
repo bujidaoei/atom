@@ -114,3 +114,5 @@ T016 continuation: internal atomic release metadata/pointer/receipt promotion im
 T016 continuation: atomic unpublish metadata/receipt and monotonic generation implemented with concurrent publish competition and late-failure rollback evidence. Route/resource visibility, rollback/adoption, verifier provenance and application rollout remain open.
 
 T017 continuation: committed published-artifact metadata lookup now checks current live/audience and pinned release audience/project scope. Real SQLite authorization tests pass. Verified artifact bytes, HTTP pinned routes/cache behavior, browser origin isolation and verifier integration remain open; no task closure.
+
+T017 continuation: private verified release materialization now passes real Linux artifact/database integration, including corruption, cleanup and visibility change during IO. Published HTTP routes, admission bounds, cache/pinned asset handling, isolated origin and trusted verifier remain open.

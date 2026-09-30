@@ -86,3 +86,5 @@ ReleaseReceipt identifies release/revision, committed publication generation and
 UnpublishReceipt contains command ID, affected release and committed generation. The publication retains slug/release/history while live becomes false. Exact replay returns its original receipt without pointer mutation; changed payload or stale generation conflicts.
 
 PublishedArtifact contains project/release/revision identity and exact artifact key, semantic digest and size. Resolution is point-in-time authorization metadata, not an ongoing capability or proof of bytes. Historical release and current publication audiences are intersected.
+
+ReleaseView pairs an authorized PublishedArtifact with an ephemeral private extraction path. It does not change revision/publication records and is not a long-lived access capability. Reauthorization after IO pins the original release instead of switching to current head.

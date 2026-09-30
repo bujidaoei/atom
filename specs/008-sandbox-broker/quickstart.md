@@ -99,3 +99,5 @@ Run tests/test_release_repository.py with tests/test_verification_repository.py 
 Release repository tests include publish/unpublish generation competition, old unpublish replay after republish, foreign/stale/conflicting commands and denied receipt insertion preserving the prior live pointer. No website serving was exercised.
 
 Release repository tests now cover private/public current and historical lookup, owner/anonymous/foreign access, privacy changes, unpublish, and invalid/missing references. Artifact descriptors are schema fixtures; file bytes, HTTP caching and browser origins are not exercised.
+
+Pinned API image integration test_revision_routes.py now additionally imports actual files, upgrades its disposable DB to v2, registers a fixture report/release and verifies Linux release views, stale legacy exclusion, normal/exception cleanup, corrupt artifact rejection and unpublish during storage read. Fixture report is not browser execution evidence.

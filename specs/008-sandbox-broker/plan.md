@@ -114,3 +114,5 @@ T016 release metadata component implemented in release_repository.py using the v
 T016 unpublish metadata uses the existing writer transaction and project-scoped unpublish:<command_id> receipt namespace. Every accepted visibility change increments generation. Public route and pinned resource visibility enforcement remain unimplemented.
 
 T017 prerequisite: ReleaseRepository.resolve selects immutable artifact metadata within the existing bounded transaction, checking current live/audience and selected same-project release audience. It does not read legacy directories or enable HTTP serving. Artifact verification, pinned URLs, cache semantics and origin isolation remain open.
+
+T017 artifact prerequisite implemented in release_view.py: resolve authorization, verify ArtifactStore bytes and snapshot descriptor, reauthorize captured release after IO, materialize privately and clean via context lifetime. HTTP serving, bounded admission and origin isolation remain to be integrated.
