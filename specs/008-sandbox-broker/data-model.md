@@ -1,4 +1,6 @@
 # Entities and states
+Runtime BrokerLease is transient trusted metadata (run/workspace IDs, internal attempt ID, signed token, deadline), never persisted by the adapter. Adapter states new/active/uncertain/closing/closed govern local dispatch only. Durable authority stays in the broker registry. Scoped release validates the exact stored claim fingerprint and attempt ID, atomically inserts revocation and termination intent even for repeat cleanup; it cannot authorize mutation or affect a higher-fence successor. No registry migration is required.
+
 Grant v1: jti, organization/project/run/attempt IDs, positive fencing integer, base_revision SHA-256, profile files-v1, issued-at/not-before/expires integer timestamps, fixed issuer/audience/subject/type. Validity requires issued-at ≤ now < expiry, nbf=iat, bounded original lifetime. Immutable claims; no host path, secret, image, resource flag or arbitrary capabilities.
 
 Registry (planned): versioned schema; grant ID unique; canonical claim digest; organization/project/run/attempt/fence; base revision; deadline; owned container name; state; latest checkpoint; termination outcome; revoked flag; operation receipt IDs. Token/key material never persisted.

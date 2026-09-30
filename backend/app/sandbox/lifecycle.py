@@ -212,6 +212,26 @@ class Lifecycle:
             attempt = self.registry.find_grant(grant_id)
             return self._stop(attempt.id) if attempt else None
 
+    def status(self, grant: Grant, attempt_id: str) -> Attempt:
+        with self._exclusive():
+            if not self.ready:
+                raise LifecycleError("broker_not_ready")
+            attempt = self.registry.authorize(grant)
+            if attempt.id != attempt_id:
+                raise RegistryError("attempt_scope_mismatch")
+            state = self.driver.inspect(attempt)
+            if state is None or not state.running or state.paused:
+                self._retire_operation(attempt)
+                raise LifecycleError("worker_unavailable")
+            return attempt
+
+    def release(self, grant: Grant, attempt_id: str) -> Attempt:
+        if self._closed:
+            raise LifecycleError("broker_closed")
+        self.registry.request_scoped_termination(grant, attempt_id)
+        with self._exclusive():
+            return self._stop(attempt_id)
+
     def _retire_operation(self, attempt: Attempt):
         self._ready = False
         try:

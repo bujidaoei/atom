@@ -58,3 +58,5 @@ T027 continuation: child 008 durable operation receipts and real write/retry/cra
 T027 continuation: child 008 can now seed actual provisioning workers from verified input snapshots and commit ready, with eleven real-container cases. HTTP/runtime integration and output checkpoint registration remain unimplemented; T027 stays open.
 
 T027 continuation: child 008 authenticated seed/file HTTP is implemented and tested against real containers and loopback transport. Runtime adapter, output registration and enterprise acceptance remain open; no production enablement is claimed.
+
+T027 continuation: child 008 T007 file-port migration now has actual Pi → Node HTTP adapter → broker → Docker evidence and is complete as a component. Production control-plane orchestration/selection, checkpoint registration and enterprise acceptance remain open; T027 stays unchecked.

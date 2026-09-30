@@ -1,4 +1,5 @@
 import asyncio
+from dataclasses import replace
 import hashlib
 import json
 import os
@@ -7,6 +8,8 @@ import socket
 import struct
 import threading
 import time
+import subprocess
+from pathlib import Path
 
 import httpx
 import pytest
@@ -175,3 +178,49 @@ def test_busy_intake_rejects_second_body_and_revoke_stays_available(environment)
     asyncio.run(scenario())
     registry = Registry(config.registry_path)
     assert DockerDriver(registry.broker_id, IMAGE).owned_inventory() == []
+
+
+def test_node_pi_tools_through_real_broker(environment):
+    config, grant, token, archive = environment
+    listener = socket.socket()
+    listener.bind(("127.0.0.1", 0))
+    server = uvicorn.Server(uvicorn.Config(create_app(config), log_level="error", access_log=False))
+    thread = threading.Thread(target=server.run, kwargs={"sockets": [listener]}, daemon=True)
+    thread.start()
+    try:
+        deadline = time.monotonic() + 15
+        while not server.started and thread.is_alive() and time.monotonic() < deadline:
+            time.sleep(0.02)
+        assert server.started
+        origin = f"http://127.0.0.1:{listener.getsockname()[1]}"
+        with httpx.Client(base_url=origin, timeout=30, trust_env=False) as client:
+            attempt_id = initialize(client, config, token, archive)
+        lease = {"runId": grant.run, "workspaceId": grant.project, "attemptId": attempt_id, "grant": token, "deadline": grant.exp}
+        result = subprocess.run(["node", "--import", "tsx", "--test", "src/broker-integration.test.ts"],
+            cwd=Path(__file__).resolve().parents[3] / "runtime", capture_output=True, text=True, encoding="utf-8", timeout=90,
+            env={**os.environ, "ATOM_TEST_BROKER_ORIGIN": origin, "ATOM_TEST_BROKER_LEASE": json.dumps(lease)})
+        assert result.returncode == 0, result.stdout + result.stderr
+        registry = Registry(config.registry_path)
+        assert registry.find(attempt_id).state == "terminated"
+        assert DockerDriver(registry.broker_id, IMAGE).owned_inventory() == []
+    finally:
+        server.should_exit = True
+        thread.join(timeout=20)
+        listener.close()
+    assert not thread.is_alive()
+
+
+def test_scoped_release_cannot_target_successor_and_is_idempotent(environment):
+    config, grant, token, archive = environment
+    with TestClient(create_app(config)) as client:
+        old_id = initialize(client, config, token, archive)
+        headers = {"authorization": "Bearer " + token}
+        assert client.get(f"/v1/attempts/{old_id}", headers=headers).json()["state"] == "ready"
+        assert client.post(f"/v1/attempts/{old_id}/release", headers=headers).json()["state"] == "terminated"
+        next_grant = replace(grant, jti="next", attempt="next", fence=2)
+        next_token = GrantCodec(config.grant_key.encode()).issue(next_grant)
+        next_id = initialize(client, config, next_token, archive)
+        assert client.post(f"/v1/attempts/{next_id}/release", headers=headers).status_code == 409
+        assert client.post(f"/v1/attempts/{old_id}/release", headers=headers).json()["state"] == "terminated"
+        assert client.get(f"/v1/attempts/{next_id}", headers={"authorization": "Bearer " + next_token}).json()["state"] == "ready"
+        assert client.get(f"/v1/attempts/{old_id}", headers=headers).status_code == 409

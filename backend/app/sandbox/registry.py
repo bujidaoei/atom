@@ -267,6 +267,17 @@ class Registry:
         with self._transaction() as db:
             return self._terminate(db, self._by_id(db, attempt_id))
 
+    def request_scoped_termination(self, grant: Grant, attempt_id: str) -> Attempt:
+        """Verified grant may retire only its immutable worker, including repeat cleanup."""
+        with self._transaction() as db:
+            if not grant.iat <= self._clock() < grant.exp:
+                raise RegistryError("grant_expired")
+            attempt = self._by_id(db, attempt_id)
+            if attempt.grant_id != grant.jti or attempt.grant_fingerprint != grant.fingerprint():
+                raise RegistryError("attempt_scope_mismatch")
+            db.execute("INSERT INTO revocations VALUES (?,?) ON CONFLICT(grant_id) DO NOTHING", (grant.jti, self._clock()))
+            return self._terminate(db, attempt)
+
     def record_termination(self, attempt_id: str, expected_version: int, *, confirmed: bool) -> Attempt:
         """Record driver evidence; this function does not verify OS termination."""
         if type(confirmed) is not bool:

@@ -29,6 +29,8 @@ Duplicate creates, same identity/different grant, lost create response, worker o
 - FR-008: Real integration, fault injection and deployment migration evidence MUST precede acceptance. No component test may close whole feature.
 
 ## Key Entities
+Runtime broker adapter is bound to one trusted pre-seeded lease and contains no administrative credentials. Acquisition verifies live ready status; failed acquisition attempts cleanup. Unknown transport outcomes prohibit new calls; release succeeds only with matching confirmed termination. Scoped release may repeat cleanup of its own immutable attempt despite revocation, but cannot act on a successor or grant new authority (contracts/runtime-adapter.md).
+
 HTTP seed/file intake authenticates before consuming large bodies, checks current ownership before intake and dispatch, and serializes large transfers with immediate busy rejection. Admin seed credentials and runtime grant authority are distinct. Known operation failures remain explicit outcome values; transport success alone is not business success (contracts/runtime-http.md).
 
 Input initialization requires a verified ATOMSNAP1 stream matching the grant's exact base revision. Only provisioning attempts may receive it; no merge into an existing workspace. Ready is committed only after successful validation/promotion and a fresh ownership/version check. Failed or uncertain imports retire the attempt; ready is not output revision registration (contracts/seeding.md).

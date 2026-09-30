@@ -221,6 +221,24 @@ def create_app(config: BrokerConfig | None = None) -> FastAPI:
             attempt = await control(lifecycle.seed, grant, payload)
             return JSONResponse({"attempt_id": attempt.id, "state": attempt.state, "deadline": attempt.deadline})
 
+    @app.get("/v1/attempts/{attempt_id}")
+    async def status(attempt_id: str, request: Request):
+        grant = signed_header(request)
+        lifecycle = getattr(app.state, "lifecycle", None)
+        if lifecycle is None:
+            raise ServiceError(503, "broker_not_ready")
+        attempt = await control(lifecycle.status, grant, attempt_id)
+        return {"attempt_id": attempt.id, "state": attempt.state, "deadline": attempt.deadline}
+
+    @app.post("/v1/attempts/{attempt_id}/release")
+    async def release(attempt_id: str, request: Request):
+        grant = signed_header(request)
+        lifecycle = getattr(app.state, "lifecycle", None)
+        if lifecycle is None:
+            raise ServiceError(503, "broker_not_ready")
+        attempt = await control(lifecycle.release, grant, attempt_id)
+        return {"attempt_id": attempt.id, "state": attempt.state}
+
     @app.post("/v1/attempts/{attempt_id}/files")
     async def files(attempt_id: str, request: Request):
         grant = signed_header(request)
