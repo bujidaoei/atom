@@ -1,0 +1,134 @@
+[
+  {
+    "name": "minesweeper",
+    "id": "73128d1562714a10b586a0a89a0d6f8c",
+    "status": "ready",
+    "http": 200,
+    "errors": [],
+    "checks": [
+      {
+        "key": "board-and-hud",
+        "checkIndex": 0,
+        "passed": true,
+        "note": "匹配到 [data-testid='board']"
+      },
+      {
+        "key": "board-and-hud",
+        "checkIndex": 1,
+        "passed": true,
+        "note": "匹配到 [data-testid='mine-count']"
+      },
+      {
+        "key": "board-and-hud",
+        "checkIndex": 2,
+        "passed": true,
+        "note": "匹配到 [data-testid='restart-btn']"
+      },
+      {
+        "key": "first-click-safe",
+        "checkIndex": 0,
+        "passed": true,
+        "note": "点击后出现了 [data-testid='cell-0-0'][data-state='revealed']"
+      },
+      {
+        "key": "first-click-safe",
+        "checkIndex": 1,
+        "passed": true,
+        "note": "匹配到 [data-testid='flag-toggle']"
+      },
+      {
+        "key": "flag-and-counter",
+        "checkIndex": 0,
+        "passed": true,
+        "note": "点击后出现了 [data-testid='cell-0-0'][data-state='flagged']"
+      },
+      {
+        "key": "flag-and-counter",
+        "checkIndex": 1,
+        "passed": true,
+        "note": "包含「9」"
+      },
+      {
+        "key": "restart-resets",
+        "checkIndex": 0,
+        "passed": true,
+        "note": "点击后出现了 [data-testid='cell-0-0'][data-state='hidden']"
+      },
+      {
+        "key": "restart-resets",
+        "checkIndex": 1,
+        "passed": true,
+        "note": "包含「10」"
+      }
+    ],
+    "passed": 9,
+    "total": 9,
+    "mobileOverflow": false
+  },
+  {
+    "name": "match3",
+    "id": "219b98292c854e5f9a543c843f959478",
+    "status": "timed_out",
+    "http": 200,
+    "errors": [],
+    "checks": [
+      {
+        "key": "board-grid",
+        "checkIndex": 0,
+        "passed": true,
+        "note": "匹配到 [data-testid='board']"
+      },
+      {
+        "key": "board-grid",
+        "checkIndex": 1,
+        "passed": true,
+        "note": "匹配到 [data-testid='cell-0-0']"
+      },
+      {
+        "key": "board-grid",
+        "checkIndex": 2,
+        "passed": true,
+        "note": "匹配到 [data-testid='cell-7-7']"
+      },
+      {
+        "key": "score-bar",
+        "checkIndex": 0,
+        "passed": true,
+        "note": "匹配到 [data-testid='score']"
+      },
+      {
+        "key": "score-bar",
+        "checkIndex": 1,
+        "passed": true,
+        "note": "包含「0」"
+      },
+      {
+        "key": "swap-match",
+        "checkIndex": 0,
+        "passed": true,
+        "note": "点击后出现了 [data-testid='combo']"
+      },
+      {
+        "key": "swap-match",
+        "checkIndex": 1,
+        "passed": true,
+        "note": "点击后出现了 [data-testid='revert-tip']"
+      },
+      {
+        "key": "restart-reset",
+        "checkIndex": 0,
+        "passed": true,
+        "note": "匹配到 [data-testid='restart-btn']"
+      },
+      {
+        "key": "restart-reset",
+        "checkIndex": 1,
+        "passed": true,
+        "note": "点击后出现了 [data-testid='combo']"
+      }
+    ],
+    "passed": 9,
+    "total": 9,
+    "mobileOverflow": false
+  }
+]

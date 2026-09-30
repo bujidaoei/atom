@@ -38,6 +38,8 @@ const ReadFileParameters = Type.Object(
     path: Type.String({ minLength: 1, maxLength: 2_000 }),
     startLine: Type.Optional(Type.Integer({ minimum: 1, maximum: 10_000_000 })),
     maxLines: Type.Optional(Type.Integer({ minimum: 1, maximum: 5_000 })),
+    offset: Type.Optional(Type.Integer({ minimum: 1, maximum: 10_000_000 })),
+    limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 5_000 })),
   },
   { additionalProperties: false },
 );
@@ -174,6 +176,13 @@ function normalizeRelativeWorkspacePath(value: string, kind: string): string {
     throw new Error(`${kind} must be a relative workspace path without parent traversal.`);
   }
   return normalized;
+}
+
+function workspacePathInput(workspace: string, value: string, kind: string): string {
+  if (!isAbsolute(value)) return normalizeRelativeWorkspacePath(value, kind);
+  const distance = relative(resolve(workspace), resolve(value));
+  if (distance === '') return '.';
+  return normalizeRelativeWorkspacePath(distance, kind);
 }
 
 function sandboxRelativeFile(workspacePath: string, absolutePath: string): string {
@@ -579,7 +588,7 @@ function createGlobTool(options: SandboxExecToolOptions): ToolDefinition<typeof 
     parameters: GlobParameters,
     executionMode: 'parallel',
     async execute(toolCallId, params, signal) {
-      const pattern = normalizeRelativeWorkspacePath(params.pattern, 'Glob pattern');
+      const pattern = workspacePathInput(options.workspacePath, params.pattern, 'Glob pattern');
       const command = pythonCommand(GLOB_SCRIPT, [pattern, params.maxResults ?? 200]);
       return executeGuardedSandboxCommand(
         options,
@@ -609,7 +618,7 @@ function createGrepTool(options: SandboxExecToolOptions): ToolDefinition<typeof 
     parameters: GrepParameters,
     executionMode: 'parallel',
     async execute(toolCallId, params, signal) {
-      const relativePath = normalizeRelativeWorkspacePath(params.path ?? '.', 'Grep path');
+      const relativePath = workspacePathInput(options.workspacePath, params.path ?? '.', 'Grep path');
       const include = params.glob ? normalizeRelativeWorkspacePath(params.glob, 'Grep glob') : '';
       const command = pythonCommand(GREP_SCRIPT, [
         params.pattern,
@@ -651,6 +660,12 @@ function createReadFileTool(
     parameters: ReadFileParameters,
     executionMode: 'parallel',
     async execute(toolCallId, params, signal, onUpdate, context) {
+      if (params.startLine !== undefined && params.offset !== undefined && params.startLine !== params.offset ||
+          params.maxLines !== undefined && params.limit !== undefined && params.maxLines !== params.limit) {
+        throw new Error('Conflicting read ranges: use offset/limit or equivalent startLine/maxLines.');
+      }
+      const offset = params.offset ?? params.startLine;
+      const limit = params.limit ?? params.maxLines;
       // Pi exposes absolute paths for verified installed resources. Reuse its
       // integrity-bound read adapter; arbitrary external paths remain denied.
       if (isAbsolute(params.path) && resourceRead) {
@@ -658,19 +673,19 @@ function createReadFileTool(
           toolCallId,
           {
             path: params.path,
-            ...(params.startLine === undefined ? {} : { offset: params.startLine }),
-            ...(params.maxLines === undefined ? {} : { limit: params.maxLines }),
+            ...(offset === undefined ? {} : { offset }),
+            ...(limit === undefined ? {} : { limit }),
           },
           signal,
           onUpdate,
           context,
         );
       }
-      const relativePath = normalizeRelativeWorkspacePath(params.path, 'Read path');
+      const relativePath = workspacePathInput(options.workspacePath, params.path, 'Read path');
       const command = pythonCommand(READ_FILE_SCRIPT, [
         relativePath,
-        params.startLine ?? 1,
-        params.maxLines ?? 2_000,
+        offset ?? 1,
+        limit ?? 2_000,
       ]);
       return executeGuardedSandboxCommand(
         options,

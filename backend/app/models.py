@@ -36,7 +36,9 @@ class User(Base):
     name: Mapped[str] = mapped_column(String(120))
     password_hash: Mapped[str] = mapped_column(String(256))
     credits: Mapped[int] = mapped_column(Integer, default=200)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow
+    )
 
     settings: Mapped["UserSettings | None"] = relationship(
         back_populates="user", uselist=False, cascade="all, delete-orphan"
@@ -75,17 +77,23 @@ class Project(Base):
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     active_run_id: Mapped[str | None] = mapped_column(String(32))
     event_seq: Mapped[int] = mapped_column(Integer, default=0)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow
+    )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow
     )
 
     user: Mapped[User] = relationship(back_populates="projects")
     messages: Mapped[list["Message"]] = relationship(
-        back_populates="project", cascade="all, delete-orphan", order_by="Message.created_at"
+        back_populates="project",
+        cascade="all, delete-orphan",
+        order_by="Message.created_at",
     )
     requirements: Mapped[list["Requirement"]] = relationship(
-        back_populates="project", cascade="all, delete-orphan", order_by="Requirement.position"
+        back_populates="project",
+        cascade="all, delete-orphan",
+        order_by="Requirement.position",
     )
     runs: Mapped[list["Run"]] = relationship(
         back_populates="project", cascade="all, delete-orphan"
@@ -102,7 +110,9 @@ class Message(Base):
     role: Mapped[str] = mapped_column(String(20))
     content: Mapped[str] = mapped_column(Text, default="")
     run_id: Mapped[str | None] = mapped_column(String(32))
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow
+    )
 
     project: Mapped[Project] = relationship(back_populates="messages")
 
@@ -140,7 +150,9 @@ class Run(Base):
     input_tokens: Mapped[int] = mapped_column(Integer, default=0)
     output_tokens: Mapped[int] = mapped_column(Integer, default=0)
     error: Mapped[str | None] = mapped_column(Text)
-    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow
+    )
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     project: Mapped[Project] = relationship(back_populates="runs")
@@ -158,7 +170,9 @@ class RunEvent(Base):
     role: Mapped[str | None] = mapped_column(String(20))
     type: Mapped[str] = mapped_column(String(60))
     payload_json: Mapped[str] = mapped_column(Text, default="{}")
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow
+    )
 
     __table_args__ = (Index("ix_run_events_project_seq", "project_id", "seq"),)
 
@@ -173,7 +187,22 @@ class AcceptanceRun(Base):
     passed: Mapped[int] = mapped_column(Integer, default=0)
     total: Mapped[int] = mapped_column(Integer, default=0)
     results_json: Mapped[str] = mapped_column(Text, default="[]")
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow
+    )
+
+
+class CommandReceipt(Base):
+    __tablename__ = "command_receipts"
+    project_id: Mapped[str] = mapped_column(
+        String(32), ForeignKey("projects.id", ondelete="CASCADE"), primary_key=True
+    )
+    key: Mapped[str] = mapped_column(String(128), primary_key=True)
+    digest: Mapped[str] = mapped_column(String(64))
+    response_json: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow
+    )
 
 
 class Race(Base):
@@ -185,10 +214,14 @@ class Race(Base):
     )
     status: Mapped[str] = mapped_column(String(20), default="running")
     winner_heat_id: Mapped[str | None] = mapped_column(String(32))
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow
+    )
 
     heats: Mapped[list["RaceHeat"]] = relationship(
-        back_populates="race", cascade="all, delete-orphan", order_by="RaceHeat.position"
+        back_populates="race",
+        cascade="all, delete-orphan",
+        order_by="RaceHeat.position",
     )
 
 
@@ -225,7 +258,9 @@ class CreditEntry(Base):
     run_id: Mapped[str | None] = mapped_column(String(32))
     input_tokens: Mapped[int] = mapped_column(Integer, default=0)
     output_tokens: Mapped[int] = mapped_column(Integer, default=0)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow
+    )
 
 
 class Publication(Base):
@@ -236,4 +271,6 @@ class Publication(Base):
         String(32), ForeignKey("projects.id", ondelete="CASCADE"), index=True
     )
     live: Mapped[bool] = mapped_column(Boolean, default=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow
+    )

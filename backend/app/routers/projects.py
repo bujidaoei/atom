@@ -18,6 +18,7 @@ from ..models import AcceptanceRun, Message, Project, Race, RaceHeat, Requiremen
 from ..serialize import acceptance_json, project_detail, project_summary, race_json
 from ..services.orchestrator import orchestrator
 from ..services.parsing import fallback_title
+from ..services.commands import Command
 
 router = APIRouter(prefix="/projects", tags=["projects"])
 
@@ -67,6 +68,11 @@ class AcceptanceBody(BaseModel):
 
 class RaceBody(BaseModel):
     models: list[str] = Field(min_length=2, max_length=4)
+    budgetSeconds: int = Field(default=180, ge=180, le=600)
+
+
+class RetryHeatBody(BaseModel):
+    budgetSeconds: int = Field(default=360, ge=180, le=600)
 
 
 @router.get("")
@@ -136,37 +142,56 @@ def _guard(project: Project, allowed: set[str]) -> None:
 
 
 @router.post("/{project_id}/plan")
-async def plan(project: OwnedProject, user: CurrentUser) -> dict[str, str]:
+async def plan(
+    project: OwnedProject, user: CurrentUser, session: DbSession, request: Request
+) -> dict[str, str]:
+    command = Command(session, project.id, request, "plan")
+    if (replay := command.replay()) is not None:
+        return replay
     _guard(project, {"draft", "error", "cancelled", "timed_out", "interrupted"})
     try:
         job = await orchestrator.start_plan(project.id, user.id)
     except AtomError as error:
         raise HTTPException(error.status_code, error.detail) from error
-    return {"runId": job}
+    return command.save({"runId": job})
 
 
 @router.post("/{project_id}/approve")
 async def approve(
-    body: ApproveBody, project: OwnedProject, user: CurrentUser
+    body: ApproveBody,
+    project: OwnedProject,
+    user: CurrentUser,
+    session: DbSession,
+    request: Request,
 ) -> dict[str, str]:
+    command = Command(session, project.id, request, "approve", body.model_dump())
+    if (replay := command.replay()) is not None:
+        return replay
     _guard(project, {"awaiting_approval"})
     try:
         job = await orchestrator.start_build(project.id, user.id, body.note)
     except AtomError as error:
         raise HTTPException(error.status_code, error.detail) from error
-    return {"runId": job}
+    return command.save({"runId": job})
 
 
 @router.post("/{project_id}/revise")
 async def revise(
-    body: ReviseBody, project: OwnedProject, user: CurrentUser
+    body: ReviseBody,
+    project: OwnedProject,
+    user: CurrentUser,
+    session: DbSession,
+    request: Request,
 ) -> dict[str, str]:
+    command = Command(session, project.id, request, "revise", body.model_dump())
+    if (replay := command.replay()) is not None:
+        return replay
     _guard(project, {"ready", "error", "cancelled", "timed_out", "interrupted"})
     try:
         job = await orchestrator.start_revise(project.id, user.id, body.message.strip())
     except AtomError as error:
         raise HTTPException(error.status_code, error.detail) from error
-    return {"runId": job}
+    return command.save({"runId": job})
 
 
 @router.post("/{project_id}/cancel")
@@ -277,9 +302,26 @@ def record_acceptance(
 
 @router.post("/{project_id}/race")
 async def start_race(
-    body: RaceBody, project: OwnedProject, user: CurrentUser, session: DbSession
+    body: RaceBody,
+    project: OwnedProject,
+    user: CurrentUser,
+    session: DbSession,
+    request: Request,
 ) -> dict[str, object]:
-    _guard(project, {"awaiting_approval", "ready", "error"})
+    command = Command(session, project.id, request, "race", body.model_dump())
+    if (replay := command.replay()) is not None:
+        return replay
+    _guard(
+        project,
+        {
+            "awaiting_approval",
+            "ready",
+            "error",
+            "timed_out",
+            "cancelled",
+            "interrupted",
+        },
+    )
     models = list(dict.fromkeys(m.strip() for m in body.models if m.strip()))
     if len(models) < 2:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "至少选择两个不同的模型")
@@ -290,13 +332,61 @@ async def start_race(
 
     try:
         race_id = orchestrator.create_race(project.id, models)
-        await orchestrator.start_race(project.id, user.id, race_id)
+        await orchestrator.start_race(project.id, user.id, race_id, body.budgetSeconds)
     except AtomError as error:
         raise HTTPException(error.status_code, error.detail) from error
 
     session.expire_all()
     race = race_json(session, project.id)
-    return {"raceId": race_id, "heats": race["heats"] if race else []}
+    return command.save({"raceId": race_id, "heats": race["heats"] if race else []})
+
+
+@router.post("/{project_id}/race/{heat_id}/retry")
+async def retry_heat(
+    body: RetryHeatBody,
+    project: OwnedProject,
+    heat_id: str,
+    user: CurrentUser,
+    session: DbSession,
+    request: Request,
+):
+    command = Command(
+        session, project.id, request, f"retry:{heat_id}", body.model_dump()
+    )
+    if (replay := command.replay()) is not None:
+        return replay
+    _guard(
+        project,
+        {
+            "awaiting_approval",
+            "ready",
+            "error",
+            "timed_out",
+            "cancelled",
+            "interrupted",
+        },
+    )
+    heat = session.get(RaceHeat, heat_id)
+    race = session.get(Race, heat.race_id) if heat else None
+    latest = session.scalar(
+        select(Race.id)
+        .where(Race.project_id == project.id)
+        .order_by(Race.created_at.desc())
+        .limit(1)
+    )
+    if race is None or race.project_id != project.id or race.id != latest:
+        raise HTTPException(404, "该赛道不属于当前竞速")
+    if heat.status not in {"failed", "error", "timed_out", "cancelled", "interrupted"}:
+        raise HTTPException(409, "只能继续未完成的赛道")
+    if user.credits < 1:
+        raise HTTPException(402, "额度不足以继续赛道")
+    race.status = "running"
+    heat.status, heat.error = "queued", None
+    session.commit()
+    job = await orchestrator.start_race(
+        project.id, user.id, race.id, body.budgetSeconds, heat_id
+    )
+    return command.save({"runId": job})
 
 
 @router.get("/{project_id}/race")

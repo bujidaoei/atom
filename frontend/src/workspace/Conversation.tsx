@@ -58,9 +58,11 @@ export function Conversation({ messages, items, liveRunIds, starting }: Conversa
           <PersistedMessage key={message.id} message={message} />
         ))}
 
-        {items.map((item) => (
-          <TimelineRow key={item.id} item={item} />
-        ))}
+        {items.map((item) => {
+          const canonical = item.kind === "message" && !item.streaming && ["mike", "emma"].includes(item.role)
+            ? messages.find(message => message.runId === item.runId && message.role === item.role) : undefined;
+          return <TimelineRow key={item.id} item={canonical && item.kind === "message" ? { ...item, text: canonical.content } : item} />;
+        })}
 
         {starting ? (
           <p className="flex items-center gap-xs text-sm text-neutral-60">

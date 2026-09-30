@@ -157,9 +157,18 @@ def test_race_all_fail_and_cancellation_converge(signed_in):
         rid = o.create_race(pid, ["one", "two"])
         await o.start_race(pid, uid, rid)
         await asyncio.sleep(0.05)
+        from app import storage
+
+        with session_scope() as session:
+            heat_id = session.scalar(select(RaceHeat.id).where(RaceHeat.race_id == rid))
+        workspace = storage.workspace_dir(pid, heat_id)
+        workspace.mkdir(parents=True, exist_ok=True)
+        (workspace / "index.html").write_text("partial output")
         await asyncio.gather(o.cancel(pid), o.cancel(pid))
         with session_scope() as session:
             assert session.get(Race, rid).status == "cancelled"
+            assert session.get(RaceHeat, heat_id).file_count == 1
+            assert session.get(RaceHeat, heat_id).bytes == len("partial output")
             assert all(
                 h.status not in {"running", "queued"}
                 for h in session.scalars(select(RaceHeat))

@@ -1,0 +1,65 @@
+[
+  {
+    "name": "minesweeper",
+    "id": "73128d1562714a10b586a0a89a0d6f8c",
+    "status": "ready",
+    "latestRun": {
+      "id": "7288c475d1e04e33b178e5bead0773f5",
+      "status": "done",
+      "phase": "build",
+      "error": null,
+      "startedAt": "2026-09-30T10:45:15.313752",
+      "finishedAt": "2026-09-30T10:46:57.6504"
+    },
+    "race": null
+  },
+  {
+    "name": "match3",
+    "id": "219b98292c854e5f9a543c843f959478",
+    "status": "ready",
+    "latestRun": {
+      "id": "666c47a951d641c7828cb95728fcd14b",
+      "status": "done",
+      "phase": "race",
+      "error": null,
+      "startedAt": "2026-09-30T10:45:25.341237",
+      "finishedAt": "2026-09-30T10:46:40.49885"
+    },
+    "race": {
+      "id": "e5a6098bf2874c8583a78bfd74c481a6",
+      "status": "done",
+      "winnerHeatId": "baf7aca0f97c4e33b2c842cd75edde54",
+      "createdAt": "2026-09-30T10:45:17.537337",
+      "heats": [
+        {
+          "id": "baf7aca0f97c4e33b2c842cd75edde54",
+          "model": "dashscope/qwen3-max",
+          "status": "done",
+          "runId": "666c47a951d641c7828cb95728fcd14b",
+          "runStartedAt": "2026-09-30T18:45:25.341237+08:00",
+          "previewUrl": "/preview/219b98292c854e5f9a543c843f959478/race/baf7aca0f97c4e33b2c842cd75edde54/",
+          "elapsedMs": 81452,
+          "inputTokens": 12089,
+          "outputTokens": 4875,
+          "fileCount": 3,
+          "bytes": 11677,
+          "error": null
+        },
+        {
+          "id": "2be6dd92196c4d2aa36055e1f47a5f02",
+          "model": "deepseek-v4.1-flash",
+          "status": "cancelled",
+          "runId": "2ac4e176af0145e3b5211cc910b57d83",
+          "runStartedAt": "2026-09-30T18:45:17.56912+08:00",
+          "previewUrl": null,
+          "elapsedMs": 6281,
+          "inputTokens": 0,
+          "outputTokens": 0,
+          "fileCount": 0,
+          "bytes": 0,
+          "error": "任务已取消，已有文件已保留"
+        }
+      ]
+    }
+  }
+]

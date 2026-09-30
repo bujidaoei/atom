@@ -15,6 +15,7 @@ type RaceTabProps = {
   heatActivity: Record<string, HeatActivity>;
   /** Called after a heat is adopted so the project and preview refresh. */
   onAdopted: () => void;
+  onChanged: () => void;
   canStart: boolean;
 };
 
@@ -34,6 +35,7 @@ export function RaceTab({
   initialRace,
   heatActivity,
   onAdopted,
+  onChanged,
   canStart,
 }: RaceTabProps) {
   const [race, setRace] = useState<RaceSummary | null>(initialRace);
@@ -42,6 +44,7 @@ export function RaceTab({
   const [loadingModels, setLoadingModels] = useState(true);
   const [selected, setSelected] = useState<string[]>([]);
   const [starting, setStarting] = useState(false);
+  const [budget, setBudget] = useState(180);
   const [startError, setStartError] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
 
@@ -87,6 +90,7 @@ export function RaceTab({
     if (!running) return;
     const timer = window.setInterval(() => {
       setNow(Date.now());
+      onChanged();
       void refreshRace();
     }, 2500);
     return () => window.clearInterval(timer);
@@ -111,7 +115,7 @@ export function RaceTab({
     setStarting(true);
     setStartError(null);
     try {
-      const result = await api.startRace(projectId, selected);
+      const result = await api.startRace(projectId, selected, budget);
       setRace({
         id: result.raceId,
         status: "running",
@@ -176,6 +180,14 @@ export function RaceTab({
               {startError ? <ErrorState title="发起竞速失败" message={startError} compact /> : null}
 
               <div className="flex flex-wrap items-center gap-m">
+                <label className="flex items-center gap-s text-sm text-neutral-60">
+                  每个模型时间上限
+                  <select aria-label="每个模型时间上限" value={budget} disabled={running || starting}
+                    onChange={event => setBudget(Number(event.target.value))}
+                    className="rounded-m border border-neutral-12 bg-base-secondary px-s py-xs text-neutral-95">
+                    <option value={180}>3 分钟</option><option value={360}>6 分钟</option><option value={600}>10 分钟</option>
+                  </select>
+                </label>
                 <Button
                   onClick={() => void startRace()}
                   loading={starting}
@@ -234,9 +246,11 @@ export function RaceTab({
                   activity={heatActivity[heat.id]}
                   isWinner={race.winnerHeatId === heat.id}
                   raceRunning={running}
+                  budget={budget}
+                  onRetried={() => { void refreshRace(); onChanged(); }}
                   liveElapsed={
-                    heat.elapsedMs === null && heat.status === "running" && startedAt
-                      ? now - startedAt
+                    heat.status === "running" && (heat.runStartedAt || startedAt)
+                      ? (heat.elapsedMs ?? 0) + Math.max(0, now - (heat.runStartedAt ? Date.parse(heat.runStartedAt) : startedAt!))
                       : heat.elapsedMs
                   }
                   onAdopted={onAdopted}
@@ -256,6 +270,8 @@ function HeatCard({
   activity,
   isWinner,
   raceRunning,
+  budget,
+  onRetried,
   liveElapsed,
   onAdopted,
 }: {
@@ -264,6 +280,8 @@ function HeatCard({
   activity: HeatActivity | undefined;
   isWinner: boolean;
   raceRunning: boolean;
+  budget: number;
+  onRetried: () => void;
   liveElapsed: number | null;
   onAdopted: () => void;
 }) {
@@ -292,7 +310,7 @@ function HeatCard({
       <div className="relative aspect-[16/10] bg-base-secondary-alt">
         {heat.previewUrl && (heat.status === "done" || heat.fileCount > 0) ? (
           <iframe
-            src={withBase(heat.previewUrl)}
+            src={`${withBase(heat.previewUrl)}?run=${heat.runId ?? ""}&status=${heat.status}`}
             title={`${heat.model} 的预览`}
             sandbox="allow-scripts allow-same-origin"
             tabIndex={-1}
@@ -328,7 +346,20 @@ function HeatCard({
         </p>
       ) : null}
 
+      {heat.error && !["running", "queued", "done"].includes(heat.status) ? (
+        <p className="border-t border-neutral-8 px-m py-s text-xs text-neutral-60">{heat.error}。可在上方调整时间上限，再继续此赛道。</p>
+      ) : null}
+
       <footer className="mt-auto flex items-center gap-s border-t border-neutral-8 px-m py-s">
+        {!["running", "queued", "done"].includes(heat.status) ? (
+          <Button size="sm" variant="secondary" loading={adopting} disabled={raceRunning}
+            onClick={() => {
+              setAdopting(true); setAdoptError(null);
+              api.retryHeat(projectId, heat.id, budget).then(onRetried)
+                .catch((err: unknown) => setAdoptError(errorMessage(err)))
+                .finally(() => setAdopting(false));
+            }}>继续此赛道</Button>
+        ) : null}
         <Button
           size="sm"
           variant={isWinner ? "secondary" : "primary"}

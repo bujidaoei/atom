@@ -31,6 +31,10 @@ const TABS: { id: TabId; label: string; icon: IconName }[] = [
 
 export function WorkspacePage() {
   const { id } = useParams<{ id: string }>();
+  return <ProjectWorkspace key={id} id={id} />;
+}
+
+function ProjectWorkspace({ id }: { id: string | undefined }) {
   const { refresh: refreshProjects, upsert } = useProjects();
   const { refresh: refreshUser } = useAuth();
 
@@ -50,20 +54,28 @@ export function WorkspacePage() {
 
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const planKicked = useRef<string | null>(null);
+  const alive = useRef(true);
+  const requestSequence = useRef(0);
+  useEffect(() => {
+    alive.current = true;
+    return () => { alive.current = false; requestSequence.current += 1; };
+  }, []);
 
   const load = useCallback(
     async (silent = false) => {
       if (!id) return;
+      const sequence = ++requestSequence.current;
       if (!silent) setLoading(true);
       try {
         const data = await api.getProject(id);
+        if (!alive.current || sequence !== requestSequence.current || data.project.id !== id) return;
         setProject(data.project);
         upsert(data.project);
         setLoadError(null);
       } catch (err) {
-        if (!silent) setLoadError(errorMessage(err));
+        if (alive.current && sequence === requestSequence.current && !silent) setLoadError(errorMessage(err));
       } finally {
-        if (!silent) setLoading(false);
+        if (alive.current && sequence === requestSequence.current) setLoading(false);
       }
     },
     [id, upsert],
@@ -93,14 +105,16 @@ export function WorkspacePage() {
   useEffect(() => {
     if (!id || !project) return;
     if (project.status !== "draft" || project.activeRunId) return;
+    if (project.id !== id) return;
     if (planKicked.current === id) return;
     // Wait for the stream to be attached, but don't strand the project if the
     // event endpoint is unreachable.
     if (stream.connection === "idle" || stream.connection === "connecting") return;
     planKicked.current = id;
+    setActionError(null);
     setStarting(true);
     api
-      .plan(id)
+      .plan(id, `initial-plan:${id}`)
       .then(() => void load(true))
       .catch((err: unknown) => setActionError(errorMessage(err)))
       .finally(() => setStarting(false));
@@ -127,7 +141,7 @@ export function WorkspacePage() {
     setStarting(true);
     setActionError(null);
     try {
-      if (!project.requirements.length) await api.plan(id);
+      if (!project.requirements.length) await api.plan(id, project.status === "draft" ? `initial-plan:${id}` : undefined);
       else await api.revise(id, "继续未完成的生成，先检查已有文件并补齐契约，不要重复已完成的工作。");
       await load(true);
     } catch (err) { setActionError(errorMessage(err)); }
@@ -306,11 +320,15 @@ export function WorkspacePage() {
           <div className="flex-1">{project.latestRun?.error || "本轮未完成。"} {hasFiles ? "可预览已有文件，尚未完成验收。" : "可以重新尝试。"}</div>
           <Button size="sm" variant="secondary" loading={starting} onClick={() => void resume()}>继续生成</Button>
         </div>
-      ) : running ? <div role="status" className="px-l py-xs text-xs text-neutral-60">正在生成，本轮构建上限 {project.buildBudgetSeconds} 秒；完成前可随时停止。</div> : null}
+      ) : running ? <div role="status" className="px-l py-xs text-xs text-neutral-60">{project.status === "planning" ? "正在规划需求，完成后请确认契约" : project.race?.status === "running" ? "正在竞速，按所选时间上限运行" : `正在生成，本轮构建上限 ${project.buildBudgetSeconds} 秒`}；完成前可随时停止。</div> : null}
 
       {actionError ? (
         <div className="shrink-0 px-l pt-s">
           <ErrorState title="操作失败" message={actionError} compact />
+          <div className="mt-xs flex gap-s">
+            {project.status === "draft" ? <Button size="sm" loading={starting} onClick={() => void resume()}>重试启动</Button> : null}
+            <Button size="sm" variant="secondary" onClick={() => setActionError(null)}>关闭提示</Button>
+          </div>
         </div>
       ) : null}
 
@@ -449,8 +467,9 @@ export function WorkspacePage() {
               <RaceTab
                 projectId={project.id}
                 initialRace={project.race}
+                onChanged={() => { void load(true); }}
                 heatActivity={stream.heatActivity}
-                canStart={project.status !== "draft" && project.status !== "planning"}
+                canStart={!running && !starting && project.requirements.length > 0}
                 onAdopted={() => {
                   void load(true);
                   setPreviewToken((token) => token + 1);

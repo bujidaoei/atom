@@ -70,7 +70,9 @@ class Orchestrator:
         return project_id in self._stopping or task is not None and not task.done()
 
     async def start_plan(self, project_id: str, user_id: str) -> str:
-        return self._spawn(project_id, self._plan(project_id, user_id))
+        return self._spawn(
+            project_id, self._plan(project_id, user_id), status="planning"
+        )
 
     async def start_build(self, project_id: str, user_id: str, note: str | None) -> str:
         return self._spawn(
@@ -102,8 +104,18 @@ class Orchestrator:
                 )
             return race.id
 
-    async def start_race(self, project_id: str, user_id: str, race_id: str) -> str:
-        return self._spawn(project_id, self._race(project_id, user_id, race_id))
+    async def start_race(
+        self,
+        project_id: str,
+        user_id: str,
+        race_id: str,
+        budget_seconds: int | None = None,
+        only_heat: str | None = None,
+    ) -> str:
+        return self._spawn(
+            project_id,
+            self._race(project_id, user_id, race_id, budget_seconds, only_heat),
+        )
 
     async def cancel(self, project_id: str) -> None:
         task = self._jobs.get(project_id)
@@ -204,11 +216,19 @@ class Orchestrator:
 
     # --------------------------------------------------------------- private
 
-    def _spawn(self, project_id: str, coro) -> str:
+    def _spawn(self, project_id: str, coro, *, status: str = "building") -> str:
         if self.active(project_id):
             coro.close()
             raise ConflictError("该项目已有任务在运行")
         job_id = new_id()
+        try:
+            with session_scope() as session:
+                project = session.get(Project, project_id)
+                if project:
+                    project.status = status
+        except Exception:
+            coro.close()
+            raise
         task = asyncio.create_task(
             self._guard(project_id, coro), name=f"squad:{project_id}"
         )
@@ -334,7 +354,14 @@ class Orchestrator:
         await self._publish_files(project_id)
         await self._finish(project_id, status="ready")
 
-    async def _race(self, project_id: str, user_id: str, race_id: str) -> None:
+    async def _race(
+        self,
+        project_id: str,
+        user_id: str,
+        race_id: str,
+        budget_seconds: int | None = None,
+        only_heat: str | None = None,
+    ) -> None:
         """Run Alex on several models at once, each in its own workspace.
 
         Atoms calls this Race Mode. The heats are fully independent so one
@@ -353,6 +380,7 @@ class Orchestrator:
                     .where(RaceHeat.race_id == race_id)
                     .order_by(RaceHeat.position)
                 )
+                if only_heat is None or heat.id == only_heat
             ]
 
         await self._set_status(project_id, "building")
@@ -365,7 +393,19 @@ class Orchestrator:
         results = await asyncio.gather(
             *(
                 self._run_heat(
-                    project_id, user_id, heat_id, model, gateway, build_prompt, context
+                    project_id,
+                    user_id,
+                    heat_id,
+                    model,
+                    gateway,
+                    (
+                        build_prompt
+                        + "\n继续已有工作区，先检查现有文件，只补齐未完成内容。"
+                        if only_heat
+                        else build_prompt
+                    ),
+                    context,
+                    budget_seconds,
                 )
                 for heat_id, model in heats
             ),
@@ -375,7 +415,8 @@ class Orchestrator:
         with session_scope() as session:
             race = session.get(Race, race_id)
             if race:
-                for heat, result in zip(race.heats, results):
+                for (heat_id, _), result in zip(heats, results):
+                    heat = session.get(RaceHeat, heat_id)
                     if heat.status in {"queued", "running"}:
                         heat.status = "failed"
                         heat.error = (
@@ -385,9 +426,15 @@ class Orchestrator:
                         )
                 succeeded = any(heat.status == "done" for heat in race.heats)
                 race.status = "done" if succeeded else "failed"
+                adopted = bool(race.winner_heat_id)
         await bus.publish(project_id, "race.completed", {"raceId": race_id})
         await self._finish(
-            project_id, status="awaiting_approval" if succeeded else "error"
+            project_id,
+            status="ready"
+            if adopted
+            else "awaiting_approval"
+            if succeeded
+            else "error",
         )
 
     async def _run_heat(
@@ -399,33 +446,51 @@ class Orchestrator:
         gateway: GatewayConfig,
         prompt: str,
         context: str,
+        budget_seconds: int | None = None,
     ) -> None:
         started = time.monotonic()
+        with session_scope() as session:
+            heat = session.get(RaceHeat, heat_id)
+            previous = (heat.elapsed_ms or 0, heat.input_tokens, heat.output_tokens)
         _set_heat(heat_id, status="running")
         await bus.publish(
             project_id, "race.heat_started", {"heatId": heat_id, "model": model}
         )
 
-        outcome = await self._turn(
-            project_id,
-            user_id,
-            role="alex",
-            phase="race",
-            gateway=GatewayConfig(gateway.base_url, gateway.api_key, model),
-            prompt=prompt,
-            context=context,
-            heat_id=heat_id,
-            record_message=False,
-        )
+        try:
+            outcome = await self._turn(
+                project_id,
+                user_id,
+                role="alex",
+                phase="race",
+                gateway=GatewayConfig(gateway.base_url, gateway.api_key, model),
+                prompt=prompt,
+                context=context,
+                heat_id=heat_id,
+                record_message=False,
+                budget_seconds=budget_seconds,
+            )
+        except asyncio.CancelledError:
+            count, size = storage.workspace_stats(
+                storage.workspace_dir(project_id, heat_id)
+            )
+            with session_scope() as session:
+                heat = session.get(RaceHeat, heat_id)
+                run = session.get(Run, heat.run_id) if heat.run_id else None
+                heat.elapsed_ms = previous[0] + int((time.monotonic() - started) * 1000)
+                heat.input_tokens = previous[1] + (run.input_tokens if run else 0)
+                heat.output_tokens = previous[2] + (run.output_tokens if run else 0)
+                heat.file_count, heat.bytes = count, size
+            raise
 
         workspace = storage.workspace_dir(project_id, heat_id)
         file_count, total_bytes = storage.workspace_stats(workspace)
         _set_heat(
             heat_id,
             status=outcome.status,
-            elapsed_ms=int((time.monotonic() - started) * 1000),
-            input_tokens=outcome.input_tokens,
-            output_tokens=outcome.output_tokens,
+            elapsed_ms=previous[0] + int((time.monotonic() - started) * 1000),
+            input_tokens=previous[1] + outcome.input_tokens,
+            output_tokens=previous[2] + outcome.output_tokens,
             file_count=file_count,
             bytes=total_bytes,
             error=outcome.error,
@@ -457,6 +522,7 @@ class Orchestrator:
         heat_id: str | None = None,
         record_message: bool = True,
         render: Callable[[str], str] | None = None,
+        budget_seconds: int | None = None,
     ) -> TurnOutcome:
         with session_scope() as session:
             user = session.get(User, user_id)
@@ -506,7 +572,11 @@ class Orchestrator:
         failed = False
         error: str | None = None
         budget = (
-            get_settings().build_budget_seconds
+            (
+                budget_seconds
+                if budget_seconds is not None
+                else get_settings().build_budget_seconds
+            )
             if role == "alex"
             else get_settings().run_timeout_seconds
         )
@@ -525,6 +595,7 @@ class Orchestrator:
                         agent_dir=storage.agent_dir(project_id),
                         gateway=gateway,
                         context=context,
+                        budget_seconds=budget,
                     )
                 ) as stream:
                     async for line in stream:

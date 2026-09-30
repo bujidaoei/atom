@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import timezone
 from typing import Any
 
 from sqlalchemy import select
@@ -136,9 +137,19 @@ def race_json(session: Session, project_id: str) -> dict[str, Any] | None:
                 "model": heat.model,
                 "status": heat.status,
                 "runId": heat.run_id,
+                "runStartedAt": (
+                    run.started_at.replace(tzinfo=timezone.utc).isoformat()
+                    if (run := session.get(Run, heat.run_id))
+                    else None
+                )
+                if heat.run_id
+                else None,
                 "previewUrl": (
                     f"/preview/{project_id}/race/{heat.id}/"
                     if heat.status in {"done", "running"}
+                    or (
+                        storage.workspace_dir(project_id, heat.id) / "index.html"
+                    ).is_file()
                     else None
                 ),
                 "elapsedMs": heat.elapsed_ms,

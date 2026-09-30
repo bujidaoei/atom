@@ -1,4 +1,5 @@
 import asyncio
+import json
 from pathlib import Path
 
 import httpx
@@ -36,12 +37,15 @@ def test_premature_eof_is_not_success(monkeypatch, body):
 
 def test_terminal_stops_reading_and_does_not_accept_a_second_result(monkeypatch):
     original = httpx.AsyncClient
-    transport = httpx.MockTransport(
-        lambda request: httpx.Response(
+
+    def response(request):
+        assert json.loads(request.content)["budgetMs"] == 360000
+        return httpx.Response(
             200,
             text='{"kind":"result","resultText":"first"}\n{"kind":"error","message":"late"}\n',
         )
-    )
+
+    transport = httpx.MockTransport(response)
     monkeypatch.setattr(
         httpx, "AsyncClient", lambda **kwargs: original(transport=transport, **kwargs)
     )
@@ -51,6 +55,7 @@ def test_terminal_stops_reading_and_does_not_accept_a_second_result(monkeypatch)
             line
             async for line in RuntimeClient().run(
                 run_id="r",
+                budget_seconds=360,
                 role="alex",
                 prompt="test",
                 workspace_path=Path("."),

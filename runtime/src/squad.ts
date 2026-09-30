@@ -173,7 +173,7 @@ Hard requirements:
   states, empty states. Do not ship unstyled browser defaults.
 - Support 360px mobile widths without horizontal scrolling: border-box sizing,
   max-width:100%, min-width:0 for grid/flex children and responsive canvas sizing.
-- The full build has a strict 180-second budget. Prioritize functional completeness.
+- Honor the wall-clock budget supplied for this turn. Prioritize functional completeness.
 - Browser acceptance is run separately by the platform/user. Do not discover,
   install, invoke or investigate browser automation packages, npm packages or
   global CLI tools. Do not write testing harnesses or fake DOM implementations.

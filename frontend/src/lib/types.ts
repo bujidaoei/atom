@@ -94,6 +94,7 @@ export type AcceptanceRun = {
 };
 
 export type RaceHeat = {
+  runStartedAt?: string | null;
   id: string;
   model: string;
   status: "queued" | "running" | "done" | "failed" | "cancelled" | "timed_out" | "interrupted" | "error";

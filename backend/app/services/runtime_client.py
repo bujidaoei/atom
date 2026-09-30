@@ -73,6 +73,7 @@ class RuntimeClient:
         agent_dir: Path,
         gateway: GatewayConfig,
         context: str | None = None,
+        budget_seconds: float | None = None,
         enable_tools: bool | None = None,
     ) -> AsyncIterator[RuntimeLine]:
         """Stream one agent turn. Yields every line until a terminal one."""
@@ -84,7 +85,11 @@ class RuntimeClient:
             "sessionPath": str(session_path),
             "agentDir": str(agent_dir),
             "budgetMs": (
-                get_settings().build_budget_seconds
+                (
+                    budget_seconds
+                    if budget_seconds is not None
+                    else get_settings().build_budget_seconds
+                )
                 if role == "alex"
                 else get_settings().run_timeout_seconds
             )

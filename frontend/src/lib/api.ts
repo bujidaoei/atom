@@ -21,6 +21,10 @@ import type {
  */
 const BASE = import.meta.env.BASE_URL.replace(/\/+$/, "");
 
+function commandKey(): string {
+  return Array.from(crypto.getRandomValues(new Uint8Array(16)), b => b.toString(16).padStart(2, "0")).join("");
+}
+
 export function withBase(path: string): string {
   return `${BASE}${path}`;
 }
@@ -48,6 +52,7 @@ type RequestOptions = {
   body?: unknown;
   silent401?: boolean;
   accept?: string;
+  commandKey?: string;
 };
 
 async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
@@ -55,15 +60,21 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
 
   let response: Response;
   try {
-    response = await fetch(withBase(path), {
+    const send = () => fetch(withBase(path), {
       method,
       credentials: "include",
       headers: {
         Accept: accept,
         ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+        ...(options.commandKey ? { "Idempotency-Key": options.commandKey } : {}),
       },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
+    try { response = await send(); }
+    catch (error) {
+      if (!options.commandKey) throw error;
+      response = await send();
+    }
   } catch {
     throw new ApiError(0, "网络连接失败，请检查后端是否已启动。");
   }
@@ -122,17 +133,19 @@ export const api = {
     }),
 
   // ---- main loop
-  plan: (id: string) =>
-    request<{ runId: string }>(`/api/projects/${id}/plan`, { method: "POST" }),
+  plan: (id: string, key = commandKey()) =>
+    request<{ runId: string }>(`/api/projects/${id}/plan`, { method: "POST", commandKey: key }),
   approve: (id: string, note?: string) =>
     request<{ runId: string }>(`/api/projects/${id}/approve`, {
       method: "POST",
       body: note ? { note } : {},
+      commandKey: commandKey(),
     }),
   revise: (id: string, message: string) =>
     request<{ runId: string }>(`/api/projects/${id}/revise`, {
       method: "POST",
       body: { message },
+      commandKey: commandKey(),
     }),
   cancel: (id: string) =>
     request<{ ok: true }>(`/api/projects/${id}/cancel`, { method: "POST" }),
@@ -151,10 +164,15 @@ export const api = {
     }),
 
   // ---- race
-  startRace: (id: string, models: string[]) =>
+  startRace: (id: string, models: string[], budgetSeconds = 180) =>
     request<{ raceId: string; heats: RaceHeat[] }>(`/api/projects/${id}/race`, {
       method: "POST",
-      body: { models },
+      body: { models, budgetSeconds },
+      commandKey: commandKey(),
+    }),
+  retryHeat: (id: string, heatId: string, budgetSeconds: number) =>
+    request<{ runId: string }>(`/api/projects/${id}/race/${heatId}/retry`, {
+      method: "POST", body: { budgetSeconds }, commandKey: commandKey(),
     }),
   getRace: (id: string) => request<{ race: RaceSummary | null }>(`/api/projects/${id}/race`),
   adoptHeat: (id: string, heatId: string) =>

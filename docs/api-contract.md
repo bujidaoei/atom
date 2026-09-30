@@ -350,3 +350,8 @@ res: `{ "ok": true }`
 ```
 
 每次 agent turn 扣 1 credit，Race Mode 每个 heat 各扣 1。额度为 0 时相关接口返回 402。
+# Workflow integrity additions (2026-09-30)
+
+Plan, approve, revise, race and individual heat retry accept an optional `Idempotency-Key` header (1–128 characters). A matching project/key/action/body replays the original receipt even after completion or cancellation. Reusing a key for different input returns 409. The UI uses `initial-plan:<projectId>` for automatic first planning and fresh keys for intentional new operations. Network retries reuse the key. Receipts are durable; execution remains single-worker.
+
+Race creation accepts `budgetSeconds` (180–600, default 180). `POST /api/projects/{id}/race/{heatId}/retry` accepts `budgetSeconds` (same bounds, default 360) and returns `runId`. Only unsuccessful terminal heats in the current owned race may be retried. Files and previous runs are retained, other heats are unchanged, and adoption remains explicit. Heat details expose `runStartedAt` in UTC; elapsed time and usage accumulate across attempts. Partial files may have a preview URL without being eligible for adoption.

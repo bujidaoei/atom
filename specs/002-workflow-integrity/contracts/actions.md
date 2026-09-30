@@ -1,0 +1,2 @@
+# Commands
+Optional Idempotency-Key (1..128 chars). Same project/key + canonical action/body returns original JSON; mismatch 409. Absent key preserves legacy behavior. Initial plan key initial-plan:<projectId> used by UI only. Race budgetSeconds accepts 180..600, default180. POST /projects/{project}/race/{heat}/retry requires terminal failed/cancelled/timed_out/interrupted heat, no active project job and owned current race; returns runId. Retry preserves files and never adopts automatically.

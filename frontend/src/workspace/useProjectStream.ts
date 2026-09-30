@@ -49,6 +49,7 @@ export function useProjectStream({ projectId, enabled, snapshotStatus, onProject
     );
 
     function handle(raw: MessageEvent<string>) {
+      if (closed) return;
       let event: RunEvent;
       try {
         event = JSON.parse(raw.data) as RunEvent;
