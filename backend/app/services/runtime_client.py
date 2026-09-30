@@ -42,11 +42,7 @@ class RuntimeClient:
     def __init__(self) -> None:
         settings = get_settings()
         self._base_url = settings.runtime_url.rstrip("/")
-        self._headers = (
-            {"Authorization": f"Bearer {settings.runtime_token}"}
-            if settings.runtime_token
-            else {}
-        )
+        self._headers = {"Authorization": f"Bearer {settings.runtime_token}"}
         # `read` bounds the gap between NDJSON lines, not the whole turn, but
         # a tool call can run silently for a while, so it tracks the run
         # budget rather than the single-model-call budget.
@@ -57,7 +53,7 @@ class RuntimeClient:
     async def healthy(self) -> bool:
         try:
             async with httpx.AsyncClient(timeout=5.0) as client:
-                response = await client.get(f"{self._base_url}/healthz")
+                response = await client.get(f"{self._base_url}/healthz", headers=self._headers)
                 return response.status_code == 200
         except httpx.HTTPError:
             return False

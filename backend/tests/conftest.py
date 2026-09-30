@@ -10,7 +10,9 @@ import pytest
 _TMP = tempfile.mkdtemp(prefix="atom-tests-")
 os.environ.update(
     {
-        "ATOM_SECRET": "test-secret",
+        "ATOM_ENVIRONMENT": "test",
+        "ATOM_SECRET": "synthetic-test-session-key-32-characters",
+        "ATOM_RUNTIME_TOKEN": "synthetic-test-runtime-key-32-characters",
         "ATOM_DATA_DIR": _TMP,
         "ATOM_DB_PATH": str(Path(_TMP) / "test.db"),
         "ATOM_LLM_API_KEY": "sk-testtesttesttest12",

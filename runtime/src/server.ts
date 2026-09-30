@@ -16,10 +16,10 @@ import type { RunEventType } from '../packages/product-contracts/src/index.ts';
 import { LocalSandboxClient } from './local-sandbox.ts';
 import { allRoles, roleDefinition } from './squad.ts';
 import { runWithRecovery } from './run-recovery.ts';
+import { loadRuntimeConfig } from './config.ts';
 
-const PORT = Number(process.env.ATOM_RUNTIME_PORT ?? 8721);
-const HOST = process.env.ATOM_RUNTIME_HOST ?? '127.0.0.1';
-const SHARED_TOKEN = process.env.ATOM_RUNTIME_TOKEN ?? '';
+const config = loadRuntimeConfig(process.env);
+const { port: PORT, host: HOST } = config;
 const MAX_BODY_BYTES = 4 * 1024 * 1024;
 
 interface RunBody {
@@ -48,11 +48,11 @@ const server = createServer((request, response) => {
 async function handle(request: IncomingMessage, response: ServerResponse): Promise<void> {
   const url = new URL(request.url ?? '/', `http://${request.headers.host ?? 'localhost'}`);
 
+  if (!config.authorize(request.headers.authorization)) return sendJson(response, 401, { error: 'unauthorized' });
+
   if (request.method === 'GET' && url.pathname === '/healthz') {
     return sendJson(response, 200, { status: 'ok', activeRuns: active.size });
   }
-
-  if (!authorized(request)) return sendJson(response, 401, { error: 'unauthorized' });
 
   if (request.method === 'GET' && url.pathname === '/v1/roles') {
     return sendJson(response, 200, {
@@ -180,12 +180,6 @@ function requireAbsolute(body: RunBody, ...keys: (keyof RunBody)[]): void {
       throw new Error(`${String(key)} must be an absolute path, got ${String(value)}`);
     }
   }
-}
-
-function authorized(request: IncomingMessage): boolean {
-  if (!SHARED_TOKEN) return true;
-  const header = request.headers.authorization;
-  return header === `Bearer ${SHARED_TOKEN}`;
 }
 
 async function readJson(request: IncomingMessage): Promise<unknown> {

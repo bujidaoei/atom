@@ -36,6 +36,7 @@ Goal: controlled enterprise repository integration. Independent test: role matri
 - [x] T016 [US4] Draft grants, existing-repo onboarding, conflict handling and export guarantees in specs/003-enterprise-foundation/contracts/collaboration.md; proposed design only, independent CO-01…07 tests unexecuted.
 
 ## Final phase: readiness and delivery
+- [ ] T024 [US1] Implement and verify specs/005-configuration-guards/tasks.md; no missing-token authorization or signing-secret fallback. Parent production delivery remains T019.
 - [ ] T017 Run Spec Kit cross-artifact analysis and replace staged tasks with concrete implementation/debug/test/acceptance tasks in specs/003-enterprise-foundation/tasks.md.
 - [ ] T018 Implement and validate accepted increments with evidence in specs/003-enterprise-foundation/evidence.md; this umbrella task must be split before coding and cannot close by prose alone.
 - [ ] T019 Deliver verified revision to the requested GitHub repository and document backup/deploy/rollback/live acceptance in specs/003-enterprise-foundation/deployment.md.

@@ -4,10 +4,11 @@ from fastapi.testclient import TestClient
 
 
 def test_health_reports_runtime_state(client: TestClient) -> None:
-    body = client.get("/api/health").json()
-    assert body["ok"] is True
-    # The test config points at a dead port, so the sidecar must read as down
-    # rather than the endpoint failing.
+    response = client.get("/api/health")
+    body = response.json()
+    assert response.status_code == 503
+    assert body["ok"] is False
+    # Unreachable runtime must fail readiness instead of a healthy HTTP result.
     assert body["runtime"] is False
 
 

@@ -19,6 +19,8 @@ Research entry passes: no Pi changes, no credentials stored, user modifications 
 
 Scoped exception to sequencing, not to acceptance: source-backed credential binding proceeds as separately specified `004-provider-binding`, with its own complete readiness checklist and regressions. Parent-wide architecture/HA and release gates remain closed. This enables a permanent shared resolver for a demonstrated defect without pretending broader research or enterprise delivery is complete.
 
+The same bounded process applies to `005-configuration-guards`, which closes demonstrated missing-credential startup and runtime authorization fallback. Its own readiness, startup/HTTP tests and migration instructions are mandatory; it does not close origin/CSRF/isolation/HA gates.
+
 ## Project Structure
 - `backend/app`: control plane and current authorization, provider and orchestration paths.
 - `runtime/src`: own runtime adapters; place isolation boundaries here or a dedicated worker adapter without changing `runtime/pi`.

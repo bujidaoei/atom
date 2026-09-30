@@ -36,7 +36,8 @@ def main() -> None:
         for name in ("projects", "published"):
             (root / name).mkdir()
         settings = config.Settings(
-            _env_file=None, secret=secrets.token_hex(32), cookie_secure=False,
+            _env_file=None, environment="test", secret=secrets.token_hex(32),
+            runtime_token=secrets.token_hex(32), cookie_secure=False,
             data_dir=root, db_path=root / "qa.db",
             llm_base_url="http://127.0.0.1:18723/managed",
             llm_api_key="synthetic-qa-managed", runtime_url="http://127.0.0.1:1",

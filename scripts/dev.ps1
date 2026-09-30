@@ -33,6 +33,17 @@ foreach ($line in Get-Content $envFile) {
   $settings[$pair[0].Trim()] = $pair[1].Trim()
 }
 
+# Validate before stopping an existing local process. Never print credentials.
+foreach ($name in @('ATOM_SECRET', 'ATOM_RUNTIME_TOKEN')) {
+  $value = $settings[$name]
+  if ($value -notmatch '^[\x21-\x7e]{32,512}$' -or $value -match 'change-me|dev-secret') {
+    throw "$name must contain a generated 32-512 character secret. See docs/configuration.md."
+  }
+}
+if ($settings['ATOM_SECRET'] -eq $settings['ATOM_RUNTIME_TOKEN']) {
+  throw 'Session and runtime credentials must differ.'
+}
+
 function Stop-Port([int]$port) {
   Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue |
     ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }
@@ -44,6 +55,7 @@ Stop-Port $ApiPort
 $runtimeDir = Join-Path $root 'runtime'
 $env:ATOM_RUNTIME_PORT = $RuntimePort
 $env:ATOM_RUNTIME_TOKEN = $settings['ATOM_RUNTIME_TOKEN']
+$env:ATOM_ENVIRONMENT = if ($settings['ATOM_ENVIRONMENT']) { $settings['ATOM_ENVIRONMENT'] } else { 'development' }
 $env:WORKDUDE_PI_CACHE_REPOSITORY_ROOT = $runtimeDir
 
 $sidecar = Start-Process -FilePath 'node' `

@@ -3,6 +3,8 @@
 后端 FastAPI，挂在 `/api` 下。除标注 `public` 外都要求登录态（HttpOnly Cookie `atom_session`）。
 所有请求/响应均为 JSON，时间为 ISO-8601 UTC 字符串。
 
+`GET /api/health` 为 public 的运行时依赖检查：运行时鉴权或连接失败时返回 HTTP 503、`{"ok":false,"runtime":false}`；成功返回 200、两个字段为 true。不表示模型、数据库恢复或整个平台已验收。Node 内部服务的 `/healthz`、`/v1/roles`、运行与取消接口均要求共享 Bearer 令牌，浏览器不持有该令牌。
+
 前端开发时 Vite 把 `/api`、`/preview`、`/p` 代理到 `http://127.0.0.1:8000`。
 
 ---

@@ -1,32 +1,51 @@
 #!/usr/bin/env bash
 #
-# One-shot deployment for a fresh Ubuntu box.
+# Legacy single-host deployment helper. Enterprise release gates remain required.
 #
-#   curl -fsSL https://raw.githubusercontent.com/bujidaoei/atom/main/deploy/server-setup.sh | bash -s -- <API_KEY>
+#   ATOM_CONFIG_FILE=/secure/path/production.env bash deploy/server-setup.sh
 #
-# or, after cloning:
-#
-#   sudo bash deploy/server-setup.sh <API_KEY>
+# Credentials belong in the protected configuration file, never command arguments.
 #
 # Port 80 is often already taken, so this defaults to 8080. Override with
 # ATOM_HTTP_PORT=9000 bash deploy/server-setup.sh ...
 
 set -euo pipefail
 
-API_KEY="${1:-${ATOM_LLM_API_KEY:-}}"
+CONFIG_FILE="${ATOM_CONFIG_FILE:-$HOME/.config/atom/production.env}"
 HTTP_PORT="${ATOM_HTTP_PORT:-8080}"
 REPO="${ATOM_REPO:-https://github.com/bujidaoei/atom.git}"
 TARGET="${ATOM_DIR:-$HOME/atom}"
+export ATOM_HTTP_PORT="$HTTP_PORT"
 
 # Set ATOM_PROXY_NETWORK to sit behind an existing reverse proxy on a subpath
 # instead of publishing a host port. See deploy/compose.reverse-proxy.yml.
 PROXY_NETWORK="${ATOM_PROXY_NETWORK:-}"
 BASE_PATH="${ATOM_BASE_PATH:-/atom}"
 
-if [[ -z "$API_KEY" ]]; then
-  echo "usage: bash deploy/server-setup.sh <AI_GATEWAY_API_KEY>" >&2
+if [[ $# -ne 0 ]]; then
+  echo "Credential arguments are no longer accepted. Set ATOM_CONFIG_FILE; see docs/configuration.md." >&2
   exit 1
 fi
+if [[ ! -f "$CONFIG_FILE" ]]; then
+  echo "Missing protected production configuration. See docs/configuration.md." >&2
+  exit 1
+fi
+CONFIG_FILE=$(realpath "$CONFIG_FILE")
+case "$CONFIG_FILE" in
+  "$(realpath -m "$TARGET")"/*)
+    echo "Production configuration must live outside the managed checkout." >&2
+    exit 1
+    ;;
+esac
+if [[ $(stat -c '%a' "$CONFIG_FILE") != 600 ]]; then
+  echo "Production configuration must have mode 600." >&2
+  exit 1
+fi
+if ! grep -Eq '^ATOM_COOKIE_SECURE=true[[:space:]]*$' "$CONFIG_FILE"; then
+  echo "Production requires ATOM_COOKIE_SECURE=true and an HTTPS reverse proxy." >&2
+  exit 1
+fi
+export ATOM_ENV_FILE="$CONFIG_FILE"
 
 say() { printf '\n\033[1;34m==>\033[0m %s\n' "$*"; }
 
@@ -140,38 +159,17 @@ else
 fi
 
 # ------------------------------------------------------------------- env
-say "Writing .env"
-cat > .env <<EOF
-ATOM_SECRET=$(openssl rand -hex 32)
-ATOM_DATA_DIR=/data
-ATOM_DB_PATH=/data/atom.db
-ATOM_LLM_BASE_URL=${ATOM_LLM_BASE_URL:-https://ai-gateway.skg.com/v1}
-ATOM_LLM_API_KEY=${API_KEY}
-ATOM_LLM_MODEL=${ATOM_LLM_MODEL:-deepseek-v4.1-flash}
-ATOM_LLM_PLANNING_MODEL=${ATOM_LLM_PLANNING_MODEL:-deepseek-v4.1-flash}
-ATOM_RUNTIME_URL=http://127.0.0.1:8721
-ATOM_RUNTIME_TOKEN=$(openssl rand -hex 16)
-ATOM_COOKIE_SECURE=false
-ATOM_STARTING_CREDITS=200
-ATOM_HTTP_PORT=${HTTP_PORT}
-APT_MIRROR=${APT_MIRROR:-$(detect_apt_mirror)}
-PYPI_INDEX=${PYPI_INDEX:-$(detect_pypi_index)}
-EOF
-
-COMPOSE_ARGS=(-f docker-compose.yml)
+# Keep the operator-managed file unchanged, including signing keys across restarts.
+COMPOSE_ARGS=(--env-file "$CONFIG_FILE" -f docker-compose.yml)
 if [[ -n "$PROXY_NETWORK" ]]; then
   COMPOSE_ARGS+=(-f deploy/compose.reverse-proxy.yml)
-  cat >> .env <<EOF
-ATOM_PROXY_NETWORK=${PROXY_NETWORK}
-ATOM_COOKIE_PATH=${BASE_PATH}
-VITE_BASE=${BASE_PATH}/
-EOF
+  export ATOM_PROXY_NETWORK="$PROXY_NETWORK"
+  export ATOM_COOKIE_PATH="$BASE_PATH"
+  export VITE_BASE="${BASE_PATH}/"
   HEALTH_URL="http://127.0.0.1${BASE_PATH}/api/health"
 else
   HEALTH_URL="http://127.0.0.1:${HTTP_PORT}/api/health"
 fi
-chmod 600 .env
-
 # ----------------------------------------------------------------- build
 say "Building and starting (first build pulls Node 24 and Python 3.12, give it a few minutes)"
 $DOCKER compose "${COMPOSE_ARGS[@]}" up -d --build

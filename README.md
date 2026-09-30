@@ -99,6 +99,8 @@ nginx ──┬── /            静态 SPA（React + Vite + Tailwind）
 
 ## 本地运行
 
+启动前请先阅读 [配置要求](docs/configuration.md)：现在必须配置独立的会话签名密钥与运行时令牌，不再接受空值或示例密钥。企业化进展及未完成门禁见 [当前规格](specs/003-enterprise-foundation/spec.md)。
+
 需要 Node 24+、Python 3.12+、[uv](https://docs.astral.sh/uv/)。
 
 ```bash

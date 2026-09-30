@@ -84,8 +84,10 @@ def _explain(item: dict[str, object]) -> str:
 
 
 @app.get("/api/health")
-async def health() -> dict[str, object]:
-    return {"ok": True, "runtime": await runtime_client.healthy()}
+async def health() -> JSONResponse:
+    runtime_ready = await runtime_client.healthy()
+    return JSONResponse(status_code=200 if runtime_ready else 503,
+                        content={"ok": runtime_ready, "runtime": runtime_ready})
 
 
 app.include_router(auth.router, prefix="/api")

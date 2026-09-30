@@ -48,6 +48,9 @@ def main() -> int:
         # session, HTTP client and HTTP receiver execute without transport mocks.
         settings = config.Settings(
             _env_file=None,
+            environment="test",
+            secret=secrets.token_hex(32),
+            runtime_token=secrets.token_hex(32),
             data_dir=root,
             db_path=root / "probe.db",
             llm_base_url="https://managed-provider.invalid/v1",
