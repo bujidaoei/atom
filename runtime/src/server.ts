@@ -100,7 +100,8 @@ async function startRun(request: IncomingMessage, response: ServerResponse): Pro
 
   const controller = new AbortController();
   active.set(body.runId, controller);
-  const deadline = setTimeout(() => controller.abort(), Math.max(1, Math.min(body.budgetMs ?? 180_000, 1_800_000)) + 1000);
+  const deadline = setTimeout(() => controller.abort(new DOMException('Runtime deadline exceeded', 'TimeoutError')),
+    Math.max(1, Math.min(body.budgetMs ?? 180_000, 1_800_000)) + 1000);
 
   response.writeHead(200, {
     'content-type': 'application/x-ndjson; charset=utf-8',
@@ -173,6 +174,7 @@ async function startRun(request: IncomingMessage, response: ServerResponse): Pro
         controller.signal.throwIfAborted();
         return result;
       }) : { value: await execute(), receipt: undefined };
+    controller.signal.throwIfAborted();
     const result = finished.value;
 
     write({
@@ -189,6 +191,8 @@ async function startRun(request: IncomingMessage, response: ServerResponse): Pro
       kind: 'error',
       role: role.id,
       cancelled: controller.signal.aborted,
+      status: controller.signal.aborted
+        ? (controller.signal.reason?.name === 'TimeoutError' ? 'timed_out' : 'cancelled') : 'failed',
       message: describe(error),
     });
   } finally {

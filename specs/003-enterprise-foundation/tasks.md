@@ -116,3 +116,7 @@ T027 continuation: child 008 broker preview and file-read endpoints now serve ac
 T027 continuation: child 008 project/race API catalogues now use verified committed manifests and version identity instead of stale host files or persisted heat counts. Orchestrator event statistics, adoption/publication, lease dispatch and enterprise acceptance remain open.
 
 T027 continuation: child 008 main orchestrator now creates and delivers broker leases and validates committed output; real consecutive build/revise preserves prior artifacts, invalid HTML output fails the Run and delivery disconnect triggers confirmed cleanup. Publication/adoption, revision-bound acceptance, active-model cancellation/deadline, ongoing recovery/outbox and enterprise release remain open.
+
+T027 continuation: child 008 verified active-model runtime cancel/deadline with actual start_build, preserving old committed content and correct Run/project interruption status. API-level cancellation races, continuous recovery, publication/adoption and enterprise release remain open.
+
+T027 continuation: post-registration timeout now rejects late runtime success while retaining the committed artifact receipt. Real delayed-response coverage is recorded in feature 008 evidence; enterprise acceptance remains open.

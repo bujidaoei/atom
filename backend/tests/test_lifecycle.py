@@ -1,4 +1,5 @@
 import asyncio
+import pytest
 
 from sqlalchemy import select
 
@@ -11,8 +12,9 @@ from app.services.runtime_client import RuntimeLine
 
 
 class ScriptedRuntime:
-    def __init__(self, mode):
+    def __init__(self, mode, reported_status=None):
         self.mode = mode
+        self.reported_status = reported_status
         self.cancelled = []
 
     async def run(self, **kwargs):
@@ -23,7 +25,7 @@ class ScriptedRuntime:
         if self.mode == "success":
             yield RuntimeLine("result", None, {"resultText": "ok"})
         if self.mode == "failed":
-            yield RuntimeLine("error", None, {"message": "provider failed"})
+            yield RuntimeLine("error", None, {"message": "provider failed", 'status':self.reported_status})
 
     async def cancel(self, run_id):
         self.cancelled.append(run_id)
@@ -55,6 +57,27 @@ def test_silent_deadline_is_terminal(signed_in, monkeypatch):
         run = session.scalar(select(Run).where(Run.project_id == project_id))
         assert run.status == "timed_out" and run.finished_at
     assert len(runtime.cancelled) == 1
+
+
+@pytest.mark.parametrize('reported,expected', [('cancelled','cancelled'),('timed_out','timed_out'),
+                                              ('done','failed'),(None,'failed'),({},'failed')])
+@pytest.mark.parametrize('phase', ['plan','build'])
+def test_runtime_error_status_cannot_claim_success(signed_in, reported, expected, phase):
+    project_id,user_id=seed()
+    async def scenario():
+        runtime=ScriptedRuntime('failed',reported)
+        orchestration=Orchestrator(runtime)
+        if phase=='plan':
+            await orchestration.start_plan(project_id,user_id)
+        else:
+            await orchestration.start_build(project_id,user_id,None)
+        await orchestration._jobs[project_id]
+        assert len(runtime.cancelled)==1
+    asyncio.run(scenario())
+    with session_scope() as session:
+        run=session.scalar(select(Run).where(Run.project_id==project_id))
+        assert run.status==expected and run.finished_at is not None
+        assert session.get(Project,project_id).status==('error' if expected=='failed' else expected)
 
 
 def test_cancel_is_durable_and_idempotent(signed_in):

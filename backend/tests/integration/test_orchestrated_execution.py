@@ -20,8 +20,8 @@ pytestmark = pytest.mark.skipif(not IMAGE or not os.environ.get('ATOM_TEST_DOCKE
                                reason='requires explicit local API and sandbox image digests')
 
 
-@pytest.mark.parametrize('valid', [True, False, None])
-def test_actual_orchestrator_leases_and_validates_registered_output(tmp_path, valid):
+@pytest.mark.parametrize('valid,interrupt', [(True,None),(False,None),(None,None),(False,'cancel'),(False,'deadline'),(False,'deadline_checkpoint')])
+def test_actual_orchestrator_leases_and_validates_registered_output(tmp_path, valid, interrupt):
     assert re.fullmatch(r'sha256:[0-9a-f]{64}', IMAGE)
     root=Path(__file__).resolve().parents[3]
     archive=io.BytesIO()
@@ -48,7 +48,7 @@ def test_actual_orchestrator_leases_and_validates_registered_output(tmp_path, va
                 runtime=root/'runtime'
                 parameters={'lease':body['lease'],'request':body,'brokerOrigin':broker._origin,
                     'executionOrigin':'http://'+port.decode().strip(), 'outputFile':'notes.txt' if len(observed)>1 else 'index.html',
-                    'outputText':'<h1>actual orchestrated output</h1>' if valid else ''}
+                    'outputText':'<h1>actual orchestrated output</h1>' if valid or interrupt else '', 'interrupt':interrupt}
                 code,out,err=run_bounded(['node','--import',(runtime/'node_modules/tsx/dist/loader.mjs').as_uri(),
                     str(runtime/'scripts/test-server-execution.ts')],input_data=json.dumps(parameters).encode(),timeout=25)
                 assert code==0,err.decode()
@@ -59,7 +59,7 @@ def test_actual_orchestrator_leases_and_validates_registered_output(tmp_path, va
         relay=ThreadingHTTPServer(('127.0.0.1',0),Relay)
         worker=threading.Thread(target=relay.serve_forever,daemon=True);worker.start()
         script=r'''
-import asyncio,base64,io,json,os,sys,zipfile
+import asyncio,base64,io,json,os,sys,zipfile,sqlite3
 from pathlib import Path
 data=json.loads(sys.stdin.buffer.read())
 code=Path('/tmp/code');code.mkdir()
@@ -70,8 +70,15 @@ os.environ.update(ATOM_ENVIRONMENT='production',ATOM_SANDBOX_MODE='broker',ATOM_
     ATOM_SECRET='synthetic-session-key-32-characters-long',ATOM_RUNTIME_TOKEN='synthetic-runtime-key-32-characters-long',
     ATOM_DATA_DIR='/tmp/data',ATOM_DB_PATH='/tmp/data/api.db',ATOM_ARTIFACT_DIR='/tmp/artifacts',
     ATOM_BROKER_ORIGIN='http://127.0.0.1:1',ATOM_BROKER_ADMIN_TOKEN=data['admin'],ATOM_BROKER_GRANT_KEY=data['key'],
-    ATOM_COMPLETION_GRANT_KEY='c'*32,ATOM_LLM_API_KEY='',ATOM_RUNTIME_URL='http://127.0.0.1:1')
+    ATOM_COMPLETION_GRANT_KEY='c'*32,ATOM_LLM_API_KEY='synthetic-model-fixture-key',
+    ATOM_LLM_BASE_URL='https://synthetic.invalid/v1',ATOM_RUNTIME_URL='http://127.0.0.1:1')
 from app.main import app
+if data['interrupt']=='deadline_checkpoint':
+    @app.middleware('http')
+    async def delayed_confirmation(request,call_next):
+        response=await call_next(request)
+        if request.url.path=='/v1/executions/complete':await asyncio.sleep(4.5)
+        return response
 from app.config import get_settings
 from app.db import engine,session_scope
 from app.models import Base,User,Project,Run
@@ -85,6 +92,9 @@ with session_scope() as s:
     s.add(User(id='owner',email='owner@example.invalid',name='Owner',password_hash='fixture'));s.flush()
     s.add(Project(id='p',user_id='owner',title='P',prompt='fixture'))
 settings=get_settings();migrate(settings.db_path,Path('/tmp/data/backup.db'));settings.db_path.chmod(0o600)
+if data['interrupt']:
+    legacy=settings.projects_dir/'p'/'workspace';legacy.mkdir(parents=True)
+    (legacy/'index.html').write_text('<h1>saved before interruption</h1>')
 async def main():
     async def proxy(port):
         async def relay(reader,writer):
@@ -111,11 +121,22 @@ async def main():
             if server.started or serving.done():break
             await asyncio.sleep(0.02)
         assert server.started
-        outcome=await orchestrator._turn('p','owner',role='alex',phase='build',
-            gateway=GatewayConfig('https://synthetic.invalid','synthetic','test-model'),
-            prompt='Write index.html and finish.',budget_seconds=1000 if data['valid'] else 40)
-        assert outcome.failed==(data['valid'] is not True),outcome
-        assert outcome.status==('done' if data['valid'] else 'failed'),outcome
+        expected='cancelled' if data['interrupt']=='cancel' else 'timed_out' if data['interrupt'] else 'done' if data['valid'] else 'failed'
+        if data['interrupt']:
+            await orchestrator.start_build('p','owner',None)
+            await asyncio.wait_for(orchestrator._jobs['p'],20)
+            with session_scope() as s:
+                recorded=s.scalar(select(Run).where(Run.project_id=='p'))
+                observed_status=recorded.status
+                assert s.get(Project,'p').status==expected
+                assert not orchestrator.active('p')
+        else:
+            outcome=await orchestrator._turn('p','owner',role='alex',phase='build',
+                gateway=GatewayConfig('https://synthetic.invalid','synthetic','test-model'),
+                prompt='Write index.html and finish.',budget_seconds=1000 if data['valid'] else 40)
+            assert outcome.failed==(data['valid'] is not True),outcome
+            observed_status=outcome.status
+        assert observed_status==expected,observed_status
         if data['valid']:
             # The second runtime writes only notes: index.html must survive from
             # the prior committed seed, since the legacy directory stays empty.
@@ -129,21 +150,30 @@ async def main():
         assert head is not None and resources.repository.pending_executions()==()
         with session_scope() as s:
             run=s.scalar(select(Run).where(Run.project_id=='p'))
-            assert run.status==outcome.status and s.get(Project,'p').active_run_id is None
-        assert not (settings.projects_dir/'p'/'workspace'/'index.html').exists()
+            assert run.status==observed_status and s.get(Project,'p').active_run_id is None
+        if not data['interrupt']: assert not (settings.projects_dir/'p'/'workspace'/'index.html').exists()
         listing=await orchestrator._catalog('p','owner')
         assert listing['revisionId']==head.revision_id
         if data['valid'] is None: assert listing['files']==[]
         else: assert listing['files'][0]['path']=='index.html'
+        if data['interrupt']:
+            from app.revision_view import materialized_revision
+            registered=data['interrupt']=='deadline_checkpoint'
+            with materialized_revision(resources.repository,resources.store,owner='owner',workspace_id=workspace) as view:
+                assert view.path.joinpath('index.html').read_text()==('<h1>actual orchestrated output</h1>' if registered else '<h1>saved before interruption</h1>')
+            with sqlite3.connect(settings.db_path) as db:
+                assert db.execute('SELECT state,termination_state,outcome FROM revision_attempts').fetchall()==[('closed','confirmed','succeeded' if registered else 'cancelled')]
+                assert db.execute('SELECT count(*) FROM revision_receipts').fetchone()[0]==int(registered)
+                assert db.execute('SELECT count(*) FROM revision_records').fetchone()[0]==1+int(registered)
         if data['valid']: assert [entry['path'] for entry in listing['files']]==['index.html','notes.txt']
-        print(json.dumps({'status':outcome.status,'revision':head.revision_id}))
+        print(json.dumps({'status':observed_status,'revision':head.revision_id}))
     finally:
         server.should_exit=True;await asyncio.wait_for(serving,15)
         broker.close();runtime.close();await broker.wait_closed();await runtime.wait_closed()
 asyncio.run(main())
 '''
         parameters={'code':base64.b64encode(archive.getvalue()).decode(),'admin':config.admin_token,
-            'key':config.grant_key,'broker':int(broker._origin.rsplit(':',1)[1]),'runtime':relay.server_port,'valid':valid}
+            'key':config.grant_key,'broker':int(broker._origin.rsplit(':',1)[1]),'runtime':relay.server_port,'valid':valid,'interrupt':interrupt}
         try:
             code,out,err=run_bounded(['docker','run','--name',name,'--network=bridge','--read-only',
                 '--user','1000:1000','--cap-drop=ALL','--security-opt=no-new-privileges','--memory=512m','--pids-limit=128',
@@ -151,7 +181,7 @@ asyncio.run(main())
                 '--workdir','/tmp','-i',IMAGE,'/app/backend/.venv/bin/python','-I','-c',script],
                 input_data=json.dumps(parameters).encode(),timeout=30)
             assert code==0,err.decode()
-            assert json.loads(out)['status']==('done' if valid else 'failed')
+            assert json.loads(out)['status']==('cancelled' if interrupt=='cancel' else 'timed_out' if interrupt else 'done' if valid else 'failed')
             assert len(observed)==(2 if valid else 1)
         finally:
             relay.shutdown();relay.server_close();worker.join(timeout=3)

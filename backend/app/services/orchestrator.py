@@ -256,6 +256,11 @@ class Orchestrator:
     async def _fail(self, project_id: str, detail: str) -> None:
         await self._terminate(project_id, "error", detail)
 
+    async def _finish_turn_failure(self, project_id: str, outcome: TurnOutcome, fallback: str) -> None:
+        await self._finish(project_id,
+            status=outcome.status if outcome.status in ('cancelled','timed_out') else 'error',
+            note=outcome.error or fallback)
+
     async def _finish(
         self, project_id: str, *, status: str, note: str | None = None
     ) -> None:
@@ -287,7 +292,7 @@ class Orchestrator:
             render=_render_plan,
         )
         if mike.failed:
-            await self._fail(project_id, mike.error or "规划失败")
+            await self._finish_turn_failure(project_id, mike, "规划失败")
             return
         plan = parsing.normalize_plan(mike.text, fallback_title=title)
         _apply_plan(project_id, plan)
@@ -320,7 +325,7 @@ class Orchestrator:
                 render=_render_contract if role == "emma" else None,
             )
             if outcome.failed:
-                await self._fail(project_id, outcome.error or f"{role} 执行失败")
+                await self._finish_turn_failure(project_id, outcome, f"{role} 执行失败")
                 return
             transcript.append((f"{role.capitalize()} 的产出", outcome.text))
             if role == "emma":
@@ -348,11 +353,7 @@ class Orchestrator:
             context=_squad_context(project_id),
         )
         if outcome.failed:
-            await self._finish(
-                project_id,
-                status=outcome.status if outcome.status == "timed_out" else "error",
-                note=outcome.error,
-            )
+            await self._finish_turn_failure(project_id, outcome, '生成失败')
             return
 
         await self._publish_files(project_id)
@@ -654,7 +655,8 @@ class Orchestrator:
                                 usage.get("outputTokens") or output_tokens
                             )
                             if line.kind == "error":
-                                status = "failed"
+                                reported = line.payload.get('status')
+                                status = reported if reported in ('cancelled','timed_out') else 'failed'
                                 error = str(line.payload.get("message") or "运行时错误")
                             else:
                                 text_parts = [str(line.payload.get("resultText") or "")]

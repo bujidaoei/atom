@@ -11,9 +11,21 @@ import { randomBytes } from 'node:crypto';
 const input = JSON.parse(readFileSync(0, 'utf8'));
 const root = await mkdtemp(join(tmpdir(), 'atom-server-execution-'));
 let requests = 0;
+let cancellation: Promise<void> = Promise.resolve();
 const model = createServer(async (req, res) => {
   for await (const _chunk of req) { /* consume request before responding */ }
   requests++;
+  if (requests === 2 && ['cancel', 'deadline'].includes(input.interrupt)) {
+    if (input.interrupt === 'cancel') cancellation = (async () => {
+      const response = await fetch(`http://127.0.0.1:${port}/v1/runs/${input.lease.runId}/cancel`, {
+        method: 'POST', headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(3000),
+      });
+      assert.equal(response.status, 200);
+      assert.equal((await response.json()).cancelled, true);
+    })();
+    // Hold the actual second model response until runtime interruption closes it.
+    return;
+  }
   const delta = requests === 1 ? { role: 'assistant', tool_calls: [{ index: 0, id: 'write-output', type: 'function',
     function: { name: 'write', arguments: JSON.stringify({ path: input.outputFile ?? 'result.txt', content: input.outputText ?? 'actual coordinator output' }) } }] }
     : { role: 'assistant', content: 'Output saved.' };
@@ -47,7 +59,7 @@ try {
       systemPromptSuffix:input.request.systemPromptSuffix, enableTools:input.request.enableTools} : {}),
     workspacePath: join(root, 'workspace'), sessionPath: join(root, 'session.jsonl'), agentDir: join(root, 'agent'),
     gateway: { baseUrl: `http://127.0.0.1:${(model.address() as any).port}/v1`, apiKey: 'synthetic-model-key', model: 'test-model' },
-    budgetMs: 15000, lease: input.lease };
+    budgetMs: input.interrupt?.startsWith('deadline') ? 3000 : 15000, lease: input.lease };
   const denied = await fetch(`http://127.0.0.1:${port}/v1/runs`, { method: 'POST',
     headers: { authorization: `Bearer ${token}` }, body: JSON.stringify({ ...body, lease: undefined }) });
   assert.equal(denied.status, 400);
@@ -56,12 +68,22 @@ try {
     headers: { authorization: `Bearer ${token}` }, body: JSON.stringify(body), signal: AbortSignal.timeout(18000) });
   assert.equal(response.status, 200);
   const lines = (await response.text()).trim().split('\n').map(line => JSON.parse(line));
-  assert.equal(lines.at(-1).kind, 'result', JSON.stringify(lines.at(-1)));
   assert.equal(requests, 2);
-  const receipt = lines.at(-1).revisionReceipt;
-  assert.equal(receipt.attempt_id, input.lease.executionId);
-  assert.equal(receipt.workspace_id, input.lease.workspaceId);
-  console.log(JSON.stringify({ revision: receipt.revision_id, lines }));
+  await cancellation;
+  if (input.interrupt) {
+    assert.equal(lines.at(-1).kind, 'error', JSON.stringify(lines.at(-1)));
+    assert.equal(lines.at(-1).status, input.interrupt === 'cancel' ? 'cancelled' : 'timed_out');
+    assert.equal(lines.at(-1).cancelled, true);
+    assert.ok(lines.some(line => line.kind === 'event' && line.type === 'tool.completed'));
+    assert.ok(!lines.some(line => line.kind === 'result'));
+    console.log(JSON.stringify({ revision: null, lines }));
+  } else {
+    assert.equal(lines.at(-1).kind, 'result', JSON.stringify(lines.at(-1)));
+    const receipt = lines.at(-1).revisionReceipt;
+    assert.equal(receipt.attempt_id, input.lease.executionId);
+    assert.equal(receipt.workspace_id, input.lease.workspaceId);
+    console.log(JSON.stringify({ revision: receipt.revision_id, lines }));
+  }
 } finally {
   child.kill(); await exited;
   model.closeAllConnections();
