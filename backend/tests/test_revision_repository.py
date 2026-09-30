@@ -55,6 +55,23 @@ def allocate(repo, workspace, *, attempt='attempt', run='run', deadline=None):
     return repo.bind('owner',attempt,'broker-' + attempt)
 
 
+def test_committed_revision_read_is_owner_scoped_and_preserves_captured_identity(repository):
+    repo, path, main, heat = repository
+    assert repo.current_revision('owner', main) is None
+    with pytest.raises(RevisionError, match='revision_not_found'):
+        repo.current_revision('foreign', main)
+    root=repo.bootstrap('owner', main, BASE)
+    captured=repo.current_revision('owner', main)
+    assert captured.workspace_id==main and captured.revision_id==root and captured.artifact==BASE
+    allocate(repo, main)
+    receipt=register(repo)
+    current=repo.current_revision('owner', main)
+    assert current.revision_id==receipt.revision_id and current.artifact==OUTPUT
+    assert captured.revision_id==root and captured.artifact==BASE
+    assert repo.current_revision('owner', heat) is None
+    assert repo.recovery('owner', 'attempt').state=='active'
+
+
 def test_startup_inventory_is_bounded_and_keeps_unknown_attempts(repository):
     repo, path, main, heat = repository
     assert repo.pending_executions() == ()

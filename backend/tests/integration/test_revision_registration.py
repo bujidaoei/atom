@@ -373,7 +373,7 @@ def coordinator_source_bundle():
                 if path.is_file() and (path.suffix == '.py' or path.name == 'cacert.pem'):
                     bundle.write(path,package+'/'+path.relative_to(directory).as_posix())
         bundle.write(importlib.util.find_spec('typing_extensions').origin,'typing_extensions.py')
-        for name in ('__init__','execution','execution_http','execution_service','workspace_import','artifacts','snapshots','revisions','migrations/__init__',
+        for name in ('__init__','execution','execution_http','execution_service','workspace_import','revision_view','artifacts','snapshots','revisions','migrations/__init__',
                      'migrations/revision_v1','sandbox/__init__','sandbox/client','sandbox/checkpoints',
                      'sandbox/docker_driver','sandbox/registry','sandbox/grants'):
             bundle.write(root / f'backend/app/{name}.py',f'app/{name}.py')
@@ -400,6 +400,7 @@ from app.migrations import migrate
 from app.execution import ExecutionCoordinator
 from app.execution_http import ExecutionAPI
 from app.workspace_import import import_workspace
+from app.revision_view import materialized_revision
 from app.snapshots import SnapshotError,verify_snapshot
 from app.sandbox.client import BrokerClient
 from app.sandbox.grants import GrantCodec,Grant,CompletionGrantCodec
@@ -450,6 +451,16 @@ async def main():
     imported=import_workspace(repo,store,owner='owner',project_id='p',source=source)
     assert imported.workspace_id==workspace
     assert import_workspace(repo,store,owner='owner',project_id='p',source=source)==imported
+    with materialized_revision(repo,store,owner='owner',workspace_id=workspace,
+                               expected_revision_id=imported.revision_id) as initial_view:
+        assert initial_view.path.joinpath('initial.txt').read_text()=='actual imported source'
+        assert initial_view.revision==repo.current_revision('owner',workspace)
+        initial_path=initial_view.path
+    assert not initial_path.exists()
+    try:
+        with materialized_revision(repo,store,owner='stranger',workspace_id=workspace):
+            raise AssertionError('foreign view')
+    except RevisionError: pass
     base=imported.artifact
     verified=verify_snapshot(io.BytesIO(store.read(base.key)))
     assert verified.revision==base.revision and len(verified.files)==1
@@ -692,6 +703,20 @@ asyncio.run(main())
                 assert state.state=='closed' and state.outcome=='succeeded' and state.receipt is not None
                 assert b'actual coordinator output' in store.read(state.receipt.artifact_key)
                 assert b'actual imported source' in store.read(state.receipt.artifact_key)
+                try:
+                    with materialized_revision(repo,store,owner='owner',workspace_id=workspace,
+                                               expected_revision_id=imported.revision_id):
+                        raise AssertionError('stale expected revision')
+                except RevisionError as error: assert error.code=='revision_conflict'
+                try:
+                    with materialized_revision(repo,store,owner='owner',workspace_id=workspace,
+                                               expected_revision_id=state.receipt.revision_id) as completed_view:
+                        assert completed_view.path.joinpath('initial.txt').read_text()=='actual imported source'
+                        assert completed_view.path.joinpath('result.txt').read_text()=='actual coordinator output'
+                        completed_path=completed_view.path
+                        raise RuntimeError('consumer interruption')
+                except RuntimeError as error: assert str(error)=='consumer interruption'
+                assert not completed_path.exists()
                 repeated=await http_control(lease.completion_grant)
                 assert repeated.json()==completed.json()
                 with sqlite3.connect(path) as db:

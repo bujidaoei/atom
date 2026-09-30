@@ -389,3 +389,12 @@ execution-app-final: 77 tests, 0 failures, 0 errors, 0 skips, 15.953 seconds
 execution-app-workflows: 48 tests, 0 failures, 0 errors, 0 skips, 16.953 seconds
 execution-app-lifecycle-final: 1 tests, 0 failures, 0 errors, 0 skips, 11.006 seconds
 Reports are in .logs. Earlier Linux runs were followed by the final added real-worker shutdown scenario above. Existing Starlette/httpx deprecation remains. Spec/plan/tasks/contract/data model/migration/quickstart and parent progress synchronized. No production database, secrets, Pi changes, push or deployment. Main lease scheduling, legacy Run/outbox synchronization, immutable preview adoption and enterprise acceptance remain open.
+
+## Continuation — committed artifact read views (2026-10-01)
+Baseline bbdf2dd; previous turn was progress. Inspected actual Orchestrator._turn, race handling, project routes and artifact validator: they still inspect the old host workspace, so merely delivering a broker lease would validate/serve stale output. Added the committed-read prerequisite before changing dispatch: owner-scoped current revision metadata and a private verified materialization context with optional expected revision. It checks immutable bytes/semantic digest/size, never replaces legacy directories, and removes its private temporary directory on normal exit or consumer exception.
+
+Real repository tests cover uninitialized and foreign scope, capture of the original root followed by real ledger registration/head advance, and absence of execution-state mutation. Actual Linux normal completion and process-exit recovery tests read imported and generated files from committed artifacts, reject stale expected revision and verify successful/exceptional context cleanup. The expected content was genuinely written in the isolated source/worker fixtures. Repository-only Artifact descriptors elsewhere remain test fixtures. This does not exercise application preview routes or main automatic dispatch and does not constitute product acceptance.
+
+revision-view-repository: 61 tests, 0 failures, 0 errors, 0 skips, 13.097 seconds
+revision-view-linux: 2 tests, 0 failures, 0 errors, 0 skips, 16.251 seconds
+Reports are in .logs; existing Starlette/httpx deprecation remains. Spec/plan/tasks/contract/data model/quickstart and parent progress synchronized. No Pi changes, production data, push or deployment. Orchestrator validation, lease scheduling, immutable preview/race adoption and enterprise gates remain open.

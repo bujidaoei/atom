@@ -54,6 +54,13 @@ class Receipt:
 
 
 @dataclass(frozen=True)
+class WorkspaceRevision:
+    workspace_id: str
+    revision_id: str
+    artifact: Artifact
+
+
+@dataclass(frozen=True)
 class PendingExecution:
     owner: str
     attempt_id: str
@@ -169,6 +176,21 @@ class RevisionRepository:
         else:
             db.execute('INSERT INTO revision_artifacts VALUES (?,?,?,?)',
                        (artifact.key, artifact.revision, artifact.size, int(time.time())))
+
+    def current_revision(self, owner: str, workspace_id: str) -> WorkspaceRevision | None:
+        _identifiers(owner, workspace_id)
+        with self._transaction() as db:
+            workspace = self._workspace(db, owner, workspace_id)
+            if workspace['current_revision_id'] is None:
+                return None
+            row = db.execute('''SELECT r.id,r.artifact_key,r.snapshot_revision,a.size
+                FROM revision_records r JOIN revision_artifacts a ON a.key=r.artifact_key
+                WHERE r.id=? AND r.workspace_id=?''',
+                             (workspace['current_revision_id'], workspace_id)).fetchone()
+            if row is None:
+                raise RevisionError('revision_conflict')
+            return WorkspaceRevision(workspace_id, row['id'],
+                                     Artifact(row['artifact_key'], row['snapshot_revision'], row['size']))
 
     def pending_executions(self, *, limit: int = 100) -> tuple[PendingExecution, ...]:
         """Trusted startup inventory, never a tenant-facing query or dispatch grant."""

@@ -54,3 +54,5 @@ ImportedWorkspace is a trusted offline operation result containing workspace_id,
 PendingExecution is a trusted cleanup inventory view (current owner, attempt ID), including expired, cancelled and unknown nonclosed rows and excluding confirmed closed rows. It contains no bearer capability, fence or snapshot issuance inputs. Inventory capacity failure returns no partial result.
 
 ExecutionResources groups the application-owned repository, store, coordinator and execution ASGI boundary. It is process-local and carries no persisted acceptance state. DatabaseLease locks the existing private Linux database inode for the resource lifetime; no new database or lock row is created. Startup never migrates implicitly.
+
+WorkspaceRevision captures workspace ID, immutable revision ID and Artifact metadata from the current head under owner scope. An uninitialized workspace returns None. RevisionView pairs that capture with a private temporary extraction path; it is not persisted, writable project state or an acceptance record. Optional expected revision prevents checking a different current version. Captured immutable metadata does not move when the head advances.
