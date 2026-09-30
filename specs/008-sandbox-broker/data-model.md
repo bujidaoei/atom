@@ -1,0 +1,5 @@
+# Entities and states
+Grant v1: jti, organization/project/run/attempt IDs, positive fencing integer, base_revision SHA-256, profile files-v1, issued-at/not-before/expires integer timestamps, fixed issuer/audience/subject/type. Validity requires issued-at ≤ now < expiry, nbf=iat, bounded original lifetime. Immutable claims; no host path, secret, image, resource flag or arbitrary capabilities.
+
+Registry (planned): versioned schema; grant ID unique; canonical claim digest; organization/project/run/attempt/fence; base revision; deadline; owned container name; state; latest checkpoint; termination outcome; revoked flag; operation receipt IDs. Token/key material never persisted.
+States: intent→provisioning→ready→quiescing→checkpointed→terminating→terminated. Failures transition to failed/termination_unknown; reconciliation required before renewed dispatch. Cancel/revoke forbids new operations immediately. Registry receipt is not control-plane authority; registration must use current execution fence.

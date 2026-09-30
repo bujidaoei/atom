@@ -1,0 +1,41 @@
+# Feature Specification: Isolated sandbox broker
+Branch `codex/008-sandbox-broker`; created 2026-09-30; status **in progress, not accepted**.
+Input: parent 003 isolation/execution contracts; actual container quota, snapshot and runtime lifecycle evidence.
+
+## User Scenarios & Testing
+### US1 — Authorize only the intended work (P1)
+Operator issues a finite permission for one organization/project/run/attempt and input revision. Runtime cannot alter it to access another workspace or choose host resources.
+Independent acceptance: valid authorized file operations succeed; forged/expired/wrong-purpose/wrong-scope/revoked permissions produce no container or file mutation.
+
+### US2 — Bound and recover execution (P1)
+Operator can cancel work or restart the service without leaving indefinite execution or accepting stale results.
+Independent acceptance: real timeout/cancel/restart/daemon failure tests preserve durable ownership and confirm termination before replacement. Unknown termination fails readiness and dispatch.
+
+### US3 — Preserve verified work through existing tools (P1)
+Project owner uses current write/read/edit/glob/grep and recovery, with verified snapshots preserving results across isolated attempts.
+Independent acceptance: actual Pi and file tools through broker/containers; byte-exact input/output snapshots; failed or stale promotion preserves prior revision; cancellation reports uncheckpointed data loss accurately.
+
+### Edge Cases
+Duplicate creates, same identity/different grant, lost create response, worker or broker crash, expiry during operation, stale fencing token, output flooding, symlink/path attacks, quota/OOM, interrupted checkpoint, previously acquired sandbox not released, daemon unavailable, partial adoption/migration.
+
+## Requirements
+- FR-001: Signed permissions MUST bind organization, project, run, attempt, input revision, fencing token, supported profile and finite lifetime. Verification MUST reject malformed/forged/expired/future/wrong-purpose scopes without side effects.
+- FR-002: Service authentication and permission-signing keys MUST be separate from runtime/session/model credentials. No platform secret, Docker authority, host path, image or resource flags may be supplied by the workload.
+- FR-003: Ownership intent MUST be durably recorded before creation; duplicate equivalent requests return same attempt, conflicts fail. Revocation/current fence/state MUST be checked on every operation.
+- FR-004: Actual OS/resource/egress limits MUST apply. Each attempt has a finite independent lifetime and bounded operation input/output/deadlines.
+- FR-005: Cancellation/restart MUST reconcile owned containers, persist confirmed or unknown termination, prohibit further mutation and reject dispatch while unsafe.
+- FR-006: Normal completion MUST quiesce writers while alive, verify export, fence revision registration, then destroy. Failure preserves previous committed revision; no implicit publication in destroy.
+- FR-007: Own runtime and existing file tools MUST use the broker; production MUST fail closed without it. Explicit development local mode remains visibly non-isolated.
+- FR-008: Real integration, fault injection and deployment migration evidence MUST precede acceptance. No component test may close whole feature.
+
+## Key Entities
+Grant, broker attempt registry, operation receipt, immutable snapshot, registered revision, terminal outcome with termination status.
+
+## Success Criteria
+- SC-001: All negative authorization cases cause zero container/file effects.
+- SC-002: Real duplicate delivery and restart tests retain one owned attempt; stale operations cannot register output.
+- SC-003: Existing real Pi/file-tool scenarios pass through actual containers with exact snapshots.
+- SC-004: Cancellation/timeout and orphan reconciliation are measured against configured deadlines; unknown outcomes are visible and prevent unsafe replacement.
+
+## Assumptions
+Initial deployment is a single trusted private-team Docker host, not a hostile public multi-tenant isolation claim or HA milestone. Broker-local registry is separate from future PostgreSQL control-plane execution ownership. Paid models and full enterprise release remain parent gates. First profile only permits controlled file helpers; arbitrary user shell/background processes and dependency-network access are excluded until separately designed.

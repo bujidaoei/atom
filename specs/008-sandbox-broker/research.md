@@ -1,0 +1,6 @@
+# Decisions and basis
+Use existing own runtime port, not a replacement agent loop. Source inspection shows its exec currently accepts arbitrary command text even though server exposes only file tools: migrate to structured file operations before claiming least privilege. Current tmpfs experiment proves export must precede stop; runtime ownership fix guarantees release attempt, not termination.
+
+Use fixed HS256 and dedicated key for first trusted-host broker. PyJWT official API requires allowed algorithms configured independently of attacker headers: https://pyjwt.readthedocs.io/en/stable/api.html (consulted 2026-09-30). Strict schema/time checks add bounds beyond generic JWT validation. No signature algorithm negotiation. Shared-key broker is privileged/trusted; runtime holds only scoped bearer tokens. EdDSA/public verification would separate signing authority but adds key distribution/dependency operations; not necessary to claim an untrusted broker boundary because none is proposed.
+
+Host-local durable registry is for owning this host's containers; it must not replace parent PostgreSQL execution/fencing design. A single broker plus durable restart is recovery, not HA. No final server capacity claim until actual designated host is inspected.

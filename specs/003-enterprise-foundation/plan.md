@@ -25,6 +25,8 @@ The same bounded process applies to `005-configuration-guards`, which closes dem
 
 `007-sandbox-lifecycle` closes source-identified post-acquisition cleanup gaps before real containers are introduced. Require reproduction through actual ProductAgentRuntime, exit-path tests and real Pi regression. This is adapter ownership only, not verified container termination or broker acceptance.
 
+`008-sandbox-broker` now decomposes T027 into grant, registry, fixed-profile driver, typed file operations, HTTP adapter, explicit checkpoint registration and migration gates. It remains in progress throughout component implementation; no signed-token unit test or local Docker probe closes real integrated isolation.
+
 ## Project Structure
 - `backend/app`: control plane and current authorization, provider and orchestration paths.
 - `runtime/src`: own runtime adapters; place isolation boundaries here or a dedicated worker adapter without changing `runtime/pi`.
