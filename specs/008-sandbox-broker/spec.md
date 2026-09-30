@@ -28,6 +28,8 @@ Duplicate creates, same identity/different grant, lost create response, worker o
 - FR-007: Own runtime and existing file tools MUST use the broker; production MUST fail closed without it. Explicit development local mode remains visibly non-isolated.
 - FR-008: Real integration, fault injection and deployment migration evidence MUST precede acceptance. No component test may close whole feature.
 
+FR-007 runtime acknowledgement: Node MUST correlate confirmed completion to the trusted API-attempt/workspace/broker-attempt/grant/deadline and a valid registered receipt. HTTP 200 with cancelled/failed/timed-out outcome or missing receipt is not successful completion.
+
 FR-007 completion HTTP: complete/cancel requests MUST derive their target solely from verified execution-purpose claims and compare every immutable persisted binding plus current ownership before effects. Only confirmed closed results may return success; transport or storage failures must not be presented as accepted output.
 
 FR-007 completion authority: runtime completion MUST use an independently scoped execution capability; sandbox grants and administrative credentials must not authorize that boundary. Purpose, exact persisted scope, owner, fence and deadline must be checked before action. Issuance alone is not completion acceptance.

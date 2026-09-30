@@ -21,6 +21,8 @@ class ExecutionLease:
     workspace_id: str
     attempt_id: str
     deadline: int
+    execution_id: str
+    grant_id: str
     grant: str = field(repr=False)
     completion_grant: str = field(repr=False)
 
@@ -110,7 +112,7 @@ class ExecutionCoordinator:
                 if current != bound:
                     raise ExecutionError('execution_changed')
                 return ExecutionLease(current.run_id, current.workspace_id, observed.attempt_id,
-                                      current.deadline, token, self._completion_codec.issue(grant))
+                                      current.deadline, current.id, current.grant_id, token, self._completion_codec.issue(grant))
             except asyncio.CancelledError:
                 await self._stop(owner, attempt_id, 'cancelled')
                 raise

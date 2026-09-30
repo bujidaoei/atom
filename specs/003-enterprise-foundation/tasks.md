@@ -90,3 +90,5 @@ T027 continuation: child 008 now persists terminal decisions before release and 
 T027 continuation: child 008 ready leases now contain distinct sandbox and execution-completion capabilities, explicitly issued with purpose separation and tested against the real broker. Runtime/API completion boundary and production adoption remain open.
 
 T027 continuation: child 008 now exposes a tested execution-only completion/cancellation HTTP component with independent capability verification and durable binding checks. Real Linux store/ledger/two-service HTTP flows pass. Main API/Node integration and release acceptance remain open.
+
+T027 continuation: child 008 now has verified Node completion transport and actual Node-to-Linux API/store/database/broker evidence. Node server/lifecycle adoption, workspace identity, production mounting and enterprise release remain open.

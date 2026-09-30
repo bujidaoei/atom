@@ -15,6 +15,8 @@ import importlib.util
 import io
 import zipfile
 import uuid
+import subprocess
+import queue
 from dataclasses import replace
 
 import pytest
@@ -378,7 +380,7 @@ def coordinator_source_bundle():
     return base64.b64encode(result.getvalue()).decode()
 
 
-@pytest.mark.parametrize('failure', ['none','missing','cancel','registered','acknowledged','storage','decision','released','http_cancel'])
+@pytest.mark.parametrize('failure', ['none','missing','cancel','registered','acknowledged','storage','decision','released','http_cancel','node'])
 def test_prepare_coordinator_with_real_linux_store_and_http(tmp_path, failure):
     path = tmp_path / 'api.db'
     create_api_database(path)
@@ -491,6 +493,29 @@ async def main():
                     intent.grant_id,intent.base_revision,intent.issued_at,intent.deadline)
             assert lease.run_id=='run' and lease.workspace_id==workspace and lease.deadline==intent.deadline
             assert repo.execution('owner','attempt').broker_attempt_id==lease.attempt_id
+            if inputs['failure']=='node':
+                import uvicorn
+                from dataclasses import asdict
+                server=uvicorn.Server(uvicorn.Config(ExecutionAPI(coordinator,store,CompletionGrantCodec(b'c'*32)),
+                    host='0.0.0.0',port=8767,lifespan='off',log_level='error',access_log=False))
+                serving=asyncio.create_task(server.serve())
+                try:
+                    until=time.monotonic()+3
+                    while not server.started and not serving.done() and time.monotonic()<until: await asyncio.sleep(0.01)
+                    assert server.started
+                    print(json.dumps({'ready':asdict(lease)}),flush=True)
+                    until=time.monotonic()+20
+                    while repo.recovery('owner','attempt').state!='closed' and time.monotonic()<until:
+                        await asyncio.sleep(0.05)
+                    state=repo.recovery('owner','attempt')
+                    assert state.state=='closed' and state.outcome=='succeeded' and state.receipt is not None
+                    assert b'actual coordinator output' in store.read(state.receipt.artifact_key)
+                finally:
+                    server.should_exit=True
+                    await asyncio.wait_for(serving,5)
+                proxy.close();await proxy.wait_closed()
+                print(json.dumps({'state':state.state,'outcome':state.outcome}))
+                return
             if inputs['failure']=='none':
                 from dataclasses import replace
                 before=repo.recovery('owner','attempt')
@@ -586,12 +611,39 @@ asyncio.run(main())
         data={'bundle':coordinator_source_bundle(),'schema':schema,'failure':failure,
               'port':int(client._origin.rsplit(':',1)[1]),'admin':config.admin_token,'key':config.grant_key}
         try:
-            status,out,err=run_bounded(['docker','run','--rm','--name',name,'--label',f'atom.coordinator-test={name}',
+            command=['docker','run','--rm','--name',name,'--label',f'atom.coordinator-test={name}',
                 '--network=bridge','--read-only','--cap-drop=ALL','--security-opt=no-new-privileges',
                 '--user','1000:1000','--memory=256m','--pids-limit=64',
                 '--tmpfs','/tmp:rw,nosuid,nodev,size=64m,mode=1777',
                 '--tmpfs','/workspace:rw,nosuid,nodev,size=64m,mode=1777',
-                '-i',IMAGE,'python3','-I','-c',script],input_data=json.dumps(data).encode(),timeout=30)
+                *(['--publish','127.0.0.1::8767'] if failure=='node' else []),
+                '-i',IMAGE,'python3','-I','-c',script]
+            if failure=='node':
+                process=subprocess.Popen(command,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+                try:
+                    process.stdin.write(json.dumps(data).encode());process.stdin.close();process.stdin=None
+                    ready_queue=queue.Queue()
+                    reader=threading.Thread(target=lambda:ready_queue.put(process.stdout.readline()),daemon=True)
+                    reader.start()
+                    message=json.loads(ready_queue.get(timeout=15));reader.join(timeout=1)
+                    lease=message['ready']
+                    code,port,_=run_bounded(['docker','port',name,'8767/tcp'])
+                    assert code==0 and port.decode().strip().startswith('127.0.0.1:')
+                    runtime=Path(__file__).resolve().parents[3] / 'runtime'
+                    node_input={'brokerOrigin':client._origin,'executionOrigin':'http://'+port.decode().strip(),
+                        'lease':{'runId':lease['run_id'],'workspaceId':lease['workspace_id'],
+                        'attemptId':lease['attempt_id'],'executionId':lease['execution_id'],'grantId':lease['grant_id'],
+                        'grant':lease['grant'],'completionGrant':lease['completion_grant'],'deadline':lease['deadline']}}
+                    code,node_out,node_err=run_bounded(['node','--import',(runtime/'node_modules/tsx/dist/loader.mjs').as_uri(),
+                        str(runtime/'scripts/test-execution-integration.ts')],input_data=json.dumps(node_input).encode(),timeout=20)
+                    assert code==0,node_err.decode()
+                    assert len(json.loads(node_out)['revision'])==32
+                    out,err=process.communicate(timeout=10);status=process.returncode
+                finally:
+                    if process.poll() is None: process.kill()
+                    process.communicate(timeout=5)
+            else:
+                status,out,err=run_bounded(command,input_data=json.dumps(data).encode(),timeout=30)
             assert status==0,err.decode()
             assert json.loads(out)['state']=='closed'
             worker=lifecycle.registry.find_grant('target')
