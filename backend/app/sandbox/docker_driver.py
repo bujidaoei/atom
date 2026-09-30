@@ -121,6 +121,12 @@ class ContainerState:
     exit_code: int
 
 
+@dataclass(frozen=True)
+class OwnedContainer:
+    id: str
+    attempt_id: str
+
+
 class DockerDriver:
     def __init__(self, broker_id: str, image: str, *, profile: FileProfile = FileProfile(), executable: str = "docker"):
         if not isinstance(broker_id, str) or not _ID.fullmatch(broker_id):
@@ -136,6 +142,21 @@ class DockerDriver:
         if status != 0:
             raise DriverError("docker_command_failed")
         return stdout
+
+    def owned_inventory(self) -> list[OwnedContainer]:
+        output = self._run("container", "ls", "--all", "--no-trunc", "--filter",
+                           f"label=atom.broker={self.broker_id}", "--format", "{{json .}}")
+        try:
+            inventory = []
+            for line in output.decode("utf-8").splitlines():
+                row = json.loads(line)
+                match = re.fullmatch(r"atom-sbox-" + self.broker_id[:12] + r"-([0-9a-f]{32})", row["Names"])
+                if not match or not _CONTAINER.fullmatch(row["ID"]):
+                    raise DriverError("ownership_mismatch")
+                inventory.append(OwnedContainer(row["ID"], match[1]))
+            return inventory
+        except (ValueError, TypeError, KeyError):
+            raise DriverError("invalid_docker_response") from None
 
     def _name(self, attempt: Attempt) -> str:
         expected = f"atom-sbox-{self.broker_id[:12]}-{attempt.id}"

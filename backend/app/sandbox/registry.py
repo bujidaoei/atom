@@ -248,3 +248,18 @@ class Registry:
         with self._connection() as db:
             return [Attempt(**dict(row)) for row in db.execute(
                 "SELECT * FROM attempts WHERE state!='terminated' AND id>? ORDER BY id LIMIT ?", (after_id, limit))]
+
+    def find(self, attempt_id: str) -> Attempt | None:
+        """Trusted administrative lookup; does not authorize a workload operation."""
+        with self._connection() as db:
+            row = db.execute("SELECT * FROM attempts WHERE id=?", (attempt_id,)).fetchone()
+            return Attempt(**dict(row)) if row else None
+
+    def find_grant(self, grant_id: str) -> Attempt | None:
+        with self._connection() as db:
+            row = db.execute("SELECT * FROM attempts WHERE grant_id=?", (grant_id,)).fetchone()
+            return Attempt(**dict(row)) if row else None
+
+    def has_pending_termination(self) -> bool:
+        with self._connection() as db:
+            return db.execute("SELECT 1 FROM attempts WHERE state IN ('terminating','termination_unknown') LIMIT 1").fetchone() is not None
