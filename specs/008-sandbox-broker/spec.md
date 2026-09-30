@@ -95,3 +95,5 @@ FR-007 application startup: production requires broker mode and explicit separat
 FR-006 committed read identity: validation and preview must identify the registered immutable revision whose bytes they read. Owner-scoped reads must not silently fall back to the old mutable workspace. An explicitly expected revision mismatch is a conflict; temporary read extraction must be cleaned on normal and exceptional exit.
 
 FR-006 preview/file adoption: broker-mode preview and source-file routes must read committed artifacts and identify the revision in response headers. Missing service/version or corrupt artifacts must not fall back to mutable files. Draft previews, including heats, require ownership even when the project has a published slug.
+
+FR-006 catalogue consistency: broker-mode project detail and race responses must derive file lists/counts/bytes and preview availability from verified committed manifests, expose revision identity and never list uncommitted host files. An uninitialized scope reports revisionId=null and an empty list. File timestamps must identify their actual source rather than inventing filesystem modification times.

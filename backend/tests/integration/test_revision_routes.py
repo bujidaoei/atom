@@ -54,7 +54,7 @@ with session_scope() as s:
                Project(id='empty',user_id='owner',title='Empty',prompt='fixture'),
                Project(id='q',user_id='owner',title='Q',prompt='fixture')]);s.flush()
     s.add_all([Race(id='race',project_id='p'),Race(id='foreign-race',project_id='q')]);s.flush()
-    s.add_all([RaceHeat(id='heat',race_id='race',model='fixture'),
+    s.add_all([RaceHeat(id='heat',race_id='race',model='fixture',file_count=999,bytes=999),
                RaceHeat(id='foreign',race_id='foreign-race',model='fixture')])
 settings=get_settings()
 migrate(settings.db_path,Path('/tmp/data/backup.db'))
@@ -68,6 +68,7 @@ main=import_workspace(repo,store,owner='owner',project_id='p',source=legacy)
 branch=Path('/tmp/branch');branch.mkdir();(branch/'index.html').write_text('<h1>branch</h1>')
 heat=import_workspace(repo,store,owner='owner',project_id='p',heat_id='heat',source=branch)
 (legacy/'index.html').write_text('<h1>uncommitted stale legacy</h1>')
+(legacy/'legacy-only.txt').write_text('not committed')
 settings.sandbox_mode='broker'
 # Actual routes/dependencies/auth/database/storage; lifespan is separately tested.
 app.state.execution=SimpleNamespace(repository=repo,store=store)
@@ -77,6 +78,25 @@ async def main_test():
             headers={} if cookie is None else {'Cookie':'atom_session='+cookie}
             assert (await client.get('/preview/p/',headers=headers)).status_code==404
         headers={'Cookie':'atom_session='+issue_session('owner')}
+        detail=await client.get('/api/projects/p',headers=headers)
+        assert detail.status_code==200,detail.text
+        project=detail.json()['project']
+        assert project['revisionId']==main.revision_id
+        assert [item['path'] for item in project['files']]==['index.html','style.css']
+        assert all(item['timestampSource']=='revision' and len(item['sha256'])==64 for item in project['files'])
+        assert project['files'][0]['bytes']==len('<h1>committed</h1>')
+        assert (await client.get('/api/projects/p',headers=headers)).json()['project']['files']==project['files']
+        assert not list(Path('/tmp').glob('atom-revision-*'))
+        race=(await client.get('/api/projects/p/race',headers=headers)).json()['race']
+        assert race==project['race']
+        assert race['heats'][0]['fileCount']==1 and race['heats'][0]['bytes']==len('<h1>branch</h1>')
+        assert race['heats'][0]['revisionId']==heat.revision_id
+        assert race['heats'][0]['previewUrl']=='/preview/p/race/heat/'
+        empty=(await client.get('/api/projects/empty',headers=headers)).json()['project']
+        assert empty['revisionId'] is None and empty['files']==[]
+        created=await client.post('/api/projects',headers=headers,json={'prompt':'Create a real dashboard'})
+        assert created.status_code==201,created.text
+        assert created.json()['project']['revisionId'] is None and created.json()['project']['files']==[]
         for url,content,revision in [('/preview/p/','<h1>committed</h1>',main.revision_id),
                                     ('/preview/p/spa/path','<h1>committed</h1>',main.revision_id),
                                     ('/api/projects/p/files/index.html','<h1>committed</h1>',main.revision_id),
@@ -101,6 +121,7 @@ async def main_test():
         target=store_root/(main.artifact.key+'.atomsnap');target.write_bytes(b'corrupt')
         failed=await client.get('/preview/p/',headers=headers)
         assert failed.status_code==503 and 'corrupt' not in failed.text
+        assert (await client.get('/api/projects/p',headers=headers)).status_code==503
         assert not list(Path('/tmp').glob('atom-revision-*'))
         app.state.execution=None
         assert (await client.get('/preview/p/',headers=headers)).status_code==503

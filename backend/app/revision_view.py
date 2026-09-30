@@ -25,10 +25,15 @@ def materialized_revision(repository: RevisionRepository, store: ArtifactStore, 
         raise RevisionError('revision_not_initialized')
     if expected_revision_id is not None and revision.revision_id != expected_revision_id:
         raise RevisionError('revision_conflict')
-    payload = store.read(revision.artifact.key)
-    if (len(payload) != revision.artifact.size
-            or verify_snapshot(io.BytesIO(payload)).revision != revision.artifact.revision):
-        raise RevisionError('revision_artifact_mismatch')
+    payload, _ = verified_revision_payload(store, revision)
     with TemporaryDirectory(prefix='atom-revision-') as temporary:
         received = receive_snapshot(io.BytesIO(payload), Path(temporary))
         yield RevisionView(revision, received.path)
+
+
+def verified_revision_payload(store: ArtifactStore, revision: WorkspaceRevision):
+    payload = store.read(revision.artifact.key)
+    verified = verify_snapshot(io.BytesIO(payload))
+    if len(payload) != revision.artifact.size or verified.revision != revision.artifact.revision:
+        raise RevisionError('revision_artifact_mismatch')
+    return payload, verified

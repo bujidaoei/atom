@@ -37,7 +37,10 @@ def project_summary(project: Project) -> dict[str, Any]:
     }
 
 
-def project_detail(session: Session, project: Project) -> dict[str, Any]:
+def project_detail(session: Session, project: Project, *, catalog=None) -> dict[str, Any]:
+    if get_settings().sandbox_mode == "broker" and catalog is None:
+        raise RuntimeError("committed_catalog_required")
+    listing = catalog() if catalog else None
     detail = project_summary(project)
     latest = session.scalar(
         select(Run)
@@ -83,9 +86,10 @@ def project_detail(session: Session, project: Project) -> dict[str, Any]:
                 }
                 for requirement in project.requirements
             ],
-            "files": storage.list_files(storage.workspace_dir(project.id)),
+            "files": listing["files"] if listing is not None else storage.list_files(storage.workspace_dir(project.id)),
+            "revisionId": listing["revisionId"] if listing is not None else None,
             "acceptance": acceptance_json(session, project.id),
-            "race": race_json(session, project.id),
+            "race": race_json(session, project.id, catalog=catalog),
         }
     )
     return detail
@@ -117,7 +121,9 @@ def acceptance_json(session: Session, project_id: str) -> dict[str, Any] | None:
     }
 
 
-def race_json(session: Session, project_id: str) -> dict[str, Any] | None:
+def race_json(session: Session, project_id: str, *, catalog=None) -> dict[str, Any] | None:
+    if get_settings().sandbox_mode == "broker" and catalog is None:
+        raise RuntimeError("committed_catalog_required")
     race = session.scalars(
         select(Race)
         .where(Race.project_id == project_id)
@@ -126,6 +132,13 @@ def race_json(session: Session, project_id: str) -> dict[str, Any] | None:
     ).first()
     if race is None:
         return None
+    listings = {heat.id: catalog(heat.id) for heat in race.heats} if catalog else {}
+    previewable = {
+        heat.id: any(item["path"] == "index.html" for item in listings[heat.id]["files"])
+        if catalog else heat.status in {"done", "running"}
+        or (storage.workspace_dir(project_id, heat.id) / "index.html").is_file()
+        for heat in race.heats
+    }
     return {
         "id": race.id,
         "status": race.status,
@@ -144,19 +157,13 @@ def race_json(session: Session, project_id: str) -> dict[str, Any] | None:
                 )
                 if heat.run_id
                 else None,
-                "previewUrl": (
-                    f"/preview/{project_id}/race/{heat.id}/"
-                    if heat.status in {"done", "running"}
-                    or (
-                        storage.workspace_dir(project_id, heat.id) / "index.html"
-                    ).is_file()
-                    else None
-                ),
+                "revisionId": listings[heat.id]["revisionId"] if catalog else None,
+                "previewUrl": f"/preview/{project_id}/race/{heat.id}/" if previewable[heat.id] else None,
                 "elapsedMs": heat.elapsed_ms,
                 "inputTokens": heat.input_tokens,
                 "outputTokens": heat.output_tokens,
-                "fileCount": heat.file_count,
-                "bytes": heat.bytes,
+                "fileCount": len(listings[heat.id]["files"]) if catalog else heat.file_count,
+                "bytes": sum(item["bytes"] for item in listings[heat.id]["files"]) if catalog else heat.bytes,
                 "error": heat.error,
             }
             for heat in race.heats

@@ -58,6 +58,7 @@ class WorkspaceRevision:
     workspace_id: str
     revision_id: str
     artifact: Artifact
+    created_at: int
 
 
 @dataclass(frozen=True)
@@ -196,14 +197,14 @@ class RevisionRepository:
             workspace = self._workspace(db, owner, workspace_id)
             if workspace['current_revision_id'] is None:
                 return None
-            row = db.execute('''SELECT r.id,r.artifact_key,r.snapshot_revision,a.size
+            row = db.execute('''SELECT r.id,r.artifact_key,r.snapshot_revision,r.created_at,a.size
                 FROM revision_records r JOIN revision_artifacts a ON a.key=r.artifact_key
                 WHERE r.id=? AND r.workspace_id=?''',
                              (workspace['current_revision_id'], workspace_id)).fetchone()
             if row is None:
                 raise RevisionError('revision_conflict')
             return WorkspaceRevision(workspace_id, row['id'],
-                                     Artifact(row['artifact_key'], row['snapshot_revision'], row['size']))
+                                     Artifact(row['artifact_key'], row['snapshot_revision'], row['size']), row['created_at'])
 
     def pending_executions(self, *, limit: int = 100) -> tuple[PendingExecution, ...]:
         """Trusted startup inventory, never a tenant-facing query or dispatch grant."""

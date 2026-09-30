@@ -112,3 +112,5 @@ T027 continuation: child 008 main API now owns broker configuration/resources, L
 T027 continuation: child 008 adds committed revision read views so validation/preview integration can stop using stale legacy files. Real owner-scope and Linux extraction/cleanup evidence passes; automatic scheduling and actual preview adoption remain open.
 
 T027 continuation: child 008 broker preview and file-read endpoints now serve actual committed artifacts with revision identity and owner checks; real Linux FastAPI route evidence passes. Scheduling, file-list/publication/race adoption, browser isolation/pinning and enterprise acceptance remain open.
+
+T027 continuation: child 008 project/race API catalogues now use verified committed manifests and version identity instead of stale host files or persisted heat counts. Orchestrator event statistics, adoption/publication, lease dispatch and enterprise acceptance remain open.

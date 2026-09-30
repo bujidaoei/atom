@@ -14,7 +14,7 @@ from ..config import get_settings
 from ..deps import CurrentUser, DbSession, OwnedProject
 from ..errors import AtomError
 from ..events import bus
-from ..revision_http import project_revision_view
+from ..revision_http import project_revision_view, project_catalog
 from ..models import AcceptanceRun, Message, Project, Race, RaceHeat, Requirement
 from ..serialize import acceptance_json, project_detail, project_summary, race_json
 from ..services.orchestrator import orchestrator
@@ -88,7 +88,7 @@ def list_projects(user: CurrentUser, session: DbSession) -> dict[str, object]:
 
 @router.post("", status_code=status.HTTP_201_CREATED)
 def create_project(
-    body: CreateProject, user: CurrentUser, session: DbSession
+    body: CreateProject, user: CurrentUser, session: DbSession, request: Request
 ) -> dict[str, object]:
     prompt = body.prompt.strip()
     project = Project(user_id=user.id, prompt=prompt, title=fallback_title(prompt))
@@ -97,12 +97,12 @@ def create_project(
     session.add(Message(project_id=project.id, role="user", content=prompt))
     session.commit()
     storage.ensure_project_dirs(project.id)
-    return {"project": project_detail(session, project)}
+    return {"project": project_detail(session, project, catalog=project_catalog(request, project) if get_settings().sandbox_mode == "broker" else None)}
 
 
 @router.get("/{project_id}")
-def read_project(project: OwnedProject, session: DbSession) -> dict[str, object]:
-    return {"project": project_detail(session, project)}
+def read_project(project: OwnedProject, session: DbSession, request: Request) -> dict[str, object]:
+    return {"project": project_detail(session, project, catalog=project_catalog(request, project) if get_settings().sandbox_mode == "broker" else None)}
 
 
 @router.delete("/{project_id}")
@@ -347,7 +347,10 @@ async def start_race(
         raise HTTPException(error.status_code, error.detail) from error
 
     session.expire_all()
-    race = race_json(session, project.id)
+    race = await asyncio.to_thread(
+        race_json, session, project.id,
+        catalog=project_catalog(request, project) if get_settings().sandbox_mode == "broker" else None,
+    )
     return command.save({"raceId": race_id, "heats": race["heats"] if race else []})
 
 
@@ -400,9 +403,9 @@ async def retry_heat(
 
 
 @router.get("/{project_id}/race")
-def read_race(project: OwnedProject, session: DbSession) -> dict[str, object]:
+def read_race(project: OwnedProject, session: DbSession, request: Request) -> dict[str, object]:
     session.expire_all()
-    return {"race": race_json(session, project.id)}
+    return {"race": race_json(session, project.id, catalog=project_catalog(request, project) if get_settings().sandbox_mode == "broker" else None)}
 
 
 @router.post("/{project_id}/race/{heat_id}/adopt")
