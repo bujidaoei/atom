@@ -147,6 +147,14 @@ verification.record_report(owner='owner',request_id=request.id,results=[{'key':'
 releases=ReleaseRepository(settings.db_path)
 releases.publish(owner='owner',project_id='p',release_id='published-release',verification_id=request.id,
     expected_revision=main.revision_id,expected_generation=0,policy_digest='c'*64,runner_version='fixture-runner',audience='public',slug='site')
+from concurrent.futures import ThreadPoolExecutor
+def competing_view():
+    try:
+        with materialized_release(releases,store,slug='site'):raise AssertionError('capacity bypass')
+    except VerificationError as error:return str(error)
+with materialized_release(releases,store,slug='site'):
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        assert pool.submit(competing_view).result(timeout=5)=='release_capacity'
 for exceptional in (False,True):
     try:
         with materialized_release(releases,store,slug='site') as view:
@@ -173,6 +181,23 @@ try:
     with materialized_release(releases,store,slug='site'):raise AssertionError('revoked artifact admitted')
 except VerificationError as error:assert str(error)=='release_not_found'
 assert not list(Path('/tmp').glob('atom-release-*'))
+store.read=read
+releases.publish(owner='owner',project_id='p',release_id='replacement',verification_id=request.id,
+    expected_revision=main.revision_id,expected_generation=2,policy_digest='c'*64,runner_version='fixture-runner',audience='public',slug='site')
+import app.release_view as release_view
+receive=release_view.receive_snapshot
+def revoke_during_extraction(stream,path):
+    received=receive(stream,path)
+    assert (received.path/'index.html').is_file()
+    releases.unpublish(owner='owner',project_id='p',command_id='off-after-extraction',expected_release='replacement',expected_generation=3)
+    return received
+release_view.receive_snapshot=revoke_during_extraction
+try:
+    with materialized_release(releases,store,slug='site'):raise AssertionError('extracted revoked artifact admitted')
+except VerificationError as error:assert str(error)=='release_not_found'
+assert not list(Path('/tmp').glob('atom-release-*'))
+assert release_view._READS.acquire(blocking=False)
+release_view._READS.release()
 print(json.dumps({'routes':'verified','legacy':(legacy/'index.html').read_text()}))
 '''
     name='atom-revision-routes-'+uuid.uuid4().hex

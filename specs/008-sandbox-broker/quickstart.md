@@ -101,3 +101,5 @@ Release repository tests include publish/unpublish generation competition, old u
 Release repository tests now cover private/public current and historical lookup, owner/anonymous/foreign access, privacy changes, unpublish, and invalid/missing references. Artifact descriptors are schema fixtures; file bytes, HTTP caching and browser origins are not exercised.
 
 Pinned API image integration test_revision_routes.py now additionally imports actual files, upgrades its disposable DB to v2, registers a fixture report/release and verifies Linux release views, stale legacy exclusion, normal/exception cleanup, corrupt artifact rejection and unpublish during storage read. Fixture report is not browser execution evidence.
+
+Linux release-view integration now holds a real view while a second thread waits and is rejected by the three-second capacity bound. It also performs actual extraction then invokes real unpublish before yielding, asserting denial, cleanup and semaphore release.

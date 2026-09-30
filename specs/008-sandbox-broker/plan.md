@@ -116,3 +116,5 @@ T016 unpublish metadata uses the existing writer transaction and project-scoped 
 T017 prerequisite: ReleaseRepository.resolve selects immutable artifact metadata within the existing bounded transaction, checking current live/audience and selected same-project release audience. It does not read legacy directories or enable HTTP serving. Artifact verification, pinned URLs, cache semantics and origin isolation remain open.
 
 T017 artifact prerequisite implemented in release_view.py: resolve authorization, verify ArtifactStore bytes and snapshot descriptor, reauthorize captured release after IO, materialize privately and clean via context lifetime. HTTP serving, bounded admission and origin isolation remain to be integrated.
+
+T017 read admission now wraps resolve/read/verify/extract/view lifetime with a process-local bounded semaphore. Recheck authorization after storage IO and after extraction. This does not provide distributed resource admission, response-stream cancellation or cache revocation.

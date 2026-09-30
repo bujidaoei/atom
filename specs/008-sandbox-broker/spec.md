@@ -127,3 +127,5 @@ Unpublish must compare expected release and generation, atomically disable visib
 Pinned published artifact lookup requires an active current publication and authorization under both the current release audience and the selected historical release audience. Unpublish denies even owner-facing publication paths; draft preview remains a separate route.
 
 Published materialization must verify actual immutable storage bytes against recorded semantic digest and size, never fall back to legacy directories, and clean private temporary output on normal/error exit. Recheck current visibility after storage IO before yielding a captured version.
+
+Published view materialization must bound concurrent in-memory snapshot reads and extraction. Current single-process profile permits one active view with a three-second admission wait; capacity is released after normal/error exits. Reauthorize the pinned release after extraction before returning it.
