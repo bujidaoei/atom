@@ -8,6 +8,7 @@ import time
 
 from .verification_contract import capture_contract, ContractError
 from .verification_repository import VerificationRepository, VerificationError
+from .artifacts import Artifact
 
 
 @dataclass(frozen=True)
@@ -25,9 +26,42 @@ class UnpublishReceipt:
     generation: int
 
 
+@dataclass(frozen=True)
+class PublishedArtifact:
+    project_id: str
+    release_id: str
+    revision_id: str
+    artifact: Artifact
+
+
 class ReleaseRepository:
     def __init__(self, path, *, lock_timeout=3):
         self._ledger = VerificationRepository(path, lock_timeout=lock_timeout)
+
+    def resolve(self, *, slug: str, viewer: str | None = None, release_id: str | None = None) -> PublishedArtifact:
+        """Resolve authorized immutable metadata, never a mutable workspace.
+
+        A pinned old release remains subject to current publication visibility
+        and its own audience. Consumers must verify stored artifact bytes.
+        """
+        if (not isinstance(slug,str) or len(slug)>63 or re.fullmatch(r'[a-z0-9]+(?:-[a-z0-9]+)*',slug) is None
+            or any(value is not None and (not isinstance(value,str) or re.fullmatch(r'[A-Za-z0-9_.-]{1,100}',value) is None)
+                   for value in (viewer,release_id))):
+            raise VerificationError('release_not_found')
+        with self._ledger._transaction() as db:
+            current = db.execute('''SELECT p.project_id,p.release_id,p.live,r.audience,o.user_id
+                FROM release_publications p JOIN release_records r ON r.id=p.release_id AND r.project_id=p.project_id
+                JOIN projects o ON o.id=p.project_id WHERE p.slug=?''',(slug,)).fetchone()
+            if current is None or not current['live'] or (current['audience']!='public' and viewer!=current['user_id']):
+                raise VerificationError('release_not_found')
+            row = db.execute('''SELECT r.id,r.revision_id,r.audience,a.key,a.revision,a.size
+                FROM release_records r JOIN revision_records v ON v.id=r.revision_id AND v.workspace_id=r.workspace_id
+                JOIN revision_artifacts a ON a.key=v.artifact_key AND a.revision=v.snapshot_revision
+                WHERE r.id=? AND r.project_id=?''',(release_id or current['release_id'],current['project_id'])).fetchone()
+            if row is None or (row['audience']!='public' and viewer!=current['user_id']):
+                raise VerificationError('release_not_found')
+            return PublishedArtifact(current['project_id'],row['id'],row['revision_id'],
+                                     Artifact(row['key'],row['revision'],row['size']))
 
     def publish(self, *, owner, project_id, release_id, verification_id, expected_revision,
                 expected_generation, policy_digest, runner_version, audience, slug) -> ReleaseReceipt:

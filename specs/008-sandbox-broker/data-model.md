@@ -84,3 +84,5 @@ Interrupted verification_results use atom-verification-interruption-v1 JSON with
 ReleaseReceipt identifies release/revision, committed publication generation and slug. Entire trusted request is hashed and persisted under project-scoped command_receipts key release:<id> (IDs bounded to keep key within 128 characters). Pointer generations use compare-before-increment under BEGIN IMMEDIATE; exact replay returns its original receipt after subsequent releases, without changing the live pointer. Stable slugs cannot be renamed by this operation.
 
 UnpublishReceipt contains command ID, affected release and committed generation. The publication retains slug/release/history while live becomes false. Exact replay returns its original receipt without pointer mutation; changed payload or stale generation conflicts.
+
+PublishedArtifact contains project/release/revision identity and exact artifact key, semantic digest and size. Resolution is point-in-time authorization metadata, not an ongoing capability or proof of bytes. Historical release and current publication audiences are intersected.

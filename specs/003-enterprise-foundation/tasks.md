@@ -140,3 +140,5 @@ T027 / feature008 T016: verification cancellation/timeout ledger and bounded exp
 T027 / feature008 T016: atomic release metadata/pointer/receipt and current-evidence checks now pass real SQLite concurrency/rollback tests. This does not expose publication or complete verifier/artifact serving/enterprise rollout.
 
 T027 / feature008 T016: fenced unpublish metadata/replay and publish competition pass real SQLite tests. Actual page/asset visibility enforcement and enterprise rollout remain open.
+
+T027 / feature008 T017: pinned publication metadata now honors current live state and both audience scopes. Database authorization tests pass; real HTTP/artifact/browser isolation and release acceptance remain open.

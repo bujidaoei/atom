@@ -97,3 +97,5 @@ Verification tests cover durable cancellation/timeout with no fabricated check r
 Run tests/test_release_repository.py with tests/test_verification_repository.py for real SQLite publish/replay/history, owner/version/policy/runner/generation rejection, changed-contract preservation, concurrent generation competition and denied receipt write rollback. Synthetic reports/artifact descriptors are ledger fixtures, not browser or deployment acceptance.
 
 Release repository tests include publish/unpublish generation competition, old unpublish replay after republish, foreign/stale/conflicting commands and denied receipt insertion preserving the prior live pointer. No website serving was exercised.
+
+Release repository tests now cover private/public current and historical lookup, owner/anonymous/foreign access, privacy changes, unpublish, and invalid/missing references. Artifact descriptors are schema fixtures; file bytes, HTTP caching and browser origins are not exercised.

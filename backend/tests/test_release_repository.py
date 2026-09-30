@@ -141,3 +141,42 @@ def test_publish_and_unpublish_compete_for_one_generation(release):
         current = db.execute('SELECT release_id,live,generation FROM release_publications').fetchone()
         assert current in [('release',0,2),('new',1,2)]
         assert db.execute('SELECT count(*) FROM command_receipts').fetchone() == (2,)
+
+
+def test_resolve_private_and_public_artifact_metadata(release):
+    path,repository,args = release
+    repository.publish(**args)
+    for viewer in [None,'foreign']:
+        with pytest.raises(VerificationError,match='release_not_found'):
+            repository.resolve(slug='site',viewer=viewer)
+    value = repository.resolve(slug='site',viewer='user')
+    assert value.release_id == 'release' and value.revision_id == 'root'
+    assert (value.artifact.key,value.artifact.revision,value.artifact.size) == ('a'*64,'b'*64,14)
+    repository.publish(**(args | {'release_id':'public','expected_generation':1,'audience':'public'}))
+    assert repository.resolve(slug='site').release_id == 'public'
+    # Republishing publicly does not retroactively expose a private release.
+    with pytest.raises(VerificationError,match='release_not_found'):
+        repository.resolve(slug='site',release_id='release')
+    assert repository.resolve(slug='site',viewer='user',release_id='release') == value
+
+
+def test_pinned_public_version_obeys_current_privacy_and_unpublish(release):
+    path,repository,args = release
+    repository.publish(**(args | {'audience':'public'}))
+    assert repository.resolve(slug='site',release_id='release').release_id == 'release'
+    repository.publish(**(args | {'release_id':'private','expected_generation':1}))
+    with pytest.raises(VerificationError,match='release_not_found'):
+        repository.resolve(slug='site',release_id='release')
+    assert repository.resolve(slug='site',viewer='user',release_id='release').release_id == 'release'
+    repository.unpublish(owner='user',project_id='project',command_id='off',expected_release='private',expected_generation=2)
+    for pinned in [None,'release','private']:
+        with pytest.raises(VerificationError,match='release_not_found'):
+            repository.resolve(slug='site',viewer='user',release_id=pinned)
+
+
+@pytest.mark.parametrize('fields',[dict(slug='absent'),dict(slug='../site'),dict(slug='site',release_id='missing')])
+def test_resolve_unknown_or_invalid_reference_is_denied(release,fields):
+    path,repository,args = release
+    repository.publish(**(args | {'audience':'public'}))
+    with pytest.raises(VerificationError,match='release_not_found'):
+        repository.resolve(**fields)

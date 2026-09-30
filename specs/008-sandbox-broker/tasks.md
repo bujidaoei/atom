@@ -112,3 +112,5 @@ T016 continuation: immutable interruption and bounded expired-request inventory 
 T016 continuation: internal atomic release metadata/pointer/receipt promotion implemented with current contract/evidence/head/policy checks. Real concurrency/replay and late write-failure rollback tests pass. Trusted verifier provenance, artifact validation/serving, event delivery, unpublish/rollback, adoption and API/UI integration remain open; task stays unchecked.
 
 T016 continuation: atomic unpublish metadata/receipt and monotonic generation implemented with concurrent publish competition and late-failure rollback evidence. Route/resource visibility, rollback/adoption, verifier provenance and application rollout remain open.
+
+T017 continuation: committed published-artifact metadata lookup now checks current live/audience and pinned release audience/project scope. Real SQLite authorization tests pass. Verified artifact bytes, HTTP pinned routes/cache behavior, browser origin isolation and verifier integration remain open; no task closure.

@@ -123,3 +123,5 @@ Verification interruption must persist cancelled/timed_out separately from obser
 Release metadata promotion must recheck owner, idle main workspace, expected head, current contract, passing evidence, policy and runner in the same transaction that advances the publication generation. Release record, pointer and idempotency receipt commit together; historical replay must not repromote old content.
 
 Unpublish must compare expected release and generation, atomically disable visibility and save an idempotency receipt, preserving artifact/history. Exact historical replay cannot disable a subsequently published release.
+
+Pinned published artifact lookup requires an active current publication and authorization under both the current release audience and the selected historical release audience. Unpublish denies even owner-facing publication paths; draft preview remains a separate route.

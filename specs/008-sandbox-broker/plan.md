@@ -112,3 +112,5 @@ T016 terminal component: terminate records explicit interruption under writer ex
 T016 release metadata component implemented in release_repository.py using the v2 ledger transaction boundary. Immutable release records also record creator/previous release for audit provenance; existing command_receipts stores a reserved release:<id> request digest and response in the same transaction. Dedicated event delivery/outbox, artifact-serving promotion and verifier provenance remain unfinished.
 
 T016 unpublish metadata uses the existing writer transaction and project-scoped unpublish:<command_id> receipt namespace. Every accepted visibility change increments generation. Public route and pinned resource visibility enforcement remain unimplemented.
+
+T017 prerequisite: ReleaseRepository.resolve selects immutable artifact metadata within the existing bounded transaction, checking current live/audience and selected same-project release audience. It does not read legacy directories or enable HTTP serving. Artifact verification, pinned URLs, cache semantics and origin isolation remain open.
