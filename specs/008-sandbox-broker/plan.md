@@ -104,3 +104,5 @@ T015 progress: release_v2 defines verification requests/results, immutable relea
 T016 prerequisite implemented in app/verification_contract.py: immutable canonical UTF-8 bytes plus SHA-256 and ordered check identities, strict stored-document loading, and exact-coverage result encoding. This is separate from forgiving model-output parsing. Trusted verifier authentication, persistence and publication remain unimplemented.
 
 T016 reservation component implemented in verification_repository.py, requiring exact v2 schema on open and every transaction. BEGIN IMMEDIATE protects stored-contract capture and owner/head/idle validation; schema drift and writer contention fail closed. No application wiring or verifier dispatch is enabled.
+
+T016 result component: trusted internal record_report resolves owner-scoped intent, reloads its canonical contract, validates complete strict results and inserts atomically under the existing bounded writer transaction. Passing/failed status is computed, not accepted as an input. No public endpoint is added before verifier authentication.

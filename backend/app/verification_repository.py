@@ -8,7 +8,7 @@ import sqlite3
 import time
 
 from .migrations import MigrationError, _schema, verify
-from .verification_contract import ContractError, VerificationContract, capture_contract, load_contract
+from .verification_contract import ContractError, VerificationContract, capture_contract, capture_report, load_contract
 
 
 class VerificationError(RuntimeError):
@@ -27,6 +27,18 @@ class VerificationRequest:
     initiator_id: str
     created_at: int
     deadline: int
+
+
+@dataclass(frozen=True)
+class VerificationResult:
+    request_id: str
+    revision_id: str
+    contract_digest: str
+    outcome: str
+    total: int
+    passed: int
+    report: bytes
+    completed_at: int
 
 
 class VerificationRepository:
@@ -113,3 +125,42 @@ class VerificationRepository:
                 VALUES (?,?,?,?,?,?,?,?,?,?,?)''', (request_id,workspace_id,scope['project_id'],expected_revision,
                     contract.digest,contract.canonical.decode('utf-8'),policy_digest,runner_version,owner,now,now+budget_seconds))
             return self._decode(db.execute('SELECT * FROM verification_requests WHERE id=?', (request_id,)).fetchone())
+
+    def record_report(self, *, owner: str, request_id: str, results) -> VerificationResult:
+        """Called only by a trusted verifier coordinator after authentication.
+
+        Owner scoping is not proof that a browser ran. No public route exposes
+        this method. Historical evidence must be rechecked by release policy.
+        """
+        if any(not isinstance(value, str) or re.fullmatch(r'[A-Za-z0-9_.-]{1,128}', value) is None
+               for value in (owner, request_id)):
+            raise VerificationError('invalid_verification_request')
+        with self._transaction() as db:
+            row = db.execute('''SELECT v.* FROM verification_requests v
+                JOIN projects p ON p.id=v.project_id WHERE v.id=? AND p.user_id=?''',
+                (request_id, owner)).fetchone()
+            if row is None:
+                raise VerificationError('verification_not_found')
+            request = self._decode(row)
+            try:
+                report = capture_report(request.contract, results)
+            except ContractError:
+                raise VerificationError('invalid_verification_report') from None
+            canonical = report.canonical.decode('utf-8')
+            previous = db.execute('SELECT * FROM verification_results WHERE request_id=?', (request_id,)).fetchone()
+            outcome = 'passed' if report.passed == report.total else 'failed'
+            if previous is not None:
+                if (previous['report_json'],previous['outcome'],previous['total'],previous['passed']) != (
+                        canonical,outcome,report.total,report.passed):
+                    raise VerificationError('verification_conflict')
+                completed_at = previous['completed_at']
+            else:
+                completed_at = int(time.time())
+                if not request.created_at <= completed_at <= request.deadline:
+                    raise VerificationError('verification_expired')
+                db.execute('''INSERT INTO verification_results
+                    (request_id,workspace_id,revision_id,contract_digest,policy_digest,outcome,total,passed,report_json,completed_at)
+                    VALUES (?,?,?,?,?,?,?,?,?,?)''', (request.id,request.workspace_id,request.revision_id,
+                        request.contract.digest,request.policy_digest,outcome,report.total,report.passed,canonical,completed_at))
+            return VerificationResult(request_id,request.revision_id,request.contract.digest,outcome,
+                                      report.total,report.passed,report.canonical,completed_at)

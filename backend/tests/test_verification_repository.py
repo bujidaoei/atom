@@ -87,3 +87,82 @@ def test_schema_drift_after_open_fails_without_insert(ledger):
         repository.reserve(**arguments)
     with sqlite3.connect(path) as db:
         assert db.execute('SELECT count(*) FROM verification_requests').fetchone() == (0,)
+
+
+def report(passed=True, note='observed'):
+    return [{'key':'page','checkIndex':0,'passed':passed,'note':note}]
+
+
+def test_report_concurrent_replay_is_immutable_and_survives_expiry(ledger, monkeypatch):
+    path, repository, arguments = ledger
+    request = repository.reserve(**arguments)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        values = list(pool.map(lambda _: repository.record_report(owner='user', request_id=request.id, results=report()), range(2)))
+    assert values[0] == values[1] and values[0].outcome == 'passed'
+    assert (values[0].total, values[0].passed) == (1,1)
+    monkeypatch.setattr('app.verification_repository.time.time', lambda: request.deadline+100)
+    assert VerificationRepository(path).record_report(owner='user',request_id=request.id,results=report()) == values[0]
+    for changed in [report(False), report(note='changed evidence')]:
+        with pytest.raises(VerificationError, match='verification_conflict'):
+            repository.record_report(owner='user',request_id=request.id,results=changed)
+    with sqlite3.connect(path) as db:
+        assert db.execute('SELECT count(*) FROM verification_results').fetchone() == (1,)
+        assert db.execute('SELECT count(*) FROM release_records').fetchone() == (0,)
+
+
+@pytest.mark.parametrize('case', ['foreign', 'missing', 'incomplete', 'duplicate', 'nonboolean', 'expired', 'clock-reversed'])
+def test_invalid_report_does_not_create_evidence(ledger, monkeypatch, case):
+    path, repository, arguments = ledger
+    request = repository.reserve(**arguments)
+    owner, request_id, results = 'user', request.id, report()
+    if case == 'foreign': owner = 'foreign'
+    elif case == 'missing': request_id = 'missing'
+    elif case == 'incomplete': results = []
+    elif case == 'duplicate': results *= 2
+    elif case == 'nonboolean': results[0]['passed'] = 1
+    elif case == 'expired': monkeypatch.setattr('app.verification_repository.time.time', lambda: request.deadline+1)
+    else: monkeypatch.setattr('app.verification_repository.time.time', lambda: request.created_at-1)
+    with pytest.raises(VerificationError):
+        repository.record_report(owner=owner,request_id=request_id,results=results)
+    with sqlite3.connect(path) as db:
+        assert db.execute('SELECT count(*) FROM verification_results').fetchone() == (0,)
+
+
+def test_report_uses_captured_contract_after_current_contract_changes(ledger):
+    path, repository, arguments = ledger
+    request = repository.reserve(**arguments)
+    with sqlite3.connect(path) as db:
+        db.execute("UPDATE requirements SET checks_json='[]'")
+    result = repository.record_report(owner='user',request_id=request.id,results=report(False))
+    assert result.outcome == 'failed' and result.contract_digest == request.contract.digest
+    assert result.revision_id == 'root'
+
+
+def test_process_exit_before_report_commit_leaves_no_partial_evidence(ledger):
+    import os
+    from pathlib import Path
+    import subprocess
+    import sys
+    path, repository, arguments = ledger
+    request = repository.reserve(**arguments)
+    script = '''
+import os,sys
+from pathlib import Path
+from contextlib import contextmanager
+from app.verification_repository import VerificationRepository
+repository=VerificationRepository(Path(sys.argv[1]))
+original=repository._transaction
+@contextmanager
+def crash():
+    with original() as db:
+        yield db
+        os._exit(43)
+repository._transaction=crash
+repository.record_report(owner='user',request_id='verification',results=[{'key':'page','checkIndex':0,'passed':True,'note':'observed'}])
+'''
+    env = dict(os.environ, PYTHONPATH=str(Path(__file__).resolve().parents[1]))
+    result = subprocess.run([sys.executable,'-c',script,str(path)],env=env,capture_output=True,timeout=15)
+    assert result.returncode == 43, result.stderr
+    with sqlite3.connect(path) as db:
+        assert db.execute('SELECT count(*) FROM verification_results').fetchone() == (0,)
+    assert repository.record_report(owner='user',request_id=request.id,results=report()).outcome == 'passed'

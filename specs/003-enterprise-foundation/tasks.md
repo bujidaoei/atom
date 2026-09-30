@@ -132,3 +132,5 @@ T027 / feature008 T015: explicit offline v2 verification/release schema and migr
 T027 / feature008 T016: canonical contract and complete report content validation now tested; trusted execution, persistence and release authorization remain open.
 
 T027 / feature008 T016: immutable verification-intent reservation and exact replay now pass real SQLite concurrency/scope/drift tests. Verifier execution, result registration and release integration remain unfinished.
+
+T027 / feature008 T016: transactional captured-contract report registration and crash/replay tests pass; trusted verifier execution and actual publication integration remain unfinished.

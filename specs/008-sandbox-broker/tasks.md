@@ -104,3 +104,5 @@ T015 continuation: explicit offline baseline/v1 to v2 migration, journal preserv
 T016 continuation: strict versioned contract/report codec implemented with real encoding/validation tests. No repository publication or verifier authority added. T015 complete provenance/adoption and T016 transactional repository behavior remain open; no checkbox closure.
 
 T016 continuation: v2 VerificationRepository now reserves immutable intents from stored requirements with owner/current-head/idle checks and exact non-renewing replay. Real SQLite concurrent/reopen/conflict tests pass. Result registration, verifier authority/provenance, release/adoption transactions and application wiring remain open; task stays unchecked.
+
+T016 continuation: internal trusted result registration now atomically computes and stores complete contract-bound reports, with exact replay and deadline checks. Real SQLite concurrency and abrupt-process-exit recovery pass. Verifier authentication/environment, timeout/cancel recording, adoption/release operations and application integration remain open; no checkbox closure.

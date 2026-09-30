@@ -115,3 +115,5 @@ FR-006 migration extension: explicit target v2 may add verification/release iden
 Verification contract identity includes ordered requirements/checks/setup, title/detail, selectors and exact input/expected text. Strict versioned encoding rejects unknown fields, duplicate keys and invalid Unicode; it must not silently repair or discard checks. Complete results require exact unique check identities and actual booleans.
 
 Verification intent reservation must capture the stored project contract under the same writer transaction as owner/current-head/idle checks. Exact request replay preserves original identity and deadline; replay is historical evidence, not renewed dispatch permission.
+
+Verification result registration derives outcome/counts from exact complete coverage of the captured contract. A first report outside the original time interval is rejected. Exact historical replay retains the original timestamp; changed report content conflicts. Persisting a report does not publish or prove verifier authority.

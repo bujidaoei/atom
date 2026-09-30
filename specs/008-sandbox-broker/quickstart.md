@@ -89,3 +89,5 @@ Disposable/offline databases only: python -m app.migrations ABSOLUTE_DATABASE --
 Codec verification: python -m pytest backend/tests/test_verification_contract.py backend/tests/test_acceptance.py. Covers fixed encoding, roundtrip, source-mutation isolation, semantic changes, rejection limits and exact report coverage. These are content-validation tests, not browser or API integration evidence.
 
 Run tests/test_verification_repository.py with tests/test_verification_contract.py for actual SQLite reservation/concurrent retry, durable reopen, foreign/stale input denial, expired historical replay, active-run rejection, bounded lock contention and schema drift. Tests use synthetic ledger artifact descriptors; they are not physical artifact or browser acceptance.
+
+Verification repository tests now include actual concurrent report writes, exact/conflicting replay, missing/foreign/invalid report rejection, expiry/clock-reversal rejection, changed current contract, and a child process exiting after insertion but before commit. These use synthetic reports and do not prove DOM execution.
