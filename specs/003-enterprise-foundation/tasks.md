@@ -17,6 +17,7 @@ Input: spec.md, plan.md, research.md. Status: research-stage decomposition only.
 
 ## Phase 3: US1 — execution boundary
 Goal: genuine isolation and provider credential binding. Independent test: hostile generated content and synthetic-secret destination tests.
+- [x] T028 [US1] Validate live tmpfs snapshot export, stop/restart data loss and verified restore with the actual 006 component in scripts/research/probe_snapshot_lifecycle.py; exact bytes/revision restored, cleanup confirmed. Evidence and contract updated; arbitrary-writer quiescence and broker integration remain untested.
 - [x] T025 [US1] Validate candidate limits in contracts/isolation.md using scripts/research/probe_container_limits.py; real memory/PID/disk/network/readonly tests passed. CPU load, lifecycle and product/file-tool integration remain untested; SEC-05 remains open.
 - [x] T010 [US1] Document threat model and role/endpoint/egress matrix in specs/003-enterprise-foundation/contracts/security.md (design only, enforcement unimplemented).
 - [x] T011 [US1] Design isolated reproductions for provider fallback, preview origin and worker access in specs/003-enterprise-foundation/quickstart.md; specify failure expectations before implementation (design only, tests not passed).

@@ -23,6 +23,8 @@ Build an actual small app with a real model, such as a task list with persistenc
 Use an explicitly designated test repository. Import an existing branch, make conflicting edits on both sides and confirm conflict is surfaced without overwriting. Create a reviewable change; test disallowed direct protected-branch push and unauthorized release. Export one accepted revision and rebuild in a clean environment with documented configuration. Compare artifact manifest and test behavior; account for declared nondeterministic build metadata rather than ignoring differences.
 
 ## Operations and recovery
+Before implementing the tmpfs broker, use one disposable nonroot/no-network container with finite lifetime and no host mounts. Create synthetic regular files, finish all controlled writes, export with the actual snapshot library while PID 1 remains alive, and verify through the host receiver. Stop/restart the container and assert tmpfs contents disappear. Restore the verified stream into a new workspace and compare exact revision and file bytes. Remove the container and verify absence. This demonstrates transfer ordering only; no uncontrolled descendant writer, broker restart, durable fencing or live agent acceptance is implied.
+
 Measure p95 non-generation latency at the specified 50-member/10-run workload, including database and storage use. Kill one worker and one control-plane replica separately; then test host loss only in an isolated environment with actual redundant fault domains. Restore encrypted backup into a clean environment and run the same critical flows. Record measured RTO/RPO, key availability and external effects not restored. A single-host restart test cannot close the HA gate.
 
 ## Evidence format and closure
