@@ -95,7 +95,7 @@ async def _body(request: Request, field: str) -> str:
 
 def create_app(config: BrokerConfig | None = None) -> FastAPI:
     config = config or BrokerConfig.from_env()
-    codec = GrantCodec(config.grant_key.encode("ascii"))
+    codec = GrantCodec(config.grant_key.encode("ascii"), max_lifetime=7200)
 
     @asynccontextmanager
     async def lifespan(app):

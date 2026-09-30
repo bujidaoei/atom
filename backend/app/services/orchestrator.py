@@ -15,6 +15,8 @@ from .. import storage
 from ..config import get_settings
 from ..db import session_scope
 from ..errors import ConflictError, OutOfCredits
+from ..execution_service import ExecutionResources
+from ..revision_view import materialized_revision, committed_catalog
 from ..events import bus
 from ..models import (
     Message,
@@ -63,6 +65,7 @@ class Orchestrator:
         self._client = client or runtime_client
         self._jobs: dict[str, asyncio.Task[None]] = {}
         self._stopping: set[str] = set()
+        self.execution: ExecutionResources | None = None
 
     # ---------------------------------------------------------------- public
 
@@ -472,9 +475,7 @@ class Orchestrator:
                 budget_seconds=budget_seconds,
             )
         except asyncio.CancelledError:
-            count, size = storage.workspace_stats(
-                storage.workspace_dir(project_id, heat_id)
-            )
+            count, size = await self._workspace_stats(project_id, user_id, heat_id)
             with session_scope() as session:
                 heat = session.get(RaceHeat, heat_id)
                 run = session.get(Run, heat.run_id) if heat.run_id else None
@@ -485,7 +486,7 @@ class Orchestrator:
             raise
 
         workspace = storage.workspace_dir(project_id, heat_id)
-        file_count, total_bytes = storage.workspace_stats(workspace)
+        file_count, total_bytes = await self._workspace_stats(project_id, user_id, heat_id)
         _set_heat(
             heat_id,
             status=outcome.status,
@@ -584,8 +585,18 @@ class Orchestrator:
         terminal = False
         status = "done"
         cancelled = False
+        lease = None
+        completed_revision = None
+        execution_args = {}
         try:
             async with asyncio.timeout(budget):
+                if get_settings().sandbox_mode == 'broker':
+                    if self.execution is None:
+                        raise RuntimeError('执行服务尚未就绪')
+                    lease = await self.execution.prepare_run(owner=user_id, project_id=project_id,
+                        run_id=run_id, heat_id=heat_id, source=workspace, budget=budget)
+                    execution_args = {'execution_lease':lease, 'execution_repository':self.execution.repository,
+                                      'execution_owner':user_id}
                 async with aclosing(
                     self._client.run(
                         run_id=run_id,
@@ -597,6 +608,7 @@ class Orchestrator:
                         gateway=gateway,
                         context=context,
                         budget_seconds=budget,
+                        **execution_args,
                     )
                 ) as stream:
                     async for line in stream:
@@ -646,11 +658,19 @@ class Orchestrator:
                                 error = str(line.payload.get("message") or "运行时错误")
                             else:
                                 text_parts = [str(line.payload.get("resultText") or "")]
+                                if lease is not None:
+                                    completed_revision = line.payload['revisionReceipt']['revision_id']
                             break
                 if not terminal:
                     raise RuntimeError("运行时未返回完成结果，已有文件已保留")
                 if status == "done" and role == "alex":
-                    await validate_artifacts(workspace)
+                    if lease is None:
+                        await validate_artifacts(workspace)
+                    else:
+                        with materialized_revision(self.execution.repository, self.execution.store,
+                                owner=user_id, workspace_id=lease.workspace_id,
+                                expected_revision_id=completed_revision) as view:
+                            await validate_artifacts(view.path)
         except TimeoutError:
             status, error = (
                 "timed_out",
@@ -662,6 +682,11 @@ class Orchestrator:
             status, error = "failed", str(exc) or type(exc).__name__
         if status != "done":
             await self._cancel_remote(run_id)
+            if lease is not None:
+                try:
+                    await self.execution.coordinator.interrupt(user_id, lease.execution_id, status)
+                except Exception:
+                    error = (error or '执行失败') + '；沙箱终止尚未确认，占用已保留'
         failed = status != "done"
         text = "".join(text_parts).strip()
         rendered = text
@@ -723,10 +748,28 @@ class Orchestrator:
                 project.status = status
         await bus.publish(project_id, "project.updated", {"status": status})
 
+    async def _catalog(self, project_id: str, user_id: str, heat_id=None):
+        if get_settings().sandbox_mode != 'broker':
+            return {'revisionId':None, 'files':storage.list_files(storage.workspace_dir(project_id, heat_id))}
+        if self.execution is None:
+            raise RuntimeError('执行服务尚未就绪')
+        return await asyncio.to_thread(committed_catalog, self.execution.repository, self.execution.store,
+                                       owner=user_id, project_id=project_id, heat_id=heat_id)
+
+    async def _workspace_stats(self, project_id, user_id, heat_id):
+        listing = await self._catalog(project_id, user_id, heat_id)
+        return len(listing['files']), sum(item['bytes'] for item in listing['files'])
+
     async def _publish_files(self, project_id: str) -> None:
-        files = storage.list_files(storage.workspace_dir(project_id))
+        with session_scope() as session:
+            project = session.get(Project, project_id)
+            if project is None:
+                return
+            owner = project.user_id
+        listing = await self._catalog(project_id, owner)
+        files = listing['files']
         await bus.publish(
-            project_id, "project.updated", {"status": "ready", "files": files}
+            project_id, "project.updated", {"status": "ready", "files": files, "revisionId":listing["revisionId"]}
         )
 
 

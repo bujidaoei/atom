@@ -58,6 +58,11 @@ class ExecutionCoordinator:
         """Durably fence dispatch before revocation; release only on broker proof."""
         return await self._stop(owner, attempt_id, 'cancelled')
 
+    async def interrupt(self, owner: str, attempt_id: str, outcome: str) -> Recovery:
+        if outcome not in ('failed', 'cancelled', 'timed_out'):
+            raise ExecutionError('invalid_interruption_outcome')
+        return await self._stop(owner, attempt_id, outcome)
+
     async def reconcile(self, *, limit: int = 100, timeout: float = 60) -> tuple[Recovery, ...]:
         """Drain interrupted ownership before admitting work in a single-owner API.
 

@@ -42,9 +42,15 @@ pytestmark = pytest.mark.skipif(not IMAGE, reason='requires explicit pinned loca
 
 
 @contextmanager
-def running_broker(path):
+def running_broker(path, *, provision_delay=0):
     config = BrokerConfig(path,IMAGE,secrets.token_urlsafe(32),secrets.token_urlsafe(32),sweep_seconds=60)
     app = create_app(config)
+    if provision_delay:
+        @app.middleware('http')
+        async def clock_boundary(request, call_next):
+            if request.url.path == '/v1/admin/provision':
+                await asyncio.sleep(provision_delay)
+            return await call_next(request)
     listener = socket.socket()
     listener.bind(('127.0.0.1',0))
     server = uvicorn.Server(uvicorn.Config(app,log_level='error',access_log=False))

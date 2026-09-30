@@ -22,17 +22,22 @@ from .services.runtime_client import runtime_client
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     _app.state.execution = None
+    orchestrator.execution = None
     async with execution_resources(get_settings()) as resources:
         verify_schema(engine)
         if resources is None:
             Base.metadata.create_all(engine)
         await orchestrator.reconcile()
+        orchestrator.execution = resources
         _app.state.execution = resources
         try:
             yield
         finally:
             _app.state.execution = None
-            await orchestrator.shutdown()
+            try:
+                await orchestrator.shutdown()
+            finally:
+                orchestrator.execution = None
 
 
 app = FastAPI(title="Atoms Demo API", version="1.0.0", lifespan=lifespan)

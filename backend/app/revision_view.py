@@ -1,6 +1,7 @@
 """Private read views of committed artifacts, independent of legacy workspaces."""
 from contextlib import contextmanager
 from dataclasses import dataclass
+from datetime import datetime, timezone
 import io
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -37,3 +38,21 @@ def verified_revision_payload(store: ArtifactStore, revision: WorkspaceRevision)
     if len(payload) != revision.artifact.size or verified.revision != revision.artifact.revision:
         raise RevisionError('revision_artifact_mismatch')
     return payload, verified
+
+
+def committed_catalog(repository, store, *, owner, project_id, heat_id=None):
+    try:
+        workspace = repository.find_workspace(owner, project_id, heat_id)
+    except RevisionError as error:
+        if error.code != 'revision_not_found':
+            raise
+        return {'revisionId':None, 'files':[]}
+    revision = repository.current_revision(owner, workspace)
+    if revision is None:
+        return {'revisionId':None, 'files':[]}
+    _, verified = verified_revision_payload(store, revision)
+    timestamp = datetime.fromtimestamp(revision.created_at, timezone.utc).isoformat()
+    files = [{'path':entry.path,'bytes':entry.size,'sha256':entry.sha256,
+              'updatedAt':timestamp,'timestampSource':'revision'} for entry in verified.files]
+    files.sort(key=lambda item: (item['path'] != 'index.html', item['path']))
+    return {'revisionId':revision.revision_id, 'files':files}

@@ -15,7 +15,7 @@ const model = createServer(async (req, res) => {
   for await (const _chunk of req) { /* consume request before responding */ }
   requests++;
   const delta = requests === 1 ? { role: 'assistant', tool_calls: [{ index: 0, id: 'write-output', type: 'function',
-    function: { name: 'write', arguments: JSON.stringify({ path: 'result.txt', content: 'actual coordinator output' }) } }] }
+    function: { name: 'write', arguments: JSON.stringify({ path: input.outputFile ?? 'result.txt', content: input.outputText ?? 'actual coordinator output' }) } }] }
     : { role: 'assistant', content: 'Output saved.' };
   res.writeHead(200, { 'content-type': 'text/event-stream' });
   res.write(`data: ${JSON.stringify({ id: `r${requests}`, choices: [{ index: 0, delta, finish_reason: null }] })}\n\n`);
@@ -43,6 +43,8 @@ try {
     await new Promise(resolve => setTimeout(resolve, 30));
   }
   const body = { runId: input.lease.runId, role: 'alex', prompt: 'Write result.txt then finish.',
+    ...(input.request ? {role:input.request.role, prompt:input.request.prompt,
+      systemPromptSuffix:input.request.systemPromptSuffix, enableTools:input.request.enableTools} : {}),
     workspacePath: join(root, 'workspace'), sessionPath: join(root, 'session.jsonl'), agentDir: join(root, 'agent'),
     gateway: { baseUrl: `http://127.0.0.1:${(model.address() as any).port}/v1`, apiKey: 'synthetic-model-key', model: 'test-model' },
     budgetMs: 15000, lease: input.lease };
@@ -59,7 +61,7 @@ try {
   const receipt = lines.at(-1).revisionReceipt;
   assert.equal(receipt.attempt_id, input.lease.executionId);
   assert.equal(receipt.workspace_id, input.lease.workspaceId);
-  console.log(JSON.stringify({ revision: receipt.revision_id }));
+  console.log(JSON.stringify({ revision: receipt.revision_id, lines }));
 } finally {
   child.kill(); await exited;
   model.closeAllConnections();

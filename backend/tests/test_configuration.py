@@ -54,6 +54,7 @@ def test_valid_production_transport_and_redacted_representation():
     {'broker_origin':'http://127.0.0.1:8766/path'}, {'artifact_dir':'relative'},
     {'broker_admin_token':None}, {'broker_grant_key':'short'},
     {'completion_grant_key':BROKER['broker_grant_key']}, {'broker_admin_token':BASE['runtime_token']},
+    {'run_timeout_seconds':7200},
 ])
 def test_production_requires_distinct_complete_broker_configuration(patch):
     with pytest.raises(ValidationError):

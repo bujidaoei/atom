@@ -85,6 +85,8 @@ class Settings(BaseSettings):
         if self.environment == 'production' and self.sandbox_mode != 'broker':
             raise ValueError('production requires broker execution')
         if self.sandbox_mode == 'broker':
+            if self.run_timeout_seconds > 7140:
+                raise ValueError('broker run timeout must leave 60 seconds within the 7200-second lease limit')
             from .sandbox.client import _origin, BrokerClientError
             try:
                 self.broker_origin = _origin(self.broker_origin)

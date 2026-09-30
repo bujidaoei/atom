@@ -1,13 +1,12 @@
 """Bounded synchronous route access to committed project files."""
 from contextlib import contextmanager
-from datetime import datetime, timezone
 from threading import BoundedSemaphore
 
 from fastapi import HTTPException
 
 from .artifacts import ArtifactError
 from .revisions import RevisionError
-from .revision_view import materialized_revision, verified_revision_payload
+from .revision_view import materialized_revision, committed_catalog
 from .snapshots import SnapshotError
 
 _READS = BoundedSemaphore(1)
@@ -45,19 +44,6 @@ def project_catalog(request, project):
     """OwnedProject routes supply the authenticated project; no rows are created."""
     def read(heat_id=None):
         with _resources(request) as resources:
-            try:
-                workspace = resources.repository.find_workspace(project.user_id, project.id, heat_id)
-            except RevisionError as error:
-                if error.code != 'revision_not_found':
-                    raise
-                return {'revisionId':None, 'files':[]}
-            revision = resources.repository.current_revision(project.user_id, workspace)
-            if revision is None:
-                return {'revisionId':None, 'files':[]}
-            _, verified = verified_revision_payload(resources.store, revision)
-            timestamp = datetime.fromtimestamp(revision.created_at, timezone.utc).isoformat()
-            files = [{'path':entry.path,'bytes':entry.size,'sha256':entry.sha256,
-                      'updatedAt':timestamp,'timestampSource':'revision'} for entry in verified.files]
-            files.sort(key=lambda item: (item['path'] != 'index.html', item['path']))
-            return {'revisionId':revision.revision_id, 'files':files}
+            return committed_catalog(resources.repository, resources.store, owner=project.user_id,
+                                     project_id=project.id, heat_id=heat_id)
     return read
