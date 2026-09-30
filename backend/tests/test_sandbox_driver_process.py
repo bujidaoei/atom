@@ -29,3 +29,13 @@ def test_real_process_timeout():
 def test_profile_limits_fail_closed(kwargs):
     with pytest.raises(DriverError, match="invalid_profile"):
         FileProfile(**kwargs)
+
+
+def test_real_large_stdin_and_blocked_reader_timeout():
+    payload = b"x" * 1048576
+    status, out, _err = run_bounded([sys.executable, "-c", "import sys;print(len(sys.stdin.buffer.read()))"], input_data=payload)
+    assert status == 0 and out.strip() == b"1048576"
+    started = time.monotonic()
+    with pytest.raises(DriverError, match="driver_timeout"):
+        run_bounded([sys.executable, "-c", "import time;time.sleep(30)"], input_data=payload, timeout=0.1)
+    assert time.monotonic() - started < 3

@@ -22,13 +22,13 @@ class DriverError(RuntimeError):
         super().__init__(code)
 
 
-async def _bounded(args: list[str], timeout: float, output_limit: int) -> tuple[int, bytes, bytes]:
+async def _bounded(args: list[str], timeout: float, output_limit: int, input_data: bytes | None) -> tuple[int, bytes, bytes]:
     process = None
     tasks = []
     completion = None
     overflow = False
     try:
-        process = await asyncio.create_subprocess_exec(*args, stdin=asyncio.subprocess.DEVNULL,
+        process = await asyncio.create_subprocess_exec(*args, stdin=asyncio.subprocess.PIPE if input_data is not None else asyncio.subprocess.DEVNULL,
                                                        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
 
         async def read(stream):
@@ -46,10 +46,24 @@ async def _bounded(args: list[str], timeout: float, output_limit: int) -> tuple[
                     output.extend(chunk)
             return bytes(output)
 
+        async def write():
+            if input_data is not None:
+                try:
+                    process.stdin.write(input_data)
+                    await process.stdin.drain()
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
+                finally:
+                    process.stdin.close()
+                    try:
+                        await process.stdin.wait_closed()
+                    except (BrokenPipeError, ConnectionResetError):
+                        pass
+
         tasks = [asyncio.create_task(read(process.stdout)), asyncio.create_task(read(process.stderr)),
-                 asyncio.create_task(process.wait())]
+                 asyncio.create_task(process.wait()), asyncio.create_task(write())]
         completion = asyncio.gather(*tasks)
-        stdout, stderr, status = await asyncio.wait_for(asyncio.shield(completion), timeout)
+        stdout, stderr, status, _ = await asyncio.wait_for(asyncio.shield(completion), timeout)
         if overflow:
             raise DriverError("driver_output_limit")
         return status, stdout, stderr
@@ -78,13 +92,16 @@ async def _bounded(args: list[str], timeout: float, output_limit: int) -> tuple[
             await asyncio.gather(*tasks, return_exceptions=True)
 
 
-def run_bounded(args: list[str], *, timeout: float = 15, output_limit: int = 256 * 1024) -> tuple[int, bytes, bytes]:
+def run_bounded(args: list[str], *, timeout: float = 15, output_limit: int = 256 * 1024,
+                input_data: bytes | None = None) -> tuple[int, bytes, bytes]:
     """Synchronous broker worker-thread helper. CLI termination is not container termination."""
     if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or not 0 < timeout <= 30:
         raise DriverError("invalid_driver_timeout")
-    if type(output_limit) is not int or not 1 <= output_limit <= 1024 * 1024:
+    if type(output_limit) is not int or not 1 <= output_limit <= 12 * 1024 * 1024:
         raise DriverError("invalid_driver_output_limit")
-    return asyncio.run(_bounded(args, timeout, output_limit))
+    if input_data is not None and (not isinstance(input_data, bytes) or len(input_data) > 50 * 1024 * 1024):
+        raise DriverError("invalid_driver_input")
+    return asyncio.run(_bounded(args, timeout, output_limit, input_data))
 
 
 @dataclass(frozen=True)
