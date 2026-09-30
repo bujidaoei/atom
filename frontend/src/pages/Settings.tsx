@@ -88,7 +88,7 @@ export function SettingsPage() {
       <header className="flex flex-col gap-xxs">
         <h1 className="text-2xl font-medium text-neutral-95">设置</h1>
         <p className="text-base text-neutral-60">
-          配置 AI 网关。留空则使用服务端默认凭据，不会把你的 key 回显到页面上。
+          配置 AI 网关。自定义地址需要自己的 Key；更换地址时请重新填写该服务的 Key。
         </p>
       </header>
 
@@ -108,9 +108,13 @@ export function SettingsPage() {
                     : "bg-neutral-12 text-neutral-60"
                 }
               >
-                {settings.source === "user" ? "使用你的 key" : "服务端默认"}
+                {settings.source === "unconfigured" ? "连接待配置" : settings.source === "user" ? "使用你的 key" : "服务端默认"}
               </Badge>
             </div>
+
+            {settings.configurationError ? (
+              <ErrorState title="连接需要修复" message={settings.configurationError} compact />
+            ) : null}
 
             <TextField
               label="Base URL"
@@ -132,7 +136,7 @@ export function SettingsPage() {
                 value={newKey}
                 placeholder="粘贴新的 key"
                 onChange={(event) => setNewKey(event.target.value)}
-                hint="保存后只会以打码形式回显，原文不会再离开服务端。"
+                hint="仅向你配置的模型服务发送；页面只显示打码值。"
                 action={
                   <button
                     type="button"
@@ -155,7 +159,9 @@ export function SettingsPage() {
                 disabled
                 onChange={() => undefined}
                 hint={
-                  settings.hasUserKey
+                  settings.source === "unconfigured"
+                    ? "连接尚未完成配置，不会发起模型请求。"
+                    : settings.hasUserKey
                     ? "这是你保存的 key（已打码）。"
                     : "当前使用服务端默认 key（已打码）。"
                 }
@@ -177,8 +183,8 @@ export function SettingsPage() {
               value={model}
               onChange={(event) => setModel(event.target.value)}
               hint={
-                settings.models.length === 0
-                  ? "网关没有返回模型列表，保留当前值即可。"
+                settings.modelsStatus !== "available"
+                  ? "尚未获取到可用模型列表；当前保存值不代表服务可用。"
                   : `网关返回了 ${settings.models.length} 个模型。`
               }
             >
@@ -221,19 +227,19 @@ export function SettingsPage() {
           <Panel className="flex flex-col gap-m p-xl">
             <h2 className="text-md font-medium text-neutral-95">恢复默认</h2>
             <p className="text-base text-neutral-60">
-              清掉你保存的 key，回落到服务端默认凭据。Base URL 与模型选择不受影响。
+              同时清除个人 Key 和自定义 Base URL，恢复服务端默认连接。保留模型选择。
             </p>
             <div>
               <Button
                 variant="danger"
                 onClick={() => void restoreDefault()}
                 loading={clearing}
-                disabled={!settings.hasUserKey}
+                disabled={!settings.hasUserKey && settings.source !== "unconfigured"}
               >
                 恢复服务端默认
               </Button>
             </div>
-            {!settings.hasUserKey ? (
+            {!settings.hasUserKey && settings.source !== "unconfigured" ? (
               <p className="text-sm text-neutral-40">你还没有自定义 key，无需恢复。</p>
             ) : null}
           </Panel>

@@ -67,7 +67,9 @@ Atoms 用的是两步式：先填邮箱，后端回答这个邮箱是否已注�
   "model": "claude-sonnet-5",
   "apiKeyMasked": "sk*********************Gg",
   "hasUserKey": false,
-  "source": "server",          // "server" | "user"
+  "source": "server",          // "server" | "user" | "unconfigured"
+  "configurationError": null,  // 配置不完整时给出可修复错误，不发起模型请求
+  "modelsStatus": "available", // "available" | "unavailable" | "unconfigured"
   "models": [                   // 来自网关 /models，60s 缓存
     { "id": "claude-sonnet-5" },
     { "id": "gpt-5.6-sol" }
@@ -85,7 +87,9 @@ Atoms 用的是两步式：先填邮箱，后端回答这个邮箱是否已注�
 // res 同 GET
 ```
 
-### `DELETE /api/settings/api-key` → 清掉用户自定义 key，回落到服务端默认；res 同 GET
+自定义地址必须与个人 Key 成对保存；更换已绑定地址必须同时重新填写未打码的 Key。无效更新返回 400，不持久化、不请求服务。读取旧的不完整配置仍返回 200，`source=unconfigured`、`models=[]`；生成任务拒绝使用该配置。模型发现失败返回空列表，不能推断保存的模型可用，也不会补入猜测的模型。
+
+### `DELETE /api/settings/api-key` → 同时清掉个人 Key 和自定义 Base URL，恢复服务端默认连接；保留模型选择；res 同 GET
 
 ---
 

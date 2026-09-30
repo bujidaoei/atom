@@ -30,6 +30,7 @@ from ..models import (
 from . import credits, parsing
 from .artifacts import validate_artifacts
 from .runtime_client import GatewayConfig, RuntimeClient, runtime_client
+from .provider_connection import resolve_provider
 
 # Roles that reason without touching the workspace, in the order Mike's plan
 # normally arranges them. Alex always runs last and separately, because the
@@ -741,11 +742,10 @@ def _gateway_for(user_id: str, *, planning: bool = False) -> GatewayConfig:
     settings = get_settings()
     with session_scope() as session:
         overrides = session.get(UserSettings, user_id)
-        base_url = (overrides.base_url if overrides else None) or settings.llm_base_url
-        api_key = (overrides.api_key if overrides else None) or settings.llm_api_key
+        connection = resolve_provider(settings, overrides)
         chosen = overrides.model if overrides else None
         default = settings.llm_planning_model if planning else settings.llm_model
-    return GatewayConfig(base_url.rstrip("/"), api_key, chosen or default)
+    return GatewayConfig(connection.base_url, connection.api_key, chosen or default)
 
 
 def _project_prompt(project_id: str) -> tuple[str, str]:

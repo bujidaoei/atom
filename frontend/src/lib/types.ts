@@ -19,8 +19,10 @@ export type Settings = {
   model: string;
   apiKeyMasked: string;
   hasUserKey: boolean;
-  source: "server" | "user";
+  source: "server" | "user" | "unconfigured";
   models: ModelOption[];
+  modelsStatus: "available" | "unavailable" | "unconfigured";
+  configurationError: string | null;
 };
 
 export type ProjectStatus =
