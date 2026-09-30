@@ -106,3 +106,5 @@ T027 continuation: child 008 now resolves/creates owner-scoped identities for po
 T027 continuation: child 008 now implements trusted offline real-directory import before revision bootstrap. Application integration, production writer fencing/cutover and enterprise acceptance remain open.
 
 T027 continuation: child 008 now provides bounded startup attempt scanning and confirmed broker cleanup, including durable success decision recovery after process loss. Main lifespan, exclusive ownership, legacy status adoption and enterprise release remain open.
+
+T027 continuation: child 008 main API now owns broker configuration/resources, Linux process lease, startup/shutdown reconciliation, scoped execution routes and broker readiness. Unleased calls are refused. Scheduling/lease delivery, durable legacy status/preview adoption and enterprise release remain open.

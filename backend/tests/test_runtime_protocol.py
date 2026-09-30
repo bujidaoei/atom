@@ -9,6 +9,18 @@ from app.errors import RuntimeUnavailable
 from app.services.runtime_client import GatewayConfig, RuntimeClient
 
 
+def test_broker_api_refuses_unleased_dispatch(monkeypatch, tmp_path):
+    from app.config import get_settings
+    monkeypatch.setattr(get_settings(), 'sandbox_mode', 'broker')
+    async def scenario():
+        with pytest.raises(RuntimeUnavailable, match='已准备的执行租约'):
+            async for _ in RuntimeClient().run(run_id='r',role='alex',prompt='test',
+                    workspace_path=tmp_path,session_path=tmp_path/'session',agent_dir=tmp_path,
+                    gateway=GatewayConfig('https://invalid','synthetic','model')):
+                raise AssertionError('unleased dispatch yielded output')
+    asyncio.run(scenario())
+
+
 @pytest.mark.parametrize(
     "body", ["", "invalid\n", '{"kind":"event","type":"run.completed"}\n']
 )

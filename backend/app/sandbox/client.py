@@ -128,13 +128,13 @@ class BrokerClient:
         return self._token(grant)
 
     async def _request(self, route, payload, *, headers=None, expected=200,
-                       media='application/json', limit=16384):
+                       media='application/json', limit=16384, method='POST'):
         if self._http.is_closed:
             raise BrokerClientError('broker_client_closed')
         outgoing = {'authorization':'Bearer '+self._admin, 'accept-encoding':'identity', **(headers or {})}
         try:
             async with asyncio.timeout(self._timeout):
-                async with self._http.stream('POST',route,content=payload,headers=outgoing) as response:
+                async with self._http.stream(method,route,content=payload,headers=outgoing) as response:
                     if response.status_code != expected:
                         raise BrokerClientError('broker_http_error',status=response.status_code)
                     if ([v.lower() for v in response.headers.get_list('content-type')] != [media]
@@ -153,6 +153,16 @@ class BrokerClient:
         _, payload = await self._request(route,json.dumps(body,separators=(',',':')).encode(),
             headers={'content-type':'application/json'},expected=expected)
         return _json(payload)
+
+    async def require_ready(self) -> None:
+        try:
+            async with asyncio.timeout(5):
+                _, payload = await self._request('/ready', None, method='GET', limit=1024)
+        except TimeoutError:
+            raise BrokerClientError('broker_not_ready') from None
+        value = _json(payload)
+        if set(value) != {'alive','ready'} or value['alive'] is not True or value['ready'] is not True:
+            raise BrokerClientError('broker_not_ready')
 
     @staticmethod
     def _provisioned(value, grant, states, expected_id=None):

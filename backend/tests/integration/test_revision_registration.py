@@ -367,13 +367,13 @@ def coordinator_source_bundle():
     root = Path(__file__).resolve().parents[3]
     result = io.BytesIO()
     with zipfile.ZipFile(result,'w',zipfile.ZIP_DEFLATED) as bundle:
-        for package in ('httpx','httpcore','anyio','certifi','idna','h11','jwt','uvicorn','click'):
+        for package in ('httpx','httpcore','anyio','certifi','idna','h11','jwt','uvicorn','click','starlette'):
             directory = Path(importlib.util.find_spec(package).origin).parent
             for path in directory.rglob('*'):
                 if path.is_file() and (path.suffix == '.py' or path.name == 'cacert.pem'):
                     bundle.write(path,package+'/'+path.relative_to(directory).as_posix())
         bundle.write(importlib.util.find_spec('typing_extensions').origin,'typing_extensions.py')
-        for name in ('__init__','execution','execution_http','workspace_import','artifacts','snapshots','revisions','migrations/__init__',
+        for name in ('__init__','execution','execution_http','execution_service','workspace_import','artifacts','snapshots','revisions','migrations/__init__',
                      'migrations/revision_v1','sandbox/__init__','sandbox/client','sandbox/checkpoints',
                      'sandbox/docker_driver','sandbox/registry','sandbox/grants'):
             bundle.write(root / f'backend/app/{name}.py',f'app/{name}.py')
@@ -468,10 +468,10 @@ async def main():
     if inputs['failure']=='missing': (store_path/(base.key+'.atomsnap')).unlink()
     async with BrokerClient(origin,inputs['admin'],GrantCodec(inputs['key'].encode())) as client:
         coordinator=ExecutionCoordinator(repo,client,completion_codec=CompletionGrantCodec(b'c'*32))
-        async def http_control(token, *, action='complete', body=b'', headers=None):
+        async def http_control(token, *, action='complete', body=b'', headers=None, application=None):
             import socket,uvicorn
             listener=socket.socket();listener.bind(('127.0.0.1',0));listener.setblocking(False)
-            server=uvicorn.Server(uvicorn.Config(ExecutionAPI(coordinator,store,CompletionGrantCodec(b'c'*32)),
+            server=uvicorn.Server(uvicorn.Config(application or ExecutionAPI(coordinator,store,CompletionGrantCodec(b'c'*32)),
                 lifespan='off',log_level='error',access_log=False))
             task=asyncio.create_task(server.serve(sockets=[listener]))
             try:
@@ -609,11 +609,61 @@ asyncio.run(main())
                     assert len(recovered)==1 and recovered[0].outcome=='succeeded'
                     assert await coordinator.reconcile()==()
             if inputs['failure']=='startup':
-                recovered=await coordinator.reconcile()
-                assert len(recovered)==1
-                state=recovered[0]
-                assert state.state=='closed' and state.outcome=='failed' and state.receipt is None
-                assert await coordinator.reconcile()==()
+                from types import SimpleNamespace
+                from app.execution_service import execution_resources,DatabaseLease,ExecutionGateway
+                from app.execution import ExecutionError
+                from starlette.applications import Starlette
+                from starlette.routing import Route
+                config=SimpleNamespace(sandbox_mode='broker',db_path=path,artifact_dir=store_path,
+                    broker_origin=origin,broker_admin_token=inputs['admin'],broker_grant_key=inputs['key'],
+                    completion_grant_key='c'*32)
+                path.chmod(0o600)
+                async def child_lease():
+                    child="import sys,os;sys.path.insert(0,'/tmp/code');from app.execution_service import DatabaseLease;DatabaseLease('/workspace/api.db');os._exit(41)"
+                    process=await asyncio.create_subprocess_exec(sys.executable,'-I','-c',child,
+                        stdout=asyncio.subprocess.PIPE,stderr=asyncio.subprocess.PIPE)
+                    await asyncio.wait_for(process.communicate(),5)
+                    return process.returncode
+                async with execution_resources(config) as resources:
+                    state=repo.recovery('owner','attempt')
+                    assert state.state=='closed' and state.outcome=='failed' and state.receipt is None
+                    try: DatabaseLease(path)
+                    except ExecutionError: pass
+                    else: raise AssertionError('duplicate database owner')
+                    assert await child_lease()!=41
+                    application=Starlette(routes=[Route('/v1/executions/complete',ExecutionGateway(),methods=['POST'])])
+                    application.state.execution=resources
+                    rejected=await http_control('invalid',application=application)
+                    assert rejected.status_code==403
+                    replay=await http_control(lease.completion_grant,application=application)
+                    assert replay.status_code==200 and replay.json()['outcome']=='failed'
+                    repo.reserve('owner',workspace,'run','shutdown-attempt','shutdown-grant',int(time.time())+120)
+                    await asyncio.sleep(2)
+                    await resources.coordinator.prepare('owner','shutdown-attempt',store)
+                assert resources.coordinator.broker._http.is_closed
+                shutdown=repo.recovery('owner','shutdown-attempt')
+                assert shutdown.state=='closed' and shutdown.termination_state=='confirmed' and shutdown.outcome=='failed'
+                assert await child_lease()==41
+                released=DatabaseLease(path);released.close()
+                for unsafe in ('symlink','hardlink','public'):
+                    alias=path.parent/'unsafe.db'
+                    if unsafe=='symlink': alias.symlink_to(path)
+                    elif unsafe=='hardlink': alias.hardlink_to(path)
+                    else: alias=path;path.chmod(0o644)
+                    try: DatabaseLease(alias)
+                    except ExecutionError: pass
+                    else: raise AssertionError('unsafe database accepted')
+                    if alias!=path: alias.unlink()
+                    path.chmod(0o600)
+                original_path=config.db_path
+                config.db_path=path.parent/'unmigrated.db'
+                with sqlite3.connect(config.db_path) as db: db.execute('CREATE TABLE unrecognized(x)')
+                config.db_path.chmod(0o600)
+                try:
+                    async with execution_resources(config): raise AssertionError('unmigrated database accepted')
+                except RevisionError: pass
+                released=DatabaseLease(config.db_path);released.close()
+                config.db_path=original_path
             elif inputs['failure']=='storage':
                 import fcntl,os
                 lock=os.open(store_path,os.O_RDONLY|os.O_DIRECTORY);fcntl.flock(lock,fcntl.LOCK_EX)

@@ -89,3 +89,5 @@ FR-006 workspace identity: new committed projects and race heats MUST obtain an 
 FR-006 initial import: trusted quiescent legacy workspaces must be exported and stored as verified immutable bytes before root registration. Exact replay must preserve identity; changed input must not reset an existing root or head. Import must reject source roots containing control-plane database or artifact storage.
 
 FR-005 startup recovery: before broker-backed API admission, interrupted attempts must be enumerated from the durable ledger and revoked with separately confirmed termination. Preserve already-decided outcomes and receipts; absence of a success decision is not success. Capacity exhaustion, timeout or uncertain termination must prevent readiness.
+
+FR-007 application startup: production requires broker mode and explicit separate broker/completion credentials. The API must hold exclusive host-local database ownership while recovering and serving, refuse unsafe or unmigrated databases, expose scoped completion/cancellation only after recovery, and reject dispatch without a prepared lease. Health must include authenticated broker readiness.

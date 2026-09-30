@@ -5,8 +5,12 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from starlette.routing import Route
 
 from .db import engine
+from .config import get_settings
+from .execution_service import ExecutionGateway, execution_resources
+from .sandbox.client import BrokerClientError
 from .errors import AtomError
 from .models import Base
 from .routers import auth, preview, projects, publish, settings, usage
@@ -17,14 +21,23 @@ from .services.runtime_client import runtime_client
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    verify_schema(engine)
-    Base.metadata.create_all(engine)
-    await orchestrator.reconcile()
-    yield
-    await orchestrator.shutdown()
+    _app.state.execution = None
+    async with execution_resources(get_settings()) as resources:
+        verify_schema(engine)
+        if resources is None:
+            Base.metadata.create_all(engine)
+        await orchestrator.reconcile()
+        _app.state.execution = resources
+        try:
+            yield
+        finally:
+            _app.state.execution = None
+            await orchestrator.shutdown()
 
 
 app = FastAPI(title="Atoms Demo API", version="1.0.0", lifespan=lifespan)
+for action in ('complete', 'cancel'):
+    app.router.routes.append(Route('/v1/executions/' + action, ExecutionGateway(), methods=['POST']))
 
 
 @app.exception_handler(AtomError)
@@ -86,6 +99,18 @@ def _explain(item: dict[str, object]) -> str:
 @app.get("/api/health")
 async def health() -> JSONResponse:
     runtime_ready = await runtime_client.healthy()
+    if get_settings().sandbox_mode == 'broker':
+        resources = getattr(app.state, 'execution', None)
+        broker_ready = False
+        if resources is not None:
+            try:
+                await resources.coordinator.broker.require_ready()
+                broker_ready = True
+            except BrokerClientError:
+                pass
+        ready = runtime_ready and broker_ready
+        return JSONResponse(status_code=200 if ready else 503,
+                            content={'ok':ready,'runtime':runtime_ready,'broker':broker_ready})
     return JSONResponse(status_code=200 if runtime_ready else 503,
                         content={"ok": runtime_ready, "runtime": runtime_ready})
 

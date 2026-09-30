@@ -12,6 +12,40 @@ from app.sandbox.client import BrokerClient, BrokerClientError
 from app.sandbox.grants import Grant, GrantCodec
 
 
+@pytest.mark.parametrize('body,status', [
+    (b'{"alive":true,"ready":true}',200),
+    (b'{"alive":true,"ready":false}',200),
+    (b'{"alive":true,"ready":1}',200),
+    (b'{"alive":true,"ready":true,"extra":true}',200),
+    (b'{"alive":true,"ready":true}',503),
+    (b'x'*1025,200),
+])
+def test_actual_readiness_requires_authenticated_exact_positive_response(body,status):
+    admin=secrets.token_urlsafe(32)
+    observed=[]
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self,*args): pass
+        def do_GET(self):
+            observed.append((self.path,self.headers.get('Authorization')))
+            self.send_response(status)
+            self.send_header('Content-Type','application/json')
+            self.end_headers()
+            self.wfile.write(body)
+    server=ThreadingHTTPServer(('127.0.0.1',0),Handler)
+    thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
+    async def scenario():
+        async with BrokerClient(f'http://127.0.0.1:{server.server_port}',admin,GrantCodec(b'k'*32)) as client:
+            if status==200 and body==b'{"alive":true,"ready":true}':
+                await client.require_ready()
+            else:
+                with pytest.raises(BrokerClientError): await client.require_ready()
+    try:
+        asyncio.run(scenario())
+        assert observed==[('/ready','Bearer '+admin)]
+    finally:
+        server.shutdown();server.server_close();thread.join(timeout=3)
+
+
 @pytest.mark.parametrize('origin', ['http://example.com','http://localhost:80','https://user:secret@example.com',
     'https://example.com/path','https://example.com?x=1','https://example.com/#part','file:///tmp/socket'])
 def test_invalid_origin_rejected_without_network(origin):

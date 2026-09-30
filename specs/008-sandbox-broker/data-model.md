@@ -52,3 +52,5 @@ Workspace identity creation: the repository may insert revision_workspaces for a
 ImportedWorkspace is a trusted offline operation result containing workspace_id, revision_id and verified Artifact metadata. It adds no schema or acceptance status. The artifact becomes durable before root registration; a failure between these steps can retain unreferenced bytes without changing the workspace head.
 
 PendingExecution is a trusted cleanup inventory view (current owner, attempt ID), including expired, cancelled and unknown nonclosed rows and excluding confirmed closed rows. It contains no bearer capability, fence or snapshot issuance inputs. Inventory capacity failure returns no partial result.
+
+ExecutionResources groups the application-owned repository, store, coordinator and execution ASGI boundary. It is process-local and carries no persisted acceptance state. DatabaseLease locks the existing private Linux database inode for the resource lifetime; no new database or lock row is created. Startup never migrates implicitly.

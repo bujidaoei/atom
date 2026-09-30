@@ -15,6 +15,11 @@ BASE = dict(secret="synthetic-session-signing-key-32-characters",
             runtime_token="synthetic-runtime-service-key-32-characters",
             runtime_url="http://127.0.0.1:8721", cookie_secure=True)
 
+BROKER = dict(broker_origin='http://127.0.0.1:8766', artifact_dir=os.path.abspath('private-artifacts'),
+              broker_admin_token='synthetic-broker-admin-key-32-characters',
+              broker_grant_key='synthetic-broker-grant-key-32-characters',
+              completion_grant_key='synthetic-completion-key-32-characters')
+
 
 @pytest.mark.parametrize("patch", [
     {"secret": ""}, {"secret": "dev-secret-change-me"},
@@ -35,11 +40,30 @@ def test_configuration_rejects_invalid_or_unsafe_values(patch):
 
 
 def test_valid_production_transport_and_redacted_representation():
-    settings = Settings(_env_file=None, **(BASE | {"environment": "production"}))
+    settings = Settings(_env_file=None, **(BASE | BROKER | {"environment": "production"}))
     assert settings.cookie_secure
     assert BASE["secret"] not in repr(settings)
     assert BASE["runtime_token"] not in repr(settings)
-    assert Settings(_env_file=None, **(BASE | {"environment": "production", "runtime_url": "https://runtime.invalid"}))
+    assert settings.sandbox_mode == 'broker'
+    assert all(value not in repr(settings) for key,value in BROKER.items() if key.endswith(('token','key')))
+    assert Settings(_env_file=None, **(BASE | BROKER | {"environment": "production", "runtime_url": "https://runtime.invalid"}))
+
+
+@pytest.mark.parametrize('patch', [
+    {'sandbox_mode':'local'}, {'broker_origin':None}, {'broker_origin':'http://broker.invalid'},
+    {'broker_origin':'http://127.0.0.1:8766/path'}, {'artifact_dir':'relative'},
+    {'broker_admin_token':None}, {'broker_grant_key':'short'},
+    {'completion_grant_key':BROKER['broker_grant_key']}, {'broker_admin_token':BASE['runtime_token']},
+])
+def test_production_requires_distinct_complete_broker_configuration(patch):
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, **(BASE | BROKER | {'environment':'production'} | patch))
+
+
+def test_local_execution_routes_are_unavailable(client):
+    for action in ('complete','cancel'):
+        response=client.post('/v1/executions/'+action)
+        assert response.status_code==503 and response.json()=={'error':'execution_unavailable'}
 
 
 def test_invalid_startup_does_not_log_configuration_secrets(tmp_path):
@@ -79,12 +103,17 @@ def test_runtime_health_uses_authentication_and_detects_rejection(monkeypatch, c
         healthy = client.get("/api/health")
         assert healthy.status_code == 200
         assert healthy.json() == {"ok": True, "runtime": True}
+        monkeypatch.setattr(get_settings(), 'sandbox_mode', 'broker')
+        unavailable=client.get('/api/health')
+        assert unavailable.status_code==503
+        assert unavailable.json()=={'ok':False,'runtime':True,'broker':False}
+        monkeypatch.setattr(get_settings(), 'sandbox_mode', 'local')
         monkeypatch.setattr(get_settings(), "runtime_token", "different-synthetic-runtime-token-12345")
         monkeypatch.setattr(main, "runtime_client", RuntimeClient())
         rejected = client.get("/api/health")
         assert rejected.status_code == 503
         assert rejected.json() == {"ok": False, "runtime": False}
-        assert observed == [True, False]
+        assert observed == [True, True, False]
     finally:
         server.shutdown()
         server.server_close()

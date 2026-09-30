@@ -45,6 +45,7 @@ class RuntimeClient:
     def __init__(self) -> None:
         settings = get_settings()
         self._base_url = settings.runtime_url.rstrip("/")
+        self._requires_lease = settings.sandbox_mode == 'broker'
         self._headers = {"Authorization": f"Bearer {settings.runtime_token}"}
         # `read` bounds the gap between NDJSON lines, not the whole turn, but
         # a tool call can run silently for a while, so it tracks the run
@@ -79,6 +80,8 @@ class RuntimeClient:
         execution_owner: str | None = None,
     ) -> AsyncIterator[RuntimeLine]:
         """Stream one agent turn. Yields every line until a terminal one."""
+        if self._requires_lease and execution_lease is None:
+            raise RuntimeUnavailable('代理执行需要已准备的执行租约')
         body: dict[str, Any] = {
             "runId": run_id,
             "role": role,

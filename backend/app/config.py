@@ -52,6 +52,12 @@ class Settings(BaseSettings):
     # --- agent runtime sidecar -----------------------------------------
     runtime_url: str = "http://127.0.0.1:8721"
     runtime_token: str = Field(repr=False)
+    sandbox_mode: Literal['local', 'broker'] | None = None
+    broker_origin: str | None = None
+    artifact_dir: Path | None = None
+    broker_admin_token: str | None = Field(default=None, repr=False)
+    broker_grant_key: str | None = Field(default=None, repr=False)
+    completion_grant_key: str | None = Field(default=None, repr=False)
 
     # --- quotas ---------------------------------------------------------
     starting_credits: int = Field(default=200, ge=0, le=1_000_000)
@@ -75,6 +81,24 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_transport(self) -> Settings:
+        self.sandbox_mode = self.sandbox_mode or ('broker' if self.environment == 'production' else 'local')
+        if self.environment == 'production' and self.sandbox_mode != 'broker':
+            raise ValueError('production requires broker execution')
+        if self.sandbox_mode == 'broker':
+            from .sandbox.client import _origin, BrokerClientError
+            try:
+                self.broker_origin = _origin(self.broker_origin)
+            except BrokerClientError:
+                raise ValueError('invalid broker origin') from None
+            if self.artifact_dir is None or not self.artifact_dir.is_absolute():
+                raise ValueError('broker execution requires an absolute artifact directory')
+            values = (self.broker_admin_token, self.broker_grant_key, self.completion_grant_key)
+            if any(not isinstance(value, str) or not 32 <= len(value) <= 128
+                   or any(not 33 <= ord(c) <= 126 for c in value)
+                   or any(marker in value.lower() for marker in ('change-me', 'dev-secret')) for value in values):
+                raise ValueError('broker execution requires independent 32–128 character secrets')
+            if len(set(values)) != 3 or any(value in (self.secret, self.runtime_token, self.llm_api_key) for value in values):
+                raise ValueError('execution secrets must be distinct from other service credentials')
         if self.secret == self.runtime_token:
             raise ValueError("session signing and runtime authentication require different secrets")
         try:
