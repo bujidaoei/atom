@@ -3,7 +3,7 @@ import { basename, dirname, join, resolve } from 'node:path';
 import { v3SkillReferenceSource, v3SkillReferences } from '../../product-contracts/src/v3-skill-reference.ts';
 import { resolveV3SkillReferencePrompt } from './v3-skill-references.ts';
 import { recoveredRunUsage } from './recovered-run-usage.ts';
-import { withSandbox } from './sandbox-lifecycle.ts';
+import { withSandbox, validateSandboxScope, type ExternalSandboxScope } from './sandbox-lifecycle.ts';
 
 import type {
   AgentRunRequest,
@@ -57,6 +57,8 @@ export interface ProductAgentRuntimeOptions {
   aiGateway: EnterpriseAiGatewayConfiguration;
   agentDir: string;
   sandbox: SandboxClient;
+  /** Trusted outer lifecycle owns acquisition/checkpoint/release across recovery. */
+  sandboxScope?: ExternalSandboxScope;
   approvals: ApprovalAdapter;
   events: ProductEventSink;
   enableTools?: boolean;
@@ -139,10 +141,11 @@ export class ProductAgentRuntime {
   private readonly options: ProductAgentRuntimeOptions;
 
   constructor(options: ProductAgentRuntimeOptions) {
-    this.options = options;
+    this.options = { ...options, sandboxScope: options.sandboxScope ? Object.freeze({ ...options.sandboxScope }) : undefined };
   }
 
   async run(request: AgentRunRequest): Promise<ProductAgentRunResult> {
+    validateSandboxScope(this.options.sandboxScope, request.runId);
     await mkdir(request.workspacePath, { recursive: true });
     await mkdir(dirname(request.sessionPath), { recursive: true });
     await mkdir(this.options.agentDir, { recursive: true });
@@ -651,7 +654,7 @@ export class ProductAgentRuntime {
         unsubscribeArrivals?.();
         await runtime.dispose();
       }
-    });
+    }, this.options.sandboxScope);
   }
 }
 

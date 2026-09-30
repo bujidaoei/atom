@@ -8,7 +8,7 @@ import { ProductAgentRuntime } from '../packages/agent-runtime/src/product-agent
 import { LocalSandboxClient } from './local-sandbox.ts';
 import { runWithRecovery } from './run-recovery.ts';
 
-test('real Pi session recovers length stop without replaying successful tool', async () => {
+for (const external of [false, true]) test(`real Pi session recovers length stop with ${external ? 'external' : 'local'} ownership`, async () => {
   const requests: any[] = [];
   const server = createServer(async (req, res) => {
     const chunks = [];
@@ -30,7 +30,10 @@ test('real Pi session recovers length stop without replaying successful tool', a
   try {
     const workspacePath = join(root, 'workspace');
     const local = new LocalSandboxClient({ resolveWorkspace: () => workspacePath });
+    const acquired = external ? await local.create('recovery-test', 'workspace') : undefined;
+    if (external) acquisitions++;
     const runtime = new ProductAgentRuntime({
+      sandboxScope: external ? { runId: 'recovery-test', workspaceId: 'workspace', sandboxId: acquired! } : undefined,
       aiGateway: { baseUrl: `http://127.0.0.1:${(server.address() as any).port}/v1`, masterKey: 'test-key', model: 'test-model', requestTimeoutMs: 5000 },
       agentDir: join(root, 'agent'), sandbox: {
         async create(runId, workspaceId) { acquisitions++; return local.create(runId, workspaceId); },
@@ -41,12 +44,18 @@ test('real Pi session recovers length stop without replaying successful tool', a
       workspaceToolNames: ['write', 'edit', 'read_file', 'glob', 'grep'],
       events: { async emit(type, payload) { if (type === 'tool.completed' && payload.toolName === 'write') writes++; } },
     });
-    const result = await runWithRecovery({ signal: new AbortController().signal, onRecover() {},
+    let result;
+    try { result = await runWithRecovery({ signal: new AbortController().signal, onRecover() {},
       run: recovery => runtime.run({ runId: 'recovery-test', prompt: 'write then finish', workspacePath, sessionPath: join(root, 'session.jsonl'), recovery }),
-    });
+    }); } finally {
+      if (external) {
+        assert.equal(releases, 0, 'runtime must not destroy externally owned sandbox');
+        await local.destroy(acquired!); releases++;
+      }
+    }
     assert.equal(result.resultText, 'recovered');
     assert.equal(writes, 1);
-    assert.equal(acquisitions, 2);
+    assert.equal(acquisitions, external ? 1 : 2);
     assert.equal(releases, acquisitions);
     assert.equal(requests.length, 3);
     assert.ok(!requests[0].tools.some((tool: any) => tool.function.name === 'sandbox_exec'));

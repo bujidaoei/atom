@@ -19,6 +19,24 @@ function fixture(overrides: Partial<SandboxClient> = {}) {
   return { client, calls };
 }
 
+test('runtime rejects mutated external scope before filesystem initialization', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'atom-external-scope-'));
+  const { client, calls } = fixture();
+  const scope = { runId: 'run', workspaceId: 'workspace', sandboxId: 'owned' };
+  const runtime = new ProductAgentRuntime({ sandboxScope: scope, sandbox: client,
+    agentDir: join(root, 'agent'), aiGateway: { baseUrl: 'http://127.0.0.1:1/v1', masterKey: 'test', model: 'test' },
+    approvals: { request: async () => 'approved' }, events: { async emit() {} },
+  });
+  scope.runId = 'other';
+  try {
+    await assert.rejects(runtime.run({ runId: 'other', prompt: 'unused', workspacePath: join(root, 'workspace'),
+      sessionPath: join(root, 'sessions', 'session.jsonl') }), /scope mismatch/);
+    const { readdir } = await import('node:fs/promises');
+    assert.deepEqual(await readdir(root), []);
+    assert.deepEqual(calls, []);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
 test('successful operation awaits exactly one release before returning', async () => {
   let release: () => void = () => { throw new Error('release has not started'); };
   const calls: string[] = [];
@@ -62,6 +80,17 @@ test('failed acquisition never guesses a resource ID or invokes work', async () 
 test('tools disabled executes without acquisition or release', async () => {
   const { client, calls } = fixture();
   assert.equal(await withSandbox(client, 'run', false, async id => { assert.equal(id, undefined); return 'done'; }), 'done');
+  assert.deepEqual(calls, []);
+});
+
+test('external scope rejects another run and leaves cleanup to its owner on failure', async () => {
+  const { client, calls } = fixture();
+  const scope = { runId: 'run', workspaceId: 'workspace', sandboxId: 'already-owned' };
+  await assert.rejects(withSandbox(client, 'other', true, async () => assert.fail('wrong scope work'), scope), /scope mismatch/);
+  const failure = new Error('operation failed');
+  await assert.rejects(withSandbox(client, 'run', true, async id => {
+    assert.equal(id, 'already-owned'); throw failure;
+  }, scope), error => error === failure);
   assert.deepEqual(calls, []);
 });
 

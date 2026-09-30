@@ -59,3 +59,5 @@ T008/T009 continuation: mountable execution complete/cancel HTTP boundary now ve
 T008/T009 continuation: Node ExecutionClient implements bounded complete/cancel HTTP with strict terminal/receipt correlation and no automatic retry. Actual Node -> broker file write -> Linux execution API -> immutable storage/registration/confirmed release passes. Existing broker/lifecycle/Pi boundary checks pass. Production server and lifecycle integration remain open; transport alone does not close either task.
 
 T008/T009 continuation: withExecution now composes actual sandbox/completion clients with explicit workspace identity and completion-before-release ordering. Fault/recovery tests and real Node/Linux/Docker helper pass. Production ProductAgentRuntime external-scope and server recovery-loop adoption remain open; tasks stay unchecked.
+
+T008/T009 continuation: ProductAgentRuntime external sandbox ownership is implemented, copied/frozen and scope-checked before session IO. Real Pi truncated-response recovery reuses one sandbox without replaying the successful write. Production server/API lease acquisition and completion hooks remain open; no checkbox closure.
