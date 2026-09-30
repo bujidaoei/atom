@@ -23,6 +23,8 @@ def _slugify(title: str) -> str:
 
 @router.post("/{project_id}/publish")
 def publish(project: OwnedProject, session: DbSession) -> dict[str, str]:
+    if project.status != "ready":
+        raise HTTPException(status.HTTP_409_CONFLICT, "生成尚未完成，请完成后再发布")
     workspace = storage.workspace_dir(project.id)
     if not (workspace / "index.html").is_file():
         raise HTTPException(status.HTTP_409_CONFLICT, "还没有可发布的页面")

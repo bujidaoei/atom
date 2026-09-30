@@ -15,6 +15,7 @@ import { ProductAgentRuntime } from '../packages/agent-runtime/src/product-agent
 import type { RunEventType } from '../packages/product-contracts/src/index.ts';
 import { LocalSandboxClient } from './local-sandbox.ts';
 import { allRoles, roleDefinition } from './squad.ts';
+import { runWithRecovery } from './run-recovery.ts';
 
 const PORT = Number(process.env.ATOM_RUNTIME_PORT ?? 8721);
 const HOST = process.env.ATOM_RUNTIME_HOST ?? '127.0.0.1';
@@ -32,6 +33,7 @@ interface RunBody {
   gateway: { baseUrl: string; apiKey: string; model: string; requestTimeoutMs?: number };
   systemPromptSuffix?: string;
   enableTools?: boolean;
+  budgetMs?: number;
 }
 
 const active = new Map<string, AbortController>();
@@ -80,6 +82,7 @@ async function startRun(request: IncomingMessage, response: ServerResponse): Pro
 
   const controller = new AbortController();
   active.set(body.runId, controller);
+  const deadline = setTimeout(() => controller.abort(), Math.max(1, Math.min(body.budgetMs ?? 180_000, 1_800_000)) + 1000);
 
   response.writeHead(200, {
     'content-type': 'application/x-ndjson; charset=utf-8',
@@ -123,12 +126,20 @@ async function startRun(request: IncomingMessage, response: ServerResponse): Pro
         },
       },
       enableTools: body.enableTools ?? role.tools,
-      systemPrompt: body.systemPromptSuffix
+      workspaceToolNames: ['glob', 'grep', 'read_file', 'write', 'edit'],
+      systemPrompt: (body.systemPromptSuffix
         ? `${role.systemPrompt}\n\n## Context from the squad\n${body.systemPromptSuffix}`
-        : role.systemPrompt,
+        : role.systemPrompt) + `\n\nThis turn has a wall-clock budget of ${(body.budgetMs ?? 180_000) / 1000} seconds including tools and recovery. Finish core functionality within this budget.`,
     });
 
-    const result = await runtime.run({
+    const result = await runWithRecovery({
+      signal: controller.signal,
+      onRecover(attempt, maxAttempts) {
+        write({ kind: 'event', type: 'run.recovering', payload: {
+          attempt, maxAttempts, message: `响应被截断，正在从已有进度恢复（${attempt}/${maxAttempts}）`,
+        } });
+      },
+      run: (recovery) => runtime.run({
       runId: body.runId,
       prompt: body.prompt,
       workspacePath: body.workspacePath,
@@ -136,6 +147,8 @@ async function startRun(request: IncomingMessage, response: ServerResponse): Pro
       ...(body.parentSessionPath ? { parentSessionPath: body.parentSessionPath } : {}),
       model: body.gateway.model,
       signal: controller.signal,
+      recovery,
+      }),
     });
 
     write({
@@ -154,6 +167,7 @@ async function startRun(request: IncomingMessage, response: ServerResponse): Pro
       message: describe(error),
     });
   } finally {
+    clearTimeout(deadline);
     active.delete(body.runId);
     response.end();
   }

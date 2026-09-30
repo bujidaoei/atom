@@ -1,0 +1,2 @@
+# Data model
+No SQL schema change. Existing status columns add cancelled/timed_out/interrupted. Run finished_at/error retained. Race/heat records must all terminate. Heat.run_id links Run. Project detail includes latest run diagnostics. Checks add optional setup: fill(selector,value), click(selector), press(selector,key), bounded to 12. Existing checks remain valid. Terminal event follows committed outcome.

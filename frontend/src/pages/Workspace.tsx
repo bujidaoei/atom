@@ -84,6 +84,7 @@ export function WorkspacePage() {
   const stream = useProjectStream({
     projectId: id,
     enabled: Boolean(id),
+    snapshotStatus: project?.status,
     onProjectUpdated: handleProjectUpdated,
   });
 
@@ -115,6 +116,23 @@ export function WorkspacePage() {
   }, [fileSignature]);
 
   const running = project ? isRunningStatus(project.status) : false;
+  useEffect(() => {
+    if (!running && stream.connection !== "retrying") return;
+    const timer = window.setInterval(() => void load(true), 3000);
+    return () => window.clearInterval(timer);
+  }, [running, stream.connection, load]);
+
+  async function resume() {
+    if (!id || !project) return;
+    setStarting(true);
+    setActionError(null);
+    try {
+      if (!project.requirements.length) await api.plan(id);
+      else await api.revise(id, "继续未完成的生成，先检查已有文件并补齐契约，不要重复已完成的工作。");
+      await load(true);
+    } catch (err) { setActionError(errorMessage(err)); }
+    finally { setStarting(false); }
+  }
 
   async function submitRevise() {
     if (!id || !reviseText.trim()) return;
@@ -162,9 +180,14 @@ export function WorkspacePage() {
     setAcceptanceError(null);
     setTab("contract");
     try {
-      const doc = iframeRef.current?.contentDocument;
-      if (!doc || !doc.body) {
-        throw new Error("预览还没加载完，先打开「预览」标签等页面出来再试。");
+      let doc = iframeRef.current?.contentDocument;
+      const deadline = Date.now() + 10000;
+      while ((!doc?.body || doc.readyState !== "complete" || doc.URL === "about:blank") && Date.now() < deadline) {
+        await new Promise(resolve => window.setTimeout(resolve, 100));
+        doc = iframeRef.current?.contentDocument;
+      }
+      if (!doc?.body || doc.readyState !== "complete" || doc.URL === "about:blank") {
+        throw new Error("预览加载超时，请刷新预览后重试。");
       }
       const results = await runAcceptance(doc, project.requirements);
       const data = await api.postAcceptance(id, results);
@@ -214,7 +237,7 @@ export function WorkspacePage() {
     );
   }
 
-  const activeMeta = agentMeta(stream.activeRole);
+  const activeMeta = agentMeta(running ? stream.activeRole : null);
   const hasFiles = project.files.length > 0;
 
   return (
@@ -266,7 +289,7 @@ export function WorkspacePage() {
             variant={project.slug ? "secondary" : "primary"}
             size="sm"
             loading={publishBusy}
-            disabled={!hasFiles && !project.slug}
+            disabled={!project.slug && (!hasFiles || project.status !== "ready")}
             onClick={() => void togglePublish()}
           >
             {project.slug ? "取消发布" : "发布"}
@@ -277,6 +300,13 @@ export function WorkspacePage() {
           </IconButton>
         </div>
       </header>
+
+      {["error", "cancelled", "timed_out", "interrupted"].includes(project.status) ? (
+        <div role="status" className="flex shrink-0 items-center gap-m border-b border-neutral-12 px-l py-s text-sm">
+          <div className="flex-1">{project.latestRun?.error || "本轮未完成。"} {hasFiles ? "可预览已有文件，尚未完成验收。" : "可以重新尝试。"}</div>
+          <Button size="sm" variant="secondary" loading={starting} onClick={() => void resume()}>继续生成</Button>
+        </div>
+      ) : running ? <div role="status" className="px-l py-xs text-xs text-neutral-60">正在生成，本轮构建上限 {project.buildBudgetSeconds} 秒；完成前可随时停止。</div> : null}
 
       {actionError ? (
         <div className="shrink-0 px-l pt-s">
@@ -302,8 +332,8 @@ export function WorkspacePage() {
               onChange={setReviseText}
               onSubmit={() => void submitRevise()}
               submitting={starting}
-              disabled={running}
-              disabledReason="squad 正在跑，等这一轮结束再说。"
+              disabled={running || project.status === "awaiting_approval"}
+              disabledReason={running ? "正在生成，可点击停止结束这一轮。" : "请在契约页填写补充要求并确认。"}
               submitLabel="发送"
               minRows={1}
               placeholder={
@@ -404,7 +434,7 @@ export function WorkspacePage() {
                 onRunAcceptance={runChecksNow}
                 acceptanceRunning={acceptanceRunning}
                 acceptanceError={acceptanceError}
-                canRunAcceptance={hasFiles && project.requirements.length > 0}
+                canRunAcceptance={!running && hasFiles && project.requirements.length > 0}
               />
             </div>
           ) : null}

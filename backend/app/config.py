@@ -9,7 +9,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     """Process configuration. Every key is overridable via an ``ATOM_`` env var."""
 
-    model_config = SettingsConfigDict(env_prefix="ATOM_", env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_prefix="ATOM_", env_file=".env", extra="ignore"
+    )
 
     # --- security -------------------------------------------------------
     secret: str = "dev-secret-change-me"
@@ -30,10 +32,9 @@ class Settings(BaseSettings):
     # Budget for a whole agent turn. A build turn writes several files and
     # runs shell verification, so it legitimately outlives many model calls.
     run_timeout_seconds: int = 1800
-    # Wall-clock cap on a build turn. Agents will keep polishing forever if
-    # allowed to; past this point the run is stopped and whatever is on disk
-    # is what ships. The user can always ask for more in the next message.
-    build_budget_seconds: int = 480
+    # Hard elapsed-time cap, including silent transport and recovery.
+    # Timeout preserves files but is never successful completion.
+    build_budget_seconds: int = 180
 
     # The gateway closes a response that stays open for roughly 60 seconds,
     # so throughput matters more than raw capability: a slow model gets cut

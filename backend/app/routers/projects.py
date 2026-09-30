@@ -24,8 +24,21 @@ router = APIRouter(prefix="/projects", tags=["projects"])
 HEARTBEAT_SECONDS = 15
 # Anything the agent writes that a browser should never be handed back.
 _TEXT_SUFFIXES = {
-    ".html", ".htm", ".css", ".js", ".mjs", ".json", ".md", ".txt",
-    ".svg", ".ts", ".jsx", ".tsx", ".yml", ".yaml", ".csv",
+    ".html",
+    ".htm",
+    ".css",
+    ".js",
+    ".mjs",
+    ".json",
+    ".md",
+    ".txt",
+    ".svg",
+    ".ts",
+    ".jsx",
+    ".tsx",
+    ".yml",
+    ".yaml",
+    ".csv",
 }
 
 
@@ -59,7 +72,9 @@ class RaceBody(BaseModel):
 @router.get("")
 def list_projects(user: CurrentUser, session: DbSession) -> dict[str, object]:
     projects = session.scalars(
-        select(Project).where(Project.user_id == user.id).order_by(Project.updated_at.desc())
+        select(Project)
+        .where(Project.user_id == user.id)
+        .order_by(Project.updated_at.desc())
     ).all()
     return {"projects": [project_summary(project) for project in projects]}
 
@@ -103,7 +118,9 @@ def read_file(project: OwnedProject, path: str) -> PlainTextResponse:
     try:
         return PlainTextResponse(target.read_text("utf-8"))
     except (UnicodeDecodeError, OSError):
-        raise HTTPException(status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, "该文件不是文本") from None
+        raise HTTPException(
+            status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, "该文件不是文本"
+        ) from None
 
 
 # ------------------------------------------------------------------ actions
@@ -120,7 +137,7 @@ def _guard(project: Project, allowed: set[str]) -> None:
 
 @router.post("/{project_id}/plan")
 async def plan(project: OwnedProject, user: CurrentUser) -> dict[str, str]:
-    _guard(project, {"draft", "error"})
+    _guard(project, {"draft", "error", "cancelled", "timed_out", "interrupted"})
     try:
         job = await orchestrator.start_plan(project.id, user.id)
     except AtomError as error:
@@ -141,8 +158,10 @@ async def approve(
 
 
 @router.post("/{project_id}/revise")
-async def revise(body: ReviseBody, project: OwnedProject, user: CurrentUser) -> dict[str, str]:
-    _guard(project, {"ready", "error"})
+async def revise(
+    body: ReviseBody, project: OwnedProject, user: CurrentUser
+) -> dict[str, str]:
+    _guard(project, {"ready", "error", "cancelled", "timed_out", "interrupted"})
     try:
         job = await orchestrator.start_revise(project.id, user.id, body.message.strip())
     except AtomError as error:
@@ -185,10 +204,14 @@ async def events(
                 if await request.is_disconnected():
                     return
                 try:
-                    event = await asyncio.wait_for(queue.get(), timeout=HEARTBEAT_SECONDS)
+                    event = await asyncio.wait_for(
+                        queue.get(), timeout=HEARTBEAT_SECONDS
+                    )
                 except asyncio.TimeoutError:
                     yield ": ping\n\n"
                     continue
+                if event.type == "stream.resync":
+                    return
                 if event.seq <= highest:
                     continue  # already delivered by the replay
                 highest = event.seq
@@ -225,11 +248,16 @@ def record_acceptance(
     ):
         valid[requirement.key] = len(json.loads(requirement.checks_json))
 
-    results = [
-        result.model_dump()
-        for result in body.results
-        if result.key in valid and 0 <= result.checkIndex < valid[result.key]
-    ]
+    expected = {(key, index) for key, count in valid.items() for index in range(count)}
+    actual = [(result.key, result.checkIndex) for result in body.results]
+    if not expected or set(actual) != expected or len(actual) != len(expected):
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "验收结果必须完整覆盖契约，不能重复或包含未知检查",
+        )
+    if orchestrator.active(project.id):
+        raise HTTPException(status.HTTP_409_CONFLICT, "请等待生成结束后运行验收")
+    results = [result.model_dump() for result in body.results]
     total = sum(valid.values())
     passed = sum(1 for result in results if result["passed"])
 
@@ -278,7 +306,11 @@ def read_race(project: OwnedProject, session: DbSession) -> dict[str, object]:
 
 
 @router.post("/{project_id}/race/{heat_id}/adopt")
-def adopt_heat(project: OwnedProject, heat_id: str, session: DbSession) -> dict[str, bool]:
+def adopt_heat(
+    project: OwnedProject, heat_id: str, session: DbSession
+) -> dict[str, bool]:
+    if orchestrator.active(project.id):
+        raise HTTPException(status.HTTP_409_CONFLICT, "请等待所有赛道结束后再采用")
     heat = session.get(RaceHeat, heat_id)
     race = session.get(Race, heat.race_id) if heat else None
     if heat is None or race is None or race.project_id != project.id:

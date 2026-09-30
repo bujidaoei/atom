@@ -1,0 +1,218 @@
+[
+  {
+    "name": "calculator",
+    "id": "d6c24d0f0004462caaad1d27d6520d89",
+    "status": "timed_out",
+    "http": 200,
+    "errors": [],
+    "checks": [
+      {
+        "key": "display-and-digits",
+        "checkIndex": 0,
+        "passed": true,
+        "note": "匹配到 [data-testid='calculator']"
+      },
+      {
+        "key": "display-and-digits",
+        "checkIndex": 1,
+        "passed": true,
+        "note": "包含「0」"
+      },
+      {
+        "key": "display-and-digits",
+        "checkIndex": 2,
+        "passed": true,
+        "note": "点击后出现了 [data-testid='calc-display'][data-value='7']"
+      },
+      {
+        "key": "four-operations",
+        "checkIndex": 0,
+        "passed": true,
+        "note": "匹配到 [data-testid='btn-div']"
+      },
+      {
+        "key": "four-operations",
+        "checkIndex": 1,
+        "passed": true,
+        "note": "匹配到 [data-testid='btn-eq']"
+      },
+      {
+        "key": "four-operations",
+        "checkIndex": 2,
+        "passed": true,
+        "note": "点击后出现了 [data-testid='calc-display'][data-value='10']"
+      },
+      {
+        "key": "divide-by-zero",
+        "checkIndex": 0,
+        "passed": true,
+        "note": "点击后出现了 [data-testid='calc-error']"
+      },
+      {
+        "key": "divide-by-zero",
+        "checkIndex": 1,
+        "passed": true,
+        "note": "包含「除数不能为零」"
+      },
+      {
+        "key": "clear-and-keyboard",
+        "checkIndex": 0,
+        "passed": true,
+        "note": "点击后出现了 [data-testid='calc-display'][data-value='10']"
+      },
+      {
+        "key": "clear-and-keyboard",
+        "checkIndex": 1,
+        "passed": true,
+        "note": "点击后出现了 [data-testid='calc-display'][data-value='0']"
+      }
+    ],
+    "passed": 10,
+    "total": 10,
+    "mobileOverflow": false
+  },
+  {
+    "name": "lottery",
+    "id": "94aaba5d9e704062aaf36f315c75341f",
+    "status": "ready",
+    "http": 200,
+    "errors": [],
+    "checks": [
+      {
+        "key": "add-name",
+        "checkIndex": 0,
+        "passed": true,
+        "note": "匹配到 [data-testid='name-input']"
+      },
+      {
+        "key": "add-name",
+        "checkIndex": 1,
+        "passed": true,
+        "note": "包含「暂无」"
+      },
+      {
+        "key": "add-name",
+        "checkIndex": 2,
+        "passed": true,
+        "note": "点击后出现了 [data-testid='name-item']"
+      },
+      {
+        "key": "draw-winner",
+        "checkIndex": 0,
+        "passed": true,
+        "note": "匹配到 [data-testid='draw-btn']"
+      },
+      {
+        "key": "draw-winner",
+        "checkIndex": 1,
+        "passed": true,
+        "note": "点击后出现了 [data-testid='result']"
+      },
+      {
+        "key": "no-repeat",
+        "checkIndex": 0,
+        "passed": true,
+        "note": "匹配到 [data-testid='winner-list']"
+      },
+      {
+        "key": "no-repeat",
+        "checkIndex": 1,
+        "passed": true,
+        "note": "点击后出现了 [data-testid='winner-item']:nth-child(2)"
+      },
+      {
+        "key": "reset-all",
+        "checkIndex": 0,
+        "passed": true,
+        "note": "匹配到 [data-testid='reset-btn']"
+      },
+      {
+        "key": "reset-all",
+        "checkIndex": 1,
+        "passed": true,
+        "note": "点击后出现了 [data-testid='empty-tip']"
+      }
+    ],
+    "passed": 9,
+    "total": 9,
+    "mobileOverflow": false
+  },
+  {
+    "name": "snake",
+    "id": "46b84c903e244935b942ebd6d52ebafb",
+    "status": "ready",
+    "http": 200,
+    "errors": [],
+    "checks": [
+      {
+        "key": "canvas-board",
+        "checkIndex": 0,
+        "passed": true,
+        "note": "匹配到 [data-testid='game-canvas']"
+      },
+      {
+        "key": "canvas-board",
+        "checkIndex": 1,
+        "passed": true,
+        "note": "匹配到 [data-testid='game-status']"
+      },
+      {
+        "key": "control-buttons",
+        "checkIndex": 0,
+        "passed": true,
+        "note": "匹配到 [data-testid='start-btn']"
+      },
+      {
+        "key": "control-buttons",
+        "checkIndex": 1,
+        "passed": true,
+        "note": "匹配到 [data-testid='pause-btn']"
+      },
+      {
+        "key": "control-buttons",
+        "checkIndex": 2,
+        "passed": true,
+        "note": "匹配到 [data-testid='restart-btn']"
+      },
+      {
+        "key": "score-and-hint",
+        "checkIndex": 0,
+        "passed": true,
+        "note": "匹配到 [data-testid='score-panel']"
+      },
+      {
+        "key": "score-and-hint",
+        "checkIndex": 1,
+        "passed": true,
+        "note": "包含「0」"
+      },
+      {
+        "key": "score-and-hint",
+        "checkIndex": 2,
+        "passed": true,
+        "note": "包含「方向键」"
+      },
+      {
+        "key": "game-flow",
+        "checkIndex": 0,
+        "passed": true,
+        "note": "点击后出现了 [data-testid='game-status'][data-state='running']"
+      },
+      {
+        "key": "game-flow",
+        "checkIndex": 1,
+        "passed": true,
+        "note": "点击后出现了 [data-testid='game-status'][data-state='paused']"
+      },
+      {
+        "key": "game-flow",
+        "checkIndex": 2,
+        "passed": true,
+        "note": "点击后出现了 [data-testid='game-status'][data-state='ready']"
+      }
+    ],
+    "passed": 11,
+    "total": 11,
+    "mobileOverflow": false
+  }
+]

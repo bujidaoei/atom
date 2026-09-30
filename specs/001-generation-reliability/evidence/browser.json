@@ -1,0 +1,141 @@
+[
+  {
+    "name": "calculator",
+    "id": "08f5a868d09a48abbdd4dbbf25a7d7b9",
+    "status": "error",
+    "http": 404,
+    "errors": []
+  },
+  {
+    "name": "lottery",
+    "id": "da78df1149904549b915345fff6f3c36",
+    "status": "ready",
+    "http": 200,
+    "errors": [],
+    "checks": [
+      {
+        "key": "add-name",
+        "checkIndex": 0,
+        "passed": true,
+        "note": "匹配到 [data-testid='name-input']"
+      },
+      {
+        "key": "add-name",
+        "checkIndex": 1,
+        "passed": true,
+        "note": "匹配到 [data-testid='add-btn']"
+      },
+      {
+        "key": "add-name",
+        "checkIndex": 2,
+        "passed": true,
+        "note": "点击后出现了 [data-testid='name-item']"
+      },
+      {
+        "key": "draw-winner",
+        "checkIndex": 0,
+        "passed": true,
+        "note": "匹配到 [data-testid='draw-btn']"
+      },
+      {
+        "key": "draw-winner",
+        "checkIndex": 1,
+        "passed": true,
+        "note": "点击后出现了 [data-testid='winner-name']"
+      },
+      {
+        "key": "no-repeat",
+        "checkIndex": 0,
+        "passed": true,
+        "note": "点击后出现了 [data-testid='winner-name']"
+      },
+      {
+        "key": "no-repeat",
+        "checkIndex": 1,
+        "passed": false,
+        "note": "未包含「1」，实际是「剩余 2 人」"
+      },
+      {
+        "key": "reset-all",
+        "checkIndex": 0,
+        "passed": true,
+        "note": "点击后出现了 [data-testid='empty-hint']"
+      },
+      {
+        "key": "reset-all",
+        "checkIndex": 1,
+        "passed": true,
+        "note": "包含「暂无」"
+      }
+    ],
+    "passed": 8,
+    "total": 9,
+    "mobileOverflow": false
+  },
+  {
+    "name": "snake",
+    "id": "0aeccc1d5661472fa3a31acaf80294a8",
+    "status": "timed_out",
+    "http": 200,
+    "errors": [],
+    "checks": [
+      {
+        "key": "board-and-score",
+        "checkIndex": 0,
+        "passed": true,
+        "note": "匹配到 [data-testid='game-canvas']"
+      },
+      {
+        "key": "board-and-score",
+        "checkIndex": 1,
+        "passed": true,
+        "note": "匹配到 [data-testid='score-value']"
+      },
+      {
+        "key": "control-buttons",
+        "checkIndex": 0,
+        "passed": true,
+        "note": "匹配到 [data-testid='start-btn']"
+      },
+      {
+        "key": "control-buttons",
+        "checkIndex": 1,
+        "passed": true,
+        "note": "匹配到 [data-testid='pause-btn']"
+      },
+      {
+        "key": "control-buttons",
+        "checkIndex": 2,
+        "passed": true,
+        "note": "匹配到 [data-testid='restart-btn']"
+      },
+      {
+        "key": "play-pause-flow",
+        "checkIndex": 0,
+        "passed": true,
+        "note": "点击后出现了 [data-testid='pause-overlay']"
+      },
+      {
+        "key": "play-pause-flow",
+        "checkIndex": 1,
+        "passed": true,
+        "note": "点击后出现了 [data-testid='start-overlay']"
+      },
+      {
+        "key": "best-score-and-over",
+        "checkIndex": 0,
+        "passed": true,
+        "note": "包含「最高分」"
+      },
+      {
+        "key": "best-score-and-over",
+        "checkIndex": 1,
+        "passed": true,
+        "note": "匹配到 [data-testid='gameover-message']"
+      }
+    ],
+    "passed": 9,
+    "total": 9,
+    "mobileOverflow": false
+  }
+]

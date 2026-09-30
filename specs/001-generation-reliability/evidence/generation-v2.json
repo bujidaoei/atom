@@ -1,0 +1,47 @@
+[
+  {
+    "name": "calculator",
+    "projectId": "d6c24d0f0004462caaad1d27d6520d89",
+    "status": "timed_out",
+    "planningSeconds": 64.28,
+    "buildSeconds": 181.1,
+    "latestRun": {
+      "id": "aac7f1b6bc764ee3bbd53932cd499bdc",
+      "status": "timed_out",
+      "phase": "build",
+      "error": "已达到 180 秒生成上限，已有文件已保留，可继续生成",
+      "startedAt": "2026-09-30T06:17:02.785427",
+      "finishedAt": "2026-09-30T06:20:02.815100"
+    }
+  },
+  {
+    "name": "lottery",
+    "projectId": "94aaba5d9e704062aaf36f315c75341f",
+    "status": "ready",
+    "planningSeconds": 52.31,
+    "buildSeconds": 151.13,
+    "latestRun": {
+      "id": "7f81e485040b486998f7511a086e7816",
+      "status": "done",
+      "phase": "build",
+      "error": null,
+      "startedAt": "2026-09-30T06:16:50.746760",
+      "finishedAt": "2026-09-30T06:19:20.182681"
+    }
+  },
+  {
+    "name": "snake",
+    "projectId": "46b84c903e244935b942ebd6d52ebafb",
+    "status": "ready",
+    "planningSeconds": 50.3,
+    "buildSeconds": 74.85,
+    "latestRun": {
+      "id": "62f24dd592e34d4baadb221092454159",
+      "status": "done",
+      "phase": "build",
+      "error": null,
+      "startedAt": "2026-09-30T06:16:48.739900",
+      "finishedAt": "2026-09-30T06:18:03.469145"
+    }
+  }
+]

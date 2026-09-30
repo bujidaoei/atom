@@ -64,6 +64,8 @@ export interface ProductAgentRuntimeOptions {
   onPolicyDecision?: (evidence: ToolPolicyEvidence) => Promise<void>;
   systemPrompt?: string;
   externalTools?: ToolDefinition[];
+  /** Product-specific capability boundary; omitted preserves all workspace tools. */
+  workspaceToolNames?: readonly string[];
   skillDirectories?: readonly ProductSkillDirectory[];
   resolveReadableAttachments?(): readonly AgentRunReadableAttachment[];
   /**
@@ -293,13 +295,16 @@ export class ProductAgentRuntime {
             ),
           ]
         : [];
-    const sandboxTools = workspaceToolOptions
+    const allSandboxTools = workspaceToolOptions
       ? [
           ...createWorkspaceTools(workspaceToolOptions, productReadTools[0]),
           createPolicyBoundPiWriteTool(workspaceToolOptions, createWriteToolDefinition),
           createPolicyBoundPiEditTool(workspaceToolOptions, createEditToolDefinition),
         ]
       : [];
+    const sandboxTools = this.options.workspaceToolNames
+      ? allSandboxTools.filter(tool => this.options.workspaceToolNames!.includes(tool.name))
+      : allSandboxTools;
     const workspaceTools = this.options.artifacts
       ? trackSessionFileChanges(sandboxTools, {
           workspacePath: request.workspacePath,

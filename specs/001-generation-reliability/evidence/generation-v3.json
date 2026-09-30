@@ -1,0 +1,47 @@
+[
+  {
+    "name": "calculator",
+    "projectId": "5fc511a309a84213b28e23a5cfa8a3cd",
+    "status": "ready",
+    "planningSeconds": 58.27,
+    "buildSeconds": 90.83,
+    "latestRun": {
+      "id": "4334c033088e41f29b0278361c3809b8",
+      "status": "done",
+      "phase": "build",
+      "error": null,
+      "startedAt": "2026-09-30T06:22:50.710060",
+      "finishedAt": "2026-09-30T06:24:19.642663"
+    }
+  },
+  {
+    "name": "lottery",
+    "projectId": "f9d22c24edcb49e1857120c2fa7e1cc1",
+    "status": "ready",
+    "planningSeconds": 64.25,
+    "buildSeconds": 104.98,
+    "latestRun": {
+      "id": "820a70d484eb46e0981d20c9b706c01d",
+      "status": "done",
+      "phase": "build",
+      "error": null,
+      "startedAt": "2026-09-30T06:22:56.760756",
+      "finishedAt": "2026-09-30T06:24:39.970321"
+    }
+  },
+  {
+    "name": "snake",
+    "projectId": "6deb1bdbc2144b0cafa358f45b04b917",
+    "status": "ready",
+    "planningSeconds": 84.31,
+    "buildSeconds": 80.91,
+    "latestRun": {
+      "id": "ced1648d2d54487bb7545a13a025e71a",
+      "status": "done",
+      "phase": "build",
+      "error": null,
+      "startedAt": "2026-09-30T06:23:16.822705",
+      "finishedAt": "2026-09-30T06:24:37.336770"
+    }
+  }
+]

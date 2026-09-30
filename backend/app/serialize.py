@@ -7,7 +7,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from . import storage
-from .models import AcceptanceRun, Project, Race, User
+from .config import get_settings
+from .models import AcceptanceRun, Project, Race, Run, User
 
 
 def user_json(user: User) -> dict[str, Any]:
@@ -27,7 +28,9 @@ def project_summary(project: Project) -> dict[str, Any]:
         "kind": project.kind,
         "status": project.status,
         "slug": project.slug,
-        "publishedAt": project.published_at.isoformat() if project.published_at else None,
+        "publishedAt": project.published_at.isoformat()
+        if project.published_at
+        else None,
         "createdAt": project.created_at.isoformat(),
         "updatedAt": project.updated_at.isoformat(),
     }
@@ -35,10 +38,31 @@ def project_summary(project: Project) -> dict[str, Any]:
 
 def project_detail(session: Session, project: Project) -> dict[str, Any]:
     detail = project_summary(project)
+    latest = session.scalar(
+        select(Run)
+        .where(Run.project_id == project.id)
+        .order_by(Run.started_at.desc())
+        .limit(1)
+    )
     detail.update(
         {
             "prompt": project.prompt,
             "activeRunId": project.active_run_id,
+            "latestRun": (
+                {
+                    "id": latest.id,
+                    "status": latest.status,
+                    "phase": latest.phase,
+                    "error": latest.error,
+                    "startedAt": latest.started_at.isoformat(),
+                    "finishedAt": latest.finished_at.isoformat()
+                    if latest.finished_at
+                    else None,
+                }
+                if latest
+                else None
+            ),
+            "buildBudgetSeconds": get_settings().build_budget_seconds,
             "messages": [
                 {
                     "id": message.id,
@@ -75,6 +99,14 @@ def acceptance_json(session: Session, project_id: str) -> dict[str, Any] | None:
     ).first()
     if run is None:
         return None
+    last_change = session.scalar(
+        select(Run.started_at)
+        .where(Run.project_id == project_id, Run.phase.in_(("build", "revise", "race")))
+        .order_by(Run.started_at.desc())
+        .limit(1)
+    )
+    if last_change and run.created_at < last_change:
+        return None  # Preserve historical evidence; never present it for new code.
     return {
         "id": run.id,
         "passed": run.passed,

@@ -3,10 +3,10 @@ from __future__ import annotations
 import asyncio
 import json
 import time
+from contextlib import aclosing
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any
 
 from sqlalchemy import select
@@ -28,6 +28,7 @@ from ..models import (
     new_id,
 )
 from . import credits, parsing
+from .artifacts import validate_artifacts
 from .runtime_client import GatewayConfig, RuntimeClient, runtime_client
 
 # Roles that reason without touching the workspace, in the order Mike's plan
@@ -51,6 +52,7 @@ class TurnOutcome:
     output_tokens: int
     failed: bool
     error: str | None = None
+    status: str = "done"
 
 
 class Orchestrator:
@@ -59,21 +61,26 @@ class Orchestrator:
     def __init__(self, client: RuntimeClient | None = None) -> None:
         self._client = client or runtime_client
         self._jobs: dict[str, asyncio.Task[None]] = {}
+        self._stopping: set[str] = set()
 
     # ---------------------------------------------------------------- public
 
     def active(self, project_id: str) -> bool:
         task = self._jobs.get(project_id)
-        return task is not None and not task.done()
+        return project_id in self._stopping or task is not None and not task.done()
 
     async def start_plan(self, project_id: str, user_id: str) -> str:
         return self._spawn(project_id, self._plan(project_id, user_id))
 
     async def start_build(self, project_id: str, user_id: str, note: str | None) -> str:
-        return self._spawn(project_id, self._build(project_id, user_id, note, phase="build"))
+        return self._spawn(
+            project_id, self._build(project_id, user_id, note, phase="build")
+        )
 
     async def start_revise(self, project_id: str, user_id: str, message: str) -> str:
-        return self._spawn(project_id, self._build(project_id, user_id, message, phase="revise"))
+        return self._spawn(
+            project_id, self._build(project_id, user_id, message, phase="revise")
+        )
 
     def create_race(self, project_id: str, models: list[str]) -> str:
         """Persist the race and its heats before the job starts.
@@ -89,7 +96,9 @@ class Orchestrator:
             session.flush()
             for position, model in enumerate(models):
                 session.add(
-                    RaceHeat(race_id=race.id, model=model, position=position, status="queued")
+                    RaceHeat(
+                        race_id=race.id, model=model, position=position, status="queued"
+                    )
                 )
             return race.id
 
@@ -100,19 +109,98 @@ class Orchestrator:
         task = self._jobs.get(project_id)
         if task is None or task.done():
             return
-        with session_scope() as session:
-            for run in session.scalars(
-                select(Run).where(Run.project_id == project_id, Run.status == "running")
-            ):
-                await self._client.cancel(run.id)
-        task.cancel()
+        if project_id in self._stopping:
+            await asyncio.gather(task, return_exceptions=True)
+            return
+        self._stopping.add(project_id)
+        try:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+            # Covers cancellation before _guard has entered its try block.
+            await self._terminate(project_id, "cancelled", "任务已取消，已有文件已保留")
+        finally:
+            self._stopping.discard(project_id)
+            if self._jobs.get(project_id) is task:
+                self._jobs.pop(project_id, None)
 
     async def shutdown(self) -> None:
-        for task in list(self._jobs.values()):
-            task.cancel()
-        if self._jobs:
-            await asyncio.gather(*self._jobs.values(), return_exceptions=True)
-        self._jobs.clear()
+        await asyncio.gather(*(self.cancel(key) for key in list(self._jobs)))
+
+    async def _cancel_remote(self, run_id: str) -> None:
+        try:
+            async with asyncio.timeout(5):
+                await self._client.cancel(run_id)
+        except Exception:
+            pass  # Closing the stream also cancels the sidecar.
+
+    async def reconcile(self) -> None:
+        """Single-worker startup: previous process cannot still own these jobs."""
+        with session_scope() as session:
+            ids = set(
+                session.scalars(
+                    select(Project.id).where(
+                        Project.status.in_(("planning", "building"))
+                    )
+                )
+            )
+            ids.update(
+                session.scalars(select(Run.project_id).where(Run.status == "running"))
+            )
+            ids.update(
+                session.scalars(select(Race.project_id).where(Race.status == "running"))
+            )
+        for project_id in ids:
+            await self._terminate(
+                project_id,
+                "interrupted",
+                "服务重启中断了任务，已有文件已保留，请继续生成",
+            )
+
+    async def _terminate(self, project_id: str, status: str, note: str) -> None:
+        with session_scope() as session:
+            runs = list(
+                session.scalars(
+                    select(Run).where(
+                        Run.project_id == project_id, Run.status == "running"
+                    )
+                )
+            )
+            pending = [(run.id, run.role, run.heat_id) for run in runs]
+            for run in runs:
+                run.status, run.error = (
+                    ("failed" if status == "error" else status),
+                    note,
+                )
+                run.finished_at = datetime.now(timezone.utc)
+                project = session.get(Project, project_id)
+                if project and (run.input_tokens or run.output_tokens):
+                    credits.charge(
+                        session,
+                        project.user_id,
+                        reason=run.phase,
+                        run_id=run.id,
+                        input_tokens=run.input_tokens,
+                        output_tokens=run.output_tokens,
+                    )
+            for race in session.scalars(
+                select(Race).where(
+                    Race.project_id == project_id, Race.status == "running"
+                )
+            ):
+                race.status = status
+                for heat in race.heats:
+                    if heat.status in {"queued", "running"}:
+                        heat.status, heat.error = status, note
+        await asyncio.gather(*(self._cancel_remote(run_id) for run_id, _, _ in pending))
+        for run_id, role, heat_id in pending:
+            await bus.publish(
+                project_id,
+                f"run.{status}",
+                {"message": note, **({"heatId": heat_id} if heat_id else {})},
+                run_id=run_id,
+                role=role,
+            )
+        await self._finish(project_id, status=status, note=note)
 
     # --------------------------------------------------------------- private
 
@@ -121,7 +209,10 @@ class Orchestrator:
             coro.close()
             raise ConflictError("该项目已有任务在运行")
         job_id = new_id()
-        task = asyncio.create_task(self._guard(project_id, coro), name=f"squad:{project_id}")
+        task = asyncio.create_task(
+            self._guard(project_id, coro), name=f"squad:{project_id}"
+        )
+        task.add_done_callback(lambda _: coro.close())
         self._jobs[project_id] = task
         return job_id
 
@@ -129,7 +220,7 @@ class Orchestrator:
         try:
             await coro
         except asyncio.CancelledError:
-            await self._finish(project_id, status="ready", note="任务已取消")
+            await self._terminate(project_id, "cancelled", "任务已取消，已有文件已保留")
             raise
         except OutOfCredits as error:
             await self._fail(project_id, str(error))
@@ -139,15 +230,11 @@ class Orchestrator:
             self._jobs.pop(project_id, None)
 
     async def _fail(self, project_id: str, detail: str) -> None:
-        with session_scope() as session:
-            project = session.get(Project, project_id)
-            if project:
-                project.status = "error"
-                project.active_run_id = None
-        await bus.publish(project_id, "run.failed", {"message": detail})
-        await bus.publish(project_id, "project.updated", {"status": "error"})
+        await self._terminate(project_id, "error", detail)
 
-    async def _finish(self, project_id: str, *, status: str, note: str | None = None) -> None:
+    async def _finish(
+        self, project_id: str, *, status: str, note: str | None = None
+    ) -> None:
         with session_scope() as session:
             project = session.get(Project, project_id)
             if project:
@@ -175,17 +262,26 @@ class Orchestrator:
             prompt=prompt,
             render=_render_plan,
         )
+        if mike.failed:
+            await self._fail(project_id, mike.error or "规划失败")
+            return
         plan = parsing.normalize_plan(mike.text, fallback_title=title)
         _apply_plan(project_id, plan)
-        await bus.publish(project_id, "project.updated", {"status": "planning", "plan": plan})
+        await bus.publish(
+            project_id, "project.updated", {"status": "planning", "plan": plan}
+        )
 
         if plan["clarification"]:
             _add_message(project_id, "mike", plan["clarification"])
             await self._finish(project_id, status="draft")
             return
 
-        planned = [step["role"] for step in plan["steps"] if step["role"] in PLANNING_ORDER]
-        order = [role for role in PLANNING_ORDER if role in planned] or list(PLANNING_ORDER)
+        planned = [
+            step["role"] for step in plan["steps"] if step["role"] in PLANNING_ORDER
+        ]
+        order = [role for role in PLANNING_ORDER if role in planned] or list(
+            PLANNING_ORDER
+        )
 
         transcript: list[tuple[str, str]] = [("Mike 的计划", mike.text)]
         for role in order:
@@ -228,7 +324,11 @@ class Orchestrator:
             context=_squad_context(project_id),
         )
         if outcome.failed:
-            await self._fail(project_id, outcome.error or "构建失败")
+            await self._finish(
+                project_id,
+                status=outcome.status if outcome.status == "timed_out" else "error",
+                note=outcome.error,
+            )
             return
 
         await self._publish_files(project_id)
@@ -249,7 +349,9 @@ class Orchestrator:
             heats = [
                 (heat.id, heat.model)
                 for heat in session.scalars(
-                    select(RaceHeat).where(RaceHeat.race_id == race_id).order_by(RaceHeat.position)
+                    select(RaceHeat)
+                    .where(RaceHeat.race_id == race_id)
+                    .order_by(RaceHeat.position)
                 )
             ]
 
@@ -260,7 +362,7 @@ class Orchestrator:
             {"raceId": race_id, "models": [model for _, model in heats]},
         )
 
-        await asyncio.gather(
+        results = await asyncio.gather(
             *(
                 self._run_heat(
                     project_id, user_id, heat_id, model, gateway, build_prompt, context
@@ -273,9 +375,20 @@ class Orchestrator:
         with session_scope() as session:
             race = session.get(Race, race_id)
             if race:
-                race.status = "done"
+                for heat, result in zip(race.heats, results):
+                    if heat.status in {"queued", "running"}:
+                        heat.status = "failed"
+                        heat.error = (
+                            str(result)
+                            if isinstance(result, BaseException)
+                            else "赛道未返回完成结果"
+                        )
+                succeeded = any(heat.status == "done" for heat in race.heats)
+                race.status = "done" if succeeded else "failed"
         await bus.publish(project_id, "race.completed", {"raceId": race_id})
-        await self._finish(project_id, status="ready")
+        await self._finish(
+            project_id, status="awaiting_approval" if succeeded else "error"
+        )
 
     async def _run_heat(
         self,
@@ -289,7 +402,9 @@ class Orchestrator:
     ) -> None:
         started = time.monotonic()
         _set_heat(heat_id, status="running")
-        await bus.publish(project_id, "race.heat_started", {"heatId": heat_id, "model": model})
+        await bus.publish(
+            project_id, "race.heat_started", {"heatId": heat_id, "model": model}
+        )
 
         outcome = await self._turn(
             project_id,
@@ -307,7 +422,7 @@ class Orchestrator:
         file_count, total_bytes = storage.workspace_stats(workspace)
         _set_heat(
             heat_id,
-            status="failed" if outcome.failed else "done",
+            status=outcome.status,
             elapsed_ms=int((time.monotonic() - started) * 1000),
             input_tokens=outcome.input_tokens,
             output_tokens=outcome.output_tokens,
@@ -359,6 +474,10 @@ class Orchestrator:
             session.add(run)
             session.flush()
             run_id = run.id
+            if heat_id:
+                heat = session.get(RaceHeat, heat_id)
+                if heat:
+                    heat.run_id = run_id
             project = session.get(Project, project_id)
             if project and heat_id is None:
                 project.active_run_id = run_id
@@ -366,8 +485,12 @@ class Orchestrator:
         await bus.publish(
             project_id,
             "squad.role_started",
-            {"role": role, "title": ROLE_TITLES.get(role, ""), "model": gateway.model,
-             **({"heatId": heat_id} if heat_id else {})},
+            {
+                "role": role,
+                "title": ROLE_TITLES.get(role, ""),
+                "model": gateway.model,
+                **({"heatId": heat_id} if heat_id else {}),
+            },
             run_id=run_id,
             role=role,
         )
@@ -382,80 +505,111 @@ class Orchestrator:
         output_tokens = 0
         failed = False
         error: str | None = None
-        # Only the code-writing turns can run away; planning turns are a
-        # single short response each.
-        deadline = (
-            time.monotonic() + get_settings().build_budget_seconds if role == "alex" else None
+        budget = (
+            get_settings().build_budget_seconds
+            if role == "alex"
+            else get_settings().run_timeout_seconds
         )
-        over_budget = False
-
-        async for line in self._client.run(
-            run_id=run_id,
-            role=role,
-            prompt=prompt,
-            workspace_path=workspace,
-            session_path=sessions / f"{run_id}.jsonl",
-            agent_dir=storage.agent_dir(project_id),
-            gateway=gateway,
-            context=context,
-        ):
-            if line.kind == "event":
-                payload = dict(line.payload)
-                if heat_id:
-                    payload["heatId"] = heat_id
-                if line.type == "usage.updated":
-                    seen_in = int(payload.get("inputTokens") or 0)
-                    seen_out = int(payload.get("outputTokens") or 0)
-                    # The runtime reports running totals; the UI accumulates,
-                    # so forward the delta instead.
-                    payload["inputTokens"] = max(0, seen_in - input_tokens)
-                    payload["outputTokens"] = max(0, seen_out - output_tokens)
-                    input_tokens, output_tokens = seen_in, seen_out
-                elif line.type == "message.delta":
-                    text_parts.append(str(payload.get("delta") or ""))
-                await bus.publish(
-                    project_id, line.type or "", payload, run_id=run_id, role=role
-                )
-            elif line.kind == "result":
-                result_text = str(line.payload.get("resultText") or "")
-                if result_text:
-                    text_parts = [result_text]
-                usage = line.payload.get("usage") or {}
-                if isinstance(usage, dict):
-                    input_tokens = int(usage.get("inputTokens") or input_tokens)
-                    output_tokens = int(usage.get("outputTokens") or output_tokens)
-            elif line.kind == "error":
-                failed = True
-                error = str(line.payload.get("message") or "运行时错误")
-
-            if deadline is not None and not over_budget and time.monotonic() > deadline:
-                over_budget = True
-                await self._client.cancel(run_id)
-                await bus.publish(
-                    project_id,
-                    "run.budget_exceeded",
-                    {"seconds": get_settings().build_budget_seconds},
-                    run_id=run_id,
-                    role=role,
-                )
-
+        terminal = False
+        status = "done"
+        cancelled = False
+        try:
+            async with asyncio.timeout(budget):
+                async with aclosing(
+                    self._client.run(
+                        run_id=run_id,
+                        role=role,
+                        prompt=prompt,
+                        workspace_path=workspace,
+                        session_path=sessions / f"{run_id}.jsonl",
+                        agent_dir=storage.agent_dir(project_id),
+                        gateway=gateway,
+                        context=context,
+                    )
+                ) as stream:
+                    async for line in stream:
+                        if line.kind == "event":
+                            # The orchestrator alone commits authoritative terminal events.
+                            if line.type in {
+                                "run.completed",
+                                "run.failed",
+                                "run.cancelled",
+                            }:
+                                continue
+                            payload = dict(line.payload)
+                            if heat_id:
+                                payload["heatId"] = heat_id
+                            if line.type == "usage.updated":
+                                usage = payload.get("usage") or payload
+                                seen_in = int(usage.get("inputTokens") or 0)
+                                seen_out = int(usage.get("outputTokens") or 0)
+                                payload["inputTokens"] = max(0, seen_in - input_tokens)
+                                payload["outputTokens"] = max(
+                                    0, seen_out - output_tokens
+                                )
+                                input_tokens, output_tokens = seen_in, seen_out
+                                with session_scope() as session:
+                                    persisted = session.get(Run, run_id)
+                                    if persisted:
+                                        persisted.input_tokens = input_tokens
+                                        persisted.output_tokens = output_tokens
+                            elif line.type == "message.delta":
+                                text_parts.append(str(payload.get("delta") or ""))
+                            await bus.publish(
+                                project_id,
+                                line.type or "",
+                                payload,
+                                run_id=run_id,
+                                role=role,
+                            )
+                        elif line.kind in {"result", "error"}:
+                            terminal = True
+                            usage = line.payload.get("usage") or {}
+                            input_tokens = int(usage.get("inputTokens") or input_tokens)
+                            output_tokens = int(
+                                usage.get("outputTokens") or output_tokens
+                            )
+                            if line.kind == "error":
+                                status = "failed"
+                                error = str(line.payload.get("message") or "运行时错误")
+                            else:
+                                text_parts = [str(line.payload.get("resultText") or "")]
+                            break
+                if not terminal:
+                    raise RuntimeError("运行时未返回完成结果，已有文件已保留")
+                if status == "done" and role == "alex":
+                    await validate_artifacts(workspace)
+        except TimeoutError:
+            status, error = (
+                "timed_out",
+                f"已达到 {budget:g} 秒生成上限，已有文件已保留，可继续生成",
+            )
+        except asyncio.CancelledError:
+            status, error, cancelled = "cancelled", "任务已取消，已有文件已保留", True
+        except Exception as exc:
+            status, error = "failed", str(exc) or type(exc).__name__
+        if status != "done":
+            await self._cancel_remote(run_id)
+        failed = status != "done"
         text = "".join(text_parts).strip()
-
-        if over_budget:
-            # Files already written are the deliverable; treat the stop as a
-            # successful, if abrupt, finish rather than a failure.
-            failed = False
-            error = None
-            text = text or "已达到本轮构建时间上限，先交付当前成果。你可以继续提要求。"
+        rendered = text
+        if record_message and text and render and not failed:
+            try:
+                rendered = render(text)
+            except (ValueError, TypeError) as exc:
+                failed, status, error = True, "failed", f"契约格式无效：{exc}"
 
         with session_scope() as session:
             run = session.get(Run, run_id)
             if run:
-                run.status = "failed" if failed else "done"
+                run.status = status
                 run.error = error
                 run.input_tokens = input_tokens
                 run.output_tokens = output_tokens
                 run.finished_at = datetime.now(timezone.utc)
+            project = session.get(Project, project_id)
+            if project and project.active_run_id == run_id:
+                project.active_run_id = None
             credits.charge(
                 session,
                 user_id,
@@ -471,19 +625,24 @@ class Orchestrator:
                     Message(
                         project_id=project_id,
                         role=role,
-                        content=render(text) if render else text,
+                        content=rendered,
                         run_id=run_id,
                     )
                 )
 
         await bus.publish(
             project_id,
-            "run.failed" if failed else "run.completed",
-            {"message": error} if failed else {"resultText": text},
+            f"run.{status}" if failed else "run.completed",
+            {
+                **({"message": error} if failed else {"resultText": text}),
+                **({"heatId": heat_id} if heat_id else {}),
+            },
             run_id=run_id,
             role=role,
         )
-        return TurnOutcome(text, input_tokens, output_tokens, failed, error)
+        if cancelled:
+            raise asyncio.CancelledError
+        return TurnOutcome(text, input_tokens, output_tokens, failed, error, status)
 
     async def _set_status(self, project_id: str, status: str) -> None:
         with session_scope() as session:
@@ -494,7 +653,9 @@ class Orchestrator:
 
     async def _publish_files(self, project_id: str) -> None:
         files = storage.list_files(storage.workspace_dir(project_id))
-        await bus.publish(project_id, "project.updated", {"status": "ready", "files": files})
+        await bus.publish(
+            project_id, "project.updated", {"status": "ready", "files": files}
+        )
 
 
 # ----------------------------------------------------------------- helpers
@@ -536,8 +697,8 @@ def _apply_plan(project_id: str, plan: dict[str, Any]) -> None:
 
 def _apply_requirements(project_id: str, text: str) -> None:
     requirements = parsing.normalize_requirements(text)
-    if not requirements:
-        return
+    if not requirements or any(not item["checks"] for item in requirements):
+        raise ValueError("契约没有有效验收检查，请重新规划")
     with session_scope() as session:
         for existing in session.scalars(
             select(Requirement).where(Requirement.project_id == project_id)
@@ -558,7 +719,9 @@ def _apply_requirements(project_id: str, text: str) -> None:
 
 
 def _context_block(parts: list[tuple[str, str]]) -> str:
-    return "\n\n".join(f"### {label}\n{text.strip()}" for label, text in parts if text.strip())
+    return "\n\n".join(
+        f"### {label}\n{text.strip()}" for label, text in parts if text.strip()
+    )
 
 
 def _squad_context(project_id: str) -> str:
@@ -566,7 +729,10 @@ def _squad_context(project_id: str) -> str:
     with session_scope() as session:
         messages = session.scalars(
             select(Message)
-            .where(Message.project_id == project_id, Message.role.in_(("iris", "emma", "bob")))
+            .where(
+                Message.project_id == project_id,
+                Message.role.in_(("iris", "emma", "bob")),
+            )
             .order_by(Message.created_at)
         ).all()
         requirements = session.scalars(
@@ -583,7 +749,9 @@ def _squad_context(project_id: str) -> str:
             lines = []
             for requirement in requirements:
                 checks = json.loads(requirement.checks_json)
-                lines.append(f"- [{requirement.key}] {requirement.title}: {requirement.detail}")
+                lines.append(
+                    f"- [{requirement.key}] {requirement.title}: {requirement.detail}"
+                )
                 for check in checks:
                     lines.append(f"    check: {json.dumps(check, ensure_ascii=False)}")
             parts.append(

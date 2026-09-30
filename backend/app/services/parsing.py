@@ -77,7 +77,9 @@ def normalize_plan(text: str, *, fallback_title: str) -> dict[str, Any]:
         "kind": (str(data.get("kind") or "").strip().lower() or None),
         "steps": steps,
         "clarification": (
-            str(clarification).strip() if isinstance(clarification, str) and clarification.strip() else None
+            str(clarification).strip()
+            if isinstance(clarification, str) and clarification.strip()
+            else None
         ),
     }
 
@@ -101,13 +103,17 @@ def normalize_requirements(text: str) -> list[dict[str, Any]]:
         title = str(item.get("title") or "").strip()
         if not title:
             continue
-        key = _KEY_SAFE.sub("-", str(item.get("key") or title).strip().lower()).strip("-")
+        key = _KEY_SAFE.sub("-", str(item.get("key") or title).strip().lower()).strip(
+            "-"
+        )
         key = (key or f"req-{index + 1}")[:80]
         if key in seen:
             key = f"{key}-{index + 1}"[:80]
         seen.add(key)
 
-        checks = [c for c in (_normalize_check(c) for c in item.get("checks") or []) if c]
+        checks = [
+            c for c in (_normalize_check(c) for c in item.get("checks") or []) if c
+        ]
         requirements.append(
             {
                 "key": key,
@@ -119,7 +125,7 @@ def normalize_requirements(text: str) -> list[dict[str, Any]]:
     return requirements[:8]
 
 
-def _normalize_check(raw: Any) -> dict[str, str] | None:
+def _normalize_check(raw: Any) -> dict[str, Any] | None:
     if not isinstance(raw, dict):
         return None
     kind = str(raw.get("type") or "").strip().lower()
@@ -132,18 +138,71 @@ def _normalize_check(raw: Any) -> dict[str, str] | None:
         return {"type": "exists", "selector": selector}
     if kind == "text":
         contains = str(raw.get("contains") or "").strip()
-        return {"type": "text", "selector": selector, "contains": contains} if contains else None
+        return (
+            {"type": "text", "selector": selector, "contains": contains}
+            if contains
+            else None
+        )
     expect = str(raw.get("expect") or "").strip()
-    return {"type": "flow", "selector": selector, "expect": expect} if expect else None
+    if not expect:
+        return None
+    setup = raw.get("setup", [])
+    if not isinstance(setup, list) or len(setup) > 12:
+        raise ValueError("验收前置步骤必须是最多 12 项的列表")
+    steps = []
+    for step in setup:
+        if not isinstance(step, dict) or step.get("action") not in {
+            "fill",
+            "click",
+            "press",
+        }:
+            raise ValueError("验收前置步骤类型无效")
+        target = step.get("selector")
+        if not isinstance(target, str) or not target.strip() or len(target) > 1000:
+            raise ValueError("验收前置步骤缺少有效选择器")
+        normalized = {"action": step["action"], "selector": target.strip()}
+        if step["action"] == "fill":
+            if not isinstance(step.get("value"), str) or len(step["value"]) > 2000:
+                raise ValueError("验收输入值无效")
+            normalized["value"] = step["value"]
+        if step["action"] == "press":
+            key = step.get("key")
+            if not isinstance(key, str) or not (
+                len(key) == 1
+                and key.isprintable()
+                or key
+                in {
+                    "Enter",
+                    "Escape",
+                    "Tab",
+                    "Backspace",
+                    "Delete",
+                    "ArrowUp",
+                    "ArrowDown",
+                    "ArrowLeft",
+                    "ArrowRight",
+                }
+            ):
+                raise ValueError("验收按键无效")
+            normalized["key"] = step["key"]
+        steps.append(normalized)
+    result = {"type": "flow", "selector": selector, "expect": expect}
+    if steps:
+        result["setup"] = steps
+    return result
 
 
 def normalize_scope(text: str) -> tuple[list[str], list[str]]:
     data = extract_json_object(text) or {}
     scope = [str(s).strip() for s in (data.get("scope") or []) if str(s).strip()]
-    out_of_scope = [str(s).strip() for s in (data.get("outOfScope") or []) if str(s).strip()]
+    out_of_scope = [
+        str(s).strip() for s in (data.get("outOfScope") or []) if str(s).strip()
+    ]
     return scope[:6], out_of_scope[:3]
 
 
 def fallback_title(prompt: str) -> str:
     condensed = " ".join(prompt.split())
-    return (condensed[:28] + "…") if len(condensed) > 29 else (condensed or "未命名项目")
+    return (
+        (condensed[:28] + "…") if len(condensed) > 29 else (condensed or "未命名项目")
+    )

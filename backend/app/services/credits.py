@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from sqlalchemy.orm import Session
+from sqlalchemy import select
 
 from ..errors import OutOfCredits
 from ..models import CreditEntry, User
@@ -13,7 +14,9 @@ TURN_COST = 1
 
 def ensure_affordable(session: Session, user: User, turns: int = 1) -> None:
     if user.credits < TURN_COST * turns:
-        raise OutOfCredits(f"额度不足，还需要 {TURN_COST * turns - user.credits} credit")
+        raise OutOfCredits(
+            f"额度不足，还需要 {TURN_COST * turns - user.credits} credit"
+        )
 
 
 def charge(
@@ -26,6 +29,14 @@ def charge(
     output_tokens: int = 0,
     turns: int = 1,
 ) -> None:
+    if (
+        run_id
+        and session.scalar(
+            select(CreditEntry.id).where(CreditEntry.run_id == run_id).limit(1)
+        )
+        is not None
+    ):
+        return
     user = session.get(User, user_id)
     if user is None:
         return

@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, rm, writeFile, realpath, rename, lstat } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 
@@ -48,6 +48,7 @@ export class LocalSandboxClient implements SandboxClient {
     request: SandboxExecRequest,
     signal?: AbortSignal,
   ): Promise<SandboxExecResult> {
+    signal?.throwIfAborted();
     const cwd = this.requireWorkspace(sandboxId);
     const timeoutMs = clampTimeout(request.timeoutMs);
     const shell = this.options.shell ?? defaultShell();
@@ -56,24 +57,47 @@ export class LocalSandboxClient implements SandboxClient {
     return await new Promise<SandboxExecResult>((resolvePromise, rejectPromise) => {
       const child = spawn(shell, [...shellArgs, request.command], {
         cwd,
-        env: { ...process.env, ...this.options.env },
+        env: { ...process.env, ...(process.platform === 'win32' ? { ATOM_PYTHON_EXECUTABLE: 'python' } : {}), ...this.options.env, ATOM_WORKSPACE_ROOT: cwd },
         windowsHide: true,
+        detached: process.platform !== 'win32',
       });
 
       const stdout = new StreamCollector();
       const stderr = new StreamCollector();
       let timedOut = false;
       let settled = false;
+      const killTree = () => {
+        if (!child.pid) return;
+        if (process.platform === 'win32') {
+          // MSYS forks can leave native PPIDs pointing at an exited shim.
+          // Resolve the shell's POSIX process group via its Windows PID.
+          const listing = spawn(shell, ['-c', 'ps -a'], { windowsHide: true });
+          let processes = '';
+          listing.stdout.on('data', chunk => { processes += chunk.toString(); });
+          listing.on('error', () => child.kill('SIGKILL'));
+          listing.on('close', () => {
+            const row = processes.split('\n').map(line => line.trim().split(/\s+/)).find(fields => Number(fields[3]) === child.pid);
+            const group = Number(row?.[2]);
+            if (Number.isSafeInteger(group) && group > 1) {
+              const killer = spawn(shell, ['-c', `kill -KILL -- -${group}`], { windowsHide: true, stdio: 'ignore' });
+              killer.on('error', () => child.kill('SIGKILL'));
+            } else child.kill('SIGKILL');
+          });
+        } else {
+          try { process.kill(-child.pid, 'SIGKILL'); } catch { child.kill('SIGKILL'); }
+        }
+      };
 
       const timer = setTimeout(() => {
         timedOut = true;
-        child.kill('SIGKILL');
+        killTree();
       }, timeoutMs);
 
       const onAbort = () => {
-        child.kill('SIGKILL');
+        killTree();
       };
       signal?.addEventListener('abort', onAbort, { once: true });
+      if (signal?.aborted) onAbort();
 
       const finish = (result: SandboxExecResult) => {
         if (settled) return;
@@ -109,12 +133,29 @@ export class LocalSandboxClient implements SandboxClient {
   async writeFile(
     sandboxId: string,
     request: SandboxWriteFileRequest,
-    _signal?: AbortSignal,
+    signal?: AbortSignal,
   ): Promise<SandboxWriteFileResult> {
     const workspacePath = this.requireWorkspace(sandboxId);
+    signal?.throwIfAborted();
     const target = confineToWorkspace(workspacePath, request.path);
+    // Resolve every existing ancestor before creating directories through it.
+    let ancestor = dirname(target);
+    while (!existsSync(ancestor)) ancestor = dirname(ancestor);
+    confineToWorkspace(await realpath(workspacePath), await realpath(ancestor));
+    const info = await lstat(target).catch((error: NodeJS.ErrnoException) => {
+      if (error.code !== 'ENOENT') throw error;
+      return undefined;
+    });
+    if (info?.isSymbolicLink()) throw new Error('Sandbox writes cannot follow symlinks');
     await mkdir(dirname(target), { recursive: true });
-    await writeFile(target, request.content, 'utf8');
+    const temporary = `${target}.${randomUUID()}.tmp`;
+    try {
+      await writeFile(temporary, request.content, { encoding: 'utf8', flag: 'wx', signal });
+      signal?.throwIfAborted();
+      await rename(temporary, target);
+    } finally {
+      await rm(temporary, { force: true });
+    }
     return { toolCallId: request.toolCallId, bytesWritten: Buffer.byteLength(request.content) };
   }
 
@@ -137,7 +178,7 @@ export class LocalSandboxClient implements SandboxClient {
 function confineToWorkspace(workspacePath: string, candidate: string): string {
   const target = isAbsolute(candidate) ? resolve(candidate) : resolve(join(workspacePath, candidate));
   const offset = relative(workspacePath, target);
-  if (offset.startsWith('..') || isAbsolute(offset)) {
+  if (offset === '..' || offset.startsWith('../') || offset.startsWith('..\\') || isAbsolute(offset)) {
     throw new Error('Sandbox writes must stay inside the workspace');
   }
   return target;
@@ -167,8 +208,9 @@ function windowsBashCandidates(): string[] {
   const programFiles = process.env.ProgramFiles ?? 'C:\\Program Files';
   const programFilesX86 = process.env['ProgramFiles(x86)'] ?? 'C:\\Program Files (x86)';
   return [
-    join(programFiles, 'Git', 'bin', 'bash.exe'),
-    join(programFilesX86, 'Git', 'bin', 'bash.exe'),
+    join(programFiles, 'Git', 'usr', 'bin', 'bash.exe'),
+    join(programFilesX86, 'Git', 'usr', 'bin', 'bash.exe'),
+    'D:\\bugu_software\\Git\\usr\\bin\\bash.exe',
     'C:\\Windows\\System32\\bash.exe',
   ];
 }

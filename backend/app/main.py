@@ -19,6 +19,7 @@ from .services.runtime_client import runtime_client
 async def lifespan(_app: FastAPI):
     verify_schema(engine)
     Base.metadata.create_all(engine)
+    await orchestrator.reconcile()
     yield
     await orchestrator.shutdown()
 
@@ -54,8 +55,14 @@ async def handle_validation_error(
     """
     messages: list[str] = []
     for item in error.errors():
-        location = [part for part in item.get("loc", ()) if part not in ("body", "query")]
-        field = _FIELD_LABELS.get(str(location[-1]), str(location[-1])) if location else "请求"
+        location = [
+            part for part in item.get("loc", ()) if part not in ("body", "query")
+        ]
+        field = (
+            _FIELD_LABELS.get(str(location[-1]), str(location[-1]))
+            if location
+            else "请求"
+        )
         messages.append(f"{field}{_explain(item)}")
     return JSONResponse(
         status_code=422, content={"detail": "；".join(messages) or "请求参数不正确"}

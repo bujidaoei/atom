@@ -54,6 +54,7 @@ class EventBus:
         self._subscribers: dict[str, set[asyncio.Queue[Event]]] = defaultdict(set)
         self._lock = asyncio.Lock()
         self._writes_since_trim = 0
+        self._publish_lock = asyncio.Lock()
 
     async def subscribe(self, project_id: str) -> asyncio.Queue[Event]:
         queue: asyncio.Queue[Event] = asyncio.Queue(maxsize=1000)
@@ -79,18 +80,22 @@ class EventBus:
         run_id: str | None = None,
         role: str | None = None,
     ) -> Event:
-        event = await asyncio.to_thread(
-            self._persist, project_id, type_, payload, run_id, role
-        )
-        for queue in list(self._subscribers.get(project_id, ())):
-            try:
-                queue.put_nowait(event)
-            except asyncio.QueueFull:
-                # A client that cannot keep up will resync from `after=` on
-                # reconnect, so dropping here is safe and keeps the agent
-                # turn from stalling behind a slow browser.
-                pass
-        return event
+        # Commit and delivery share one ordering boundary in this single worker.
+        # Keep the short DB write synchronous: cancellation must not leave a
+        # detached writer allocating a sequence after releasing the lock.
+        async with self._publish_lock:
+            event = self._persist(project_id, type_, payload, run_id, role)
+            for queue in list(self._subscribers.get(project_id, ())):
+                try:
+                    queue.put_nowait(event)
+                except asyncio.QueueFull:
+                    while not queue.empty():
+                        queue.get_nowait()
+                    queue.put_nowait(
+                        Event(0, None, None, "stream.resync", {}, event.at)
+                    )
+                    self._subscribers[project_id].discard(queue)
+            return event
 
     def _persist(
         self,

@@ -29,7 +29,8 @@ export type ProjectStatus =
   | "awaiting_approval"
   | "building"
   | "ready"
-  | "error";
+  | "error" | "cancelled" | "timed_out" | "interrupted";
+// Persisted terminal outcomes are distinct from successful generation.
 
 export type ProjectSummary = {
   id: string;
@@ -54,10 +55,15 @@ export type Message = {
   createdAt: string;
 };
 
+export type SetupStep =
+  | { action: "fill"; selector: string; value: string }
+  | { action: "click"; selector: string }
+  | { action: "press"; selector: string; key: string };
+
 export type Check =
   | { type: "exists"; selector: string }
   | { type: "text"; selector: string; contains: string }
-  | { type: "flow"; selector: string; expect: string };
+  | { type: "flow"; selector: string; expect: string; setup?: SetupStep[] };
 
 export type Requirement = {
   key: string;
@@ -90,7 +96,7 @@ export type AcceptanceRun = {
 export type RaceHeat = {
   id: string;
   model: string;
-  status: "queued" | "running" | "done" | "failed";
+  status: "queued" | "running" | "done" | "failed" | "cancelled" | "timed_out" | "interrupted" | "error";
   runId: string | null;
   previewUrl: string | null;
   elapsedMs: number | null;
@@ -103,7 +109,7 @@ export type RaceHeat = {
 
 export type RaceSummary = {
   id: string;
-  status: "running" | "done";
+  status: "running" | "done" | "failed" | "cancelled" | "interrupted" | "error";
   heats: RaceHeat[];
   winnerHeatId: string | null;
   createdAt: string;
@@ -116,6 +122,8 @@ export type ProjectDetail = ProjectSummary & {
   files: FileEntry[];
   acceptance: AcceptanceRun | null;
   activeRunId: string | null;
+  latestRun: { id: string; status: string; phase: string; error: string | null; startedAt: string; finishedAt: string | null } | null;
+  buildBudgetSeconds: number;
   race: RaceSummary | null;
 };
 

@@ -44,10 +44,11 @@ const ReadFileParameters = Type.Object(
 
 const GLOB_SCRIPT = String.raw`
 import glob
+import os
 import sys
 from pathlib import Path
 
-root = Path('/workspace').resolve()
+root = Path(os.environ.get('ATOM_WORKSPACE_ROOT', '/workspace')).resolve()
 pattern = sys.argv[1]
 limit = int(sys.argv[2])
 matches = set()
@@ -66,7 +67,7 @@ import re
 import sys
 from pathlib import Path, PurePosixPath
 
-root = Path('/workspace').resolve()
+root = Path(os.environ.get('ATOM_WORKSPACE_ROOT', '/workspace')).resolve()
 expression = sys.argv[1]
 relative_base = sys.argv[2]
 include = sys.argv[3] or None
@@ -116,10 +117,11 @@ print('\n'.join(matches) if matches else '(no matches)')
 `.trim();
 
 const READ_FILE_SCRIPT = String.raw`
+import os
 import sys
 from pathlib import Path
 
-root = Path('/workspace').resolve()
+root = Path(os.environ.get('ATOM_WORKSPACE_ROOT', '/workspace')).resolve()
 relative = sys.argv[1]
 start = int(sys.argv[2])
 limit = int(sys.argv[3])
@@ -143,7 +145,7 @@ import os
 import sys
 from pathlib import Path
 
-root = Path('/workspace').resolve()
+root = Path(os.environ.get('ATOM_WORKSPACE_ROOT', '/workspace')).resolve()
 relative = sys.argv[1]
 target = (root / relative).resolve()
 if not target.is_relative_to(root):
@@ -156,7 +158,7 @@ sys.stdout.write(base64.b64encode(target.read_bytes()).decode('ascii'))
 `;
 
 function pythonCommand(script: string, args: Array<string | number>): string {
-  return ['python3', '-c', shellQuote(script), ...args.map((value) => shellQuote(String(value)))].join(' ');
+  return ['"${ATOM_PYTHON_EXECUTABLE:-python3}"', '-c', shellQuote(script), ...args.map((value) => shellQuote(String(value)))].join(' ');
 }
 
 function normalizeRelativeWorkspacePath(value: string, kind: string): string {

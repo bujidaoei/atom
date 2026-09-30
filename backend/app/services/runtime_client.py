@@ -83,6 +83,12 @@ class RuntimeClient:
             "workspacePath": str(workspace_path),
             "sessionPath": str(session_path),
             "agentDir": str(agent_dir),
+            "budgetMs": (
+                get_settings().build_budget_seconds
+                if role == "alex"
+                else get_settings().run_timeout_seconds
+            )
+            * 1000,
             "gateway": {
                 "baseUrl": gateway.base_url,
                 "apiKey": gateway.api_key,
@@ -98,10 +104,15 @@ class RuntimeClient:
         try:
             async with httpx.AsyncClient(timeout=self._timeout) as client:
                 async with client.stream(
-                    "POST", f"{self._base_url}/v1/runs", json=body, headers=self._headers
+                    "POST",
+                    f"{self._base_url}/v1/runs",
+                    json=body,
+                    headers=self._headers,
                 ) as response:
                     if response.status_code != 200:
-                        detail = (await response.aread()).decode("utf-8", "replace")[:400]
+                        detail = (await response.aread()).decode("utf-8", "replace")[
+                            :400
+                        ]
                         raise RuntimeUnavailable(
                             f"运行时返回 {response.status_code}：{detail}"
                         )
@@ -109,8 +120,15 @@ class RuntimeClient:
                         parsed = _parse_line(line)
                         if parsed is not None:
                             yield parsed
+                            if parsed.is_terminal:
+                                return
+                    raise RuntimeUnavailable(
+                        "运行时连接提前结束，未收到完成结果；已有文件已保留"
+                    )
         except httpx.HTTPError as error:
-            raise RuntimeUnavailable(f"agent 运行时连接中断：{_describe(error)}") from error
+            raise RuntimeUnavailable(
+                f"agent 运行时连接中断：{_describe(error)}"
+            ) from error
 
     async def cancel(self, run_id: str) -> None:
         try:
@@ -145,7 +163,9 @@ def _parse_line(line: str) -> RuntimeLine | None:
         return RuntimeLine(
             kind="event",
             type=str(data.get("type", "")),
-            payload=data.get("payload") if isinstance(data.get("payload"), dict) else {},
+            payload=data.get("payload")
+            if isinstance(data.get("payload"), dict)
+            else {},
         )
     if kind in {"result", "error"}:
         return RuntimeLine(kind=kind, type=None, payload=data)

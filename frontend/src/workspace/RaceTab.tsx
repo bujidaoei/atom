@@ -23,6 +23,10 @@ const HEAT_STATUS: Record<RaceHeat["status"], { label: string; tone: string }> =
   running: { label: "构建中", tone: "bg-brand-alpha-strong text-brand-text" },
   done: { label: "已完成", tone: "bg-success-surface text-success-strong" },
   failed: { label: "失败", tone: "bg-danger-surface text-danger-strong" },
+  error: { label: "失败", tone: "bg-danger-surface text-danger-strong" },
+  cancelled: { label: "已停止", tone: "bg-neutral-12 text-neutral-60" },
+  interrupted: { label: "已中断", tone: "bg-danger-surface text-danger-strong" },
+  timed_out: { label: "已超时", tone: "bg-danger-surface text-danger-strong" },
 };
 
 export function RaceTab({
@@ -229,6 +233,7 @@ export function RaceTab({
                   heat={heat}
                   activity={heatActivity[heat.id]}
                   isWinner={race.winnerHeatId === heat.id}
+                  raceRunning={running}
                   liveElapsed={
                     heat.elapsedMs === null && heat.status === "running" && startedAt
                       ? now - startedAt
@@ -250,6 +255,7 @@ function HeatCard({
   heat,
   activity,
   isWinner,
+  raceRunning,
   liveElapsed,
   onAdopted,
 }: {
@@ -257,6 +263,7 @@ function HeatCard({
   heat: RaceHeat;
   activity: HeatActivity | undefined;
   isWinner: boolean;
+  raceRunning: boolean;
   liveElapsed: number | null;
   onAdopted: () => void;
 }) {
@@ -294,7 +301,7 @@ function HeatCard({
         ) : (
           <div className="flex h-full items-center justify-center px-m text-center">
             <p className="text-sm text-neutral-40">
-              {heat.status === "failed"
+              {!["queued", "running", "done"].includes(heat.status)
                 ? (heat.error ?? "这一路失败了")
                 : (activity?.label ?? "等待第一个文件…")}
             </p>
@@ -326,7 +333,7 @@ function HeatCard({
           size="sm"
           variant={isWinner ? "secondary" : "primary"}
           loading={adopting}
-          disabled={heat.status !== "done"}
+          disabled={heat.status !== "done" || raceRunning}
           onClick={() => {
             setAdopting(true);
             setAdoptError(null);

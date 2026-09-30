@@ -56,8 +56,11 @@ export const STATUS_LABEL: Record<ProjectStatus, string> = {
   planning: "规划中",
   awaiting_approval: "待确认契约",
   building: "构建中",
-  ready: "可预览",
+  ready: "已生成",
   error: "出错",
+  cancelled: "已停止",
+  timed_out: "已超时",
+  interrupted: "已中断",
 };
 
 /** Tone classes per status, all drawn from the semantic layer. */
@@ -68,6 +71,9 @@ export const STATUS_TONE: Record<ProjectStatus, string> = {
   building: "bg-brand-alpha-soft text-brand-text",
   ready: "bg-success-surface text-success-strong",
   error: "bg-danger-surface text-danger-strong",
+  cancelled: "bg-neutral-12 text-neutral-60",
+  timed_out: "bg-danger-surface text-danger-strong",
+  interrupted: "bg-danger-surface text-danger-strong",
 };
 
 export function isRunningStatus(status: ProjectStatus): boolean {

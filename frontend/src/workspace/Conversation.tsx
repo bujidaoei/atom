@@ -116,6 +116,8 @@ function TimelineRow({ item }: { item: TimelineItem }) {
           </p>
         </div>
       );
+    case "notice":
+      return <SystemNote content={item.message} />;
     case "message":
       return (
         <AgentBlock role={item.role} streaming={item.streaming}>
