@@ -48,6 +48,86 @@ def initialize(client, config, token, archive):
     return seeded.json()["attempt_id"]
 
 
+def test_actual_checkpoint_http_boundary_and_exact_confirmation(environment):
+    config, grant, token, archive = environment
+    app = create_app(config)
+    admin = {'authorization': 'Bearer ' + config.admin_token, 'x-atom-grant': token}
+    export_url, confirm_url = '/v1/admin/checkpoints/export', '/v1/admin/checkpoints/confirm'
+    with TestClient(app) as client:
+        attempt = initialize(client, config, token, archive)
+        body = {'attempt_id': attempt}
+        assert client.post(export_url,json=body,headers={'authorization':'Bearer '+token}).status_code == 401
+        assert client.post(export_url,json={'attempt_id':'f'*32},headers=admin).status_code == 409
+        assert Registry(config.registry_path).find(attempt).state == 'ready'
+        output = client.post(export_url,json=body,headers=admin)
+        assert output.status_code == 200, output.text
+        assert output.content == archive and output.headers['cache-control'] == 'no-store'
+        assert output.headers['x-atom-artifact-key'] == hashlib.sha256(archive).hexdigest()
+        assert output.headers['x-atom-revision'] == grant.base_revision
+        assert client.post(export_url,json=body,headers=admin).content == output.content
+        headers = {**admin,'content-type':'application/octet-stream','x-atom-attempt':attempt,
+                   'x-atom-export-version':output.headers['x-atom-export-version'],
+                   'x-atom-registered-revision':output.headers['x-atom-revision']}
+        for changes in ({'x-atom-export-version':'01'},{'x-atom-export-version':'-1'},
+                        {'x-atom-attempt':'f'*32},{'x-atom-registered-revision':'x'*64}):
+            assert client.post(confirm_url,content=archive,headers={**headers,**changes}).status_code in (400,409)
+        assert client.post(confirm_url,content=archive[:-1],headers=headers).status_code == 400
+        assert Registry(config.registry_path).find(attempt).state == 'quiescing'
+        first = client.post(confirm_url,content=archive,headers=headers)
+        assert first.status_code == 200 and first.json()['state'] == 'checkpointed', first.text
+        assert client.post(confirm_url,content=archive,headers=headers).json() == first.json()
+        assert client.post(export_url,json=body,headers=admin).status_code == 409
+        assert client.post('/v1/admin/revoke',json={'grant_id':grant.jti},headers=admin).status_code == 200
+        assert client.post(confirm_url,content=archive,headers=headers).status_code == 409
+
+
+def test_slow_export_holds_slot_but_revocation_remains_available(environment):
+    config, grant, token, archive = environment
+    app = create_app(config)
+    async def scenario():
+        async with app.router.lifespan_context(app):
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),base_url='http://broker') as client:
+                admin = {'authorization':'Bearer '+config.admin_token}
+                created = await client.post('/v1/admin/provision',json={'grant':token},headers=admin)
+                attempt = created.json()['attempt_id']
+                seeded = await client.post('/v1/admin/seed',content=archive,headers={**admin,
+                    'x-atom-grant':token,'content-type':'application/octet-stream'})
+                assert seeded.status_code == 200
+                entered, release = asyncio.Event(), asyncio.Event()
+                messages = []
+                body = json.dumps({'attempt_id':attempt}).encode()
+                async def receive():
+                    return {'type':'http.request','body':body,'more_body':False}
+                async def send(message):
+                    messages.append(message)
+                    if message['type'] == 'http.response.body':
+                        entered.set()
+                        await release.wait()
+                headers = {**admin,'x-atom-grant':token,'content-type':'application/json'}
+                scope = {'type':'http','asgi':{'version':'3.0'},'http_version':'1.1','method':'POST',
+                    'scheme':'http','path':'/v1/admin/checkpoints/export','raw_path':b'/v1/admin/checkpoints/export',
+                    'root_path':'','query_string':b'','headers':[(k.encode(),v.encode()) for k,v in headers.items()],
+                    'client':('127.0.0.1',1),'server':('broker',80)}
+                pending = asyncio.create_task(app(scope,receive,send))
+                try:
+                    await asyncio.wait_for(entered.wait(),10)
+                    assert app.state.transfer_lock.locked()
+                    async def unread():
+                        raise AssertionError('busy body must not be read')
+                        yield b''
+                    busy = await client.post('/v1/admin/checkpoints/export',content=unread(),headers=headers)
+                    assert busy.status_code == 503 and busy.json()['error'] == 'broker_busy'
+                    revoked = await client.post('/v1/admin/revoke',json={'grant_id':grant.jti},headers=admin)
+                    assert revoked.status_code == 200
+                finally:
+                    release.set()
+                    await asyncio.wait_for(pending,10)
+                assert not app.state.transfer_lock.locked()
+                assert messages[-1]['body'] == archive
+                assert app.state.lifecycle.registry.find(attempt).state == 'terminated'
+    asyncio.run(scenario())
+
+
 def test_real_seed_files_receipts_and_revocation_over_http(environment):
     config, grant, token, archive = environment
     with TestClient(create_app(config)) as client:
@@ -130,6 +210,17 @@ def test_real_loopback_seed_and_file_transport(environment):
             result = client.post(f"/v1/attempts/{attempt_id}/files", headers={"authorization": "Bearer " + token},
                 json={"operation_id": "write", "tool_call_id": "tool", "operation": {"op": "write", "path": "a", "content": "network"}})
             assert result.status_code == 200 and result.json()["outcome"]["data"]["bytes_written"] == 7
+            exported = client.post('/v1/admin/checkpoints/export',json={'attempt_id':attempt_id},
+                headers={'authorization':'Bearer '+config.admin_token,'x-atom-grant':token})
+            assert exported.status_code == 200
+            assert exported.headers['x-atom-artifact-key'] == hashlib.sha256(exported.content).hexdigest()
+            assert exported.content.endswith(b'network')
+            confirmed = client.post('/v1/admin/checkpoints/confirm',content=exported.content,headers={
+                'authorization':'Bearer '+config.admin_token,'x-atom-grant':token,
+                'content-type':'application/octet-stream','x-atom-attempt':attempt_id,
+                'x-atom-export-version':exported.headers['x-atom-export-version'],
+                'x-atom-registered-revision':exported.headers['x-atom-revision']})
+            assert confirmed.status_code == 200 and confirmed.json()['state'] == 'checkpointed'
     finally:
         server.should_exit = True
         thread.join(timeout=20)

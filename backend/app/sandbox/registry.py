@@ -260,22 +260,33 @@ class Registry:
 
     def confirm_checkpoint(self, grant: Grant, export_version: int, revision: str) -> Attempt:
         """Trusted post-registration acknowledgement; never runtime authority."""
+        with self._transaction() as db:
+            attempt = self._checkpoint_confirmation(db, grant, export_version, revision)
+            if attempt.state == "checkpointed":
+                return attempt
+            db.execute("UPDATE attempts SET state='checkpointed',version=version+1,checkpoint_revision=?,updated_at=? WHERE id=?",
+                       (revision, self._clock(), attempt.id))
+            return self._by_id(db, attempt.id)
+
+    def authorize_confirmation(self, grant: Grant, export_version: int, revision: str) -> Attempt:
+        """Read-only preflight for administrative bounded body intake."""
+        with self._transaction() as db:
+            return self._checkpoint_confirmation(db, grant, export_version, revision)
+
+    def _checkpoint_confirmation(self, db, grant, export_version, revision):
         if type(export_version) is not int or export_version < 1:
             raise RegistryError("version_conflict")
         if not isinstance(revision, str) or not _REVISION.fullmatch(revision):
             raise RegistryError("invalid_revision")
-        with self._transaction() as db:
-            attempt = self._owned(db, grant)
-            if attempt.state == "checkpointed":
-                if attempt.version != export_version + 1 or attempt.checkpoint_revision != revision:
-                    raise RegistryError("checkpoint_conflict")
-                return attempt
+        attempt = self._owned(db, grant)
+        if attempt.state == "checkpointed":
+            if attempt.version != export_version + 1 or attempt.checkpoint_revision != revision:
+                raise RegistryError("checkpoint_conflict")
+        else:
             self._version(attempt, export_version)
             if attempt.state != "quiescing":
                 raise RegistryError("invalid_transition")
-            db.execute("UPDATE attempts SET state='checkpointed',version=version+1,checkpoint_revision=?,updated_at=? WHERE id=?",
-                       (revision, self._clock(), attempt.id))
-            return self._by_id(db, attempt.id)
+        return attempt
 
     def _terminate(self, db: sqlite3.Connection, attempt: Attempt) -> Attempt:
         db.execute("UPDATE operations SET state='unknown',reserved_bytes=0,updated_at=? WHERE attempt_id=? AND state='running'",

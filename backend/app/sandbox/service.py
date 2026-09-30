@@ -2,12 +2,13 @@
 import asyncio
 from contextlib import asynccontextmanager
 import hmac
+import hashlib
 import json
 import logging
 import re
 
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from starlette.concurrency import run_in_threadpool
 from starlette.requests import ClientDisconnect
 
@@ -18,8 +19,25 @@ from .lifecycle import Lifecycle, LifecycleError
 from .registry import Registry, RegistryError
 from .seeding import MAX_SEED_BYTES
 from .file_helper import validate
+from .checkpoints import CheckpointExport
+from ..snapshots import MAX_ARCHIVE_BYTES
 
 _LOG = logging.getLogger("atom.sandbox")
+_CHECKPOINT_SEND_SECONDS = 10
+
+
+class _SnapshotResponse(Response):
+    """Own the transfer slot until bounded ASGI delivery completes or fails."""
+    def __init__(self, content, *, lock, headers):
+        self._lock = lock
+        super().__init__(content, media_type="application/octet-stream", headers=headers)
+
+    async def __call__(self, scope, receive, send):
+        try:
+            async with asyncio.timeout(_CHECKPOINT_SEND_SECONDS):
+                await super().__call__(scope, receive, send)
+        finally:
+            self._lock.release()
 
 
 class ServiceError(Exception):
@@ -151,8 +169,7 @@ def create_app(config: BrokerConfig | None = None) -> FastAPI:
         except GrantError:
             raise ServiceError(403, "invalid_grant") from None
 
-    @asynccontextmanager
-    async def transfer():
+    async def acquire_transfer():
         lifecycle = getattr(app.state, "lifecycle", None)
         if lifecycle is None or not app.state.maintenance_ok:
             raise ServiceError(503, "broker_not_ready")
@@ -161,16 +178,28 @@ def create_app(config: BrokerConfig | None = None) -> FastAPI:
         # all intake runs on the single service event loop.
         if lock.locked():
             raise ServiceError(503, "broker_busy")
-        async with lock:
-            yield lifecycle
+        await lock.acquire()
+        return lifecycle, lock
 
-    async def control(function, *args):
+    @asynccontextmanager
+    async def transfer():
+        lifecycle, lock = await acquire_transfer()
         try:
-            return await run_in_threadpool(function, *args)
+            yield lifecycle
+        finally:
+            lock.release()
+
+    async def control(function, *args, **kwargs):
+        try:
+            return await run_in_threadpool(function, *args, **kwargs)
         except RegistryError as error:
             status = 503 if error.code == "registry_unavailable" else 409
             raise ServiceError(status, "registry_unavailable" if status == 503 else "ownership_conflict") from None
-        except (LifecycleError, DriverError):
+        except LifecycleError as error:
+            if error.code == "invalid_checkpoint_acknowledgement":
+                raise ServiceError(400, "invalid_checkpoint") from None
+            raise ServiceError(503, "lifecycle_unavailable") from None
+        except DriverError:
             raise ServiceError(503, "lifecycle_unavailable") from None
 
     @app.exception_handler(ServiceError)
@@ -220,6 +249,51 @@ def create_app(config: BrokerConfig | None = None) -> FastAPI:
             payload = await _read_body(request, "application/octet-stream", MAX_SEED_BYTES)
             attempt = await control(lifecycle.seed, grant, payload)
             return JSONResponse({"attempt_id": attempt.id, "state": attempt.state, "deadline": attempt.deadline})
+
+    @app.post("/v1/admin/checkpoints/export")
+    async def export_checkpoint(request: Request):
+        authenticate(request)
+        grant = signed_header(request, "x-atom-grant")
+        lifecycle, lock = await acquire_transfer()
+        try:
+            attempt_id = await _body(request, "attempt_id")
+            if not re.fullmatch(r"[0-9a-f]{32}", attempt_id):
+                raise ServiceError(400, "invalid_request")
+            attempt = await control(lifecycle.registry.authorize_checkpoint, grant)
+            if attempt.id != attempt_id:
+                raise ServiceError(409, "ownership_conflict")
+            exported = await control(lifecycle.export_checkpoint, grant)
+            return _SnapshotResponse(exported.payload, lock=lock, headers={
+                "cache-control": "no-store", "x-atom-attempt": exported.attempt_id,
+                "x-atom-export-version": str(exported.attempt_version), "x-atom-revision": exported.revision,
+                "x-atom-artifact-key": hashlib.sha256(exported.payload).hexdigest()})
+        except BaseException:
+            lock.release()
+            raise
+
+    @app.post("/v1/admin/checkpoints/confirm")
+    async def confirm_checkpoint(request: Request):
+        authenticate(request)
+        grant = signed_header(request, "x-atom-grant")
+        def field(name, pattern):
+            values = request.headers.getlist(name)
+            if len(values) != 1 or not re.fullmatch(pattern, values[0]):
+                raise ServiceError(400, "invalid_request")
+            return values[0]
+        attempt_id = field("x-atom-attempt", r"[0-9a-f]{32}")
+        version = int(field("x-atom-export-version", r"[1-9][0-9]{0,18}"))
+        revision = field("x-atom-registered-revision", r"[0-9a-f]{64}")
+        if version > 9223372036854775807:
+            raise ServiceError(400, "invalid_request")
+        async with transfer() as lifecycle:
+            attempt = await control(lifecycle.registry.authorize_confirmation, grant, version, revision)
+            if attempt.id != attempt_id:
+                raise ServiceError(409, "ownership_conflict")
+            payload = await _read_body(request, "application/octet-stream", MAX_ARCHIVE_BYTES)
+            confirmed = await control(lifecycle.confirm_checkpoint, grant,
+                CheckpointExport(attempt_id, version, revision, payload), registered_revision=revision)
+            return JSONResponse({"attempt_id": confirmed.id, "state": confirmed.state,
+                                 "version": confirmed.version, "revision": confirmed.checkpoint_revision})
 
     @app.get("/v1/attempts/{attempt_id}")
     async def status(attempt_id: str, request: Request):
