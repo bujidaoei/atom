@@ -95,3 +95,5 @@ Verification repository tests now include actual concurrent report writes, exact
 Verification tests cover durable cancellation/timeout with no fabricated check results, premature timeout rejection, exact deadline boundary, bounded non-mutating expiry inventory, foreign cancellation denial and synchronized report/cancel race. Browser lifecycle and automatic recovery are not covered.
 
 Run tests/test_release_repository.py with tests/test_verification_repository.py for real SQLite publish/replay/history, owner/version/policy/runner/generation rejection, changed-contract preservation, concurrent generation competition and denied receipt write rollback. Synthetic reports/artifact descriptors are ledger fixtures, not browser or deployment acceptance.
+
+Release repository tests include publish/unpublish generation competition, old unpublish replay after republish, foreign/stale/conflicting commands and denied receipt insertion preserving the prior live pointer. No website serving was exercised.

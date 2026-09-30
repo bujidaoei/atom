@@ -138,3 +138,5 @@ T027 / feature008 T016: transactional captured-contract report registration and 
 T027 / feature008 T016: verification cancellation/timeout ledger and bounded expiry inventory now tested, including simultaneous report/cancel. Browser lifecycle and automatic reconciliation remain unimplemented; no enterprise completion claim.
 
 T027 / feature008 T016: atomic release metadata/pointer/receipt and current-evidence checks now pass real SQLite concurrency/rollback tests. This does not expose publication or complete verifier/artifact serving/enterprise rollout.
+
+T027 / feature008 T016: fenced unpublish metadata/replay and publish competition pass real SQLite tests. Actual page/asset visibility enforcement and enterprise rollout remain open.

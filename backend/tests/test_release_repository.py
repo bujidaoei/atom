@@ -73,7 +73,8 @@ def test_two_publishers_cannot_overwrite_same_generation(release):
         assert db.execute('SELECT generation FROM release_publications').fetchone() == (1,)
 
 
-def test_receipt_write_failure_rolls_back_pointer_and_release(release,monkeypatch):
+@pytest.mark.parametrize('operation',['publish','unpublish'])
+def test_receipt_write_failure_rolls_back_pointer_and_release(release,monkeypatch,operation):
     path,repository,args = release
     repository.publish(**args)
     original = repository._ledger._transaction
@@ -90,8 +91,53 @@ def test_receipt_write_failure_rolls_back_pointer_and_release(release,monkeypatc
             yield db
     monkeypatch.setattr(repository._ledger,'_transaction',fail_receipt)
     with pytest.raises(VerificationError):
-        repository.publish(**(args | {'release_id':'new','expected_generation':1}))
+        if operation == 'publish':
+            repository.publish(**(args | {'release_id':'new','expected_generation':1}))
+        else:
+            repository.unpublish(owner='user',project_id='project',command_id='off',expected_release='release',expected_generation=1)
     assert denied == ['command_receipts']
     with sqlite3.connect(path) as db:
         assert db.execute('SELECT id FROM release_records').fetchall() == [('release',)]
         assert db.execute('SELECT release_id,generation FROM release_publications').fetchone() == ('release',1)
+        assert db.execute('SELECT live FROM release_publications').fetchone() == (1,)
+
+
+def test_unpublish_replay_cannot_disable_later_release(release):
+    path,repository,args = release
+    first = repository.publish(**args)
+    command = dict(owner='user',project_id='project',command_id='off',expected_release=first.release_id,expected_generation=1)
+    stopped = repository.unpublish(**command)
+    assert stopped.generation == 2
+    with sqlite3.connect(path) as db:
+        assert db.execute('SELECT live,generation FROM release_publications').fetchone() == (0,2)
+        assert db.execute('SELECT count(*) FROM release_records').fetchone() == (1,)
+    next_release = repository.publish(**(args | {'release_id':'new','expected_generation':2}))
+    assert next_release.generation == 3
+    assert ReleaseRepository(path).unpublish(**command) == stopped
+    with sqlite3.connect(path) as db:
+        assert db.execute('SELECT release_id,live,generation FROM release_publications').fetchone() == ('new',1,3)
+    with pytest.raises(VerificationError): repository.unpublish(**(command | {'command_id':'stale'}))
+    with pytest.raises(VerificationError): repository.unpublish(**(command | {'expected_generation':3}))
+    with pytest.raises(VerificationError): repository.unpublish(**(command | {'owner':'foreign'}))
+
+
+def test_publish_and_unpublish_compete_for_one_generation(release):
+    path,repository,args = release
+    repository.publish(**args)
+    barrier = Barrier(2)
+    def run(stop):
+        barrier.wait(timeout=3)
+        try:
+            if stop:
+                return repository.unpublish(owner='user',project_id='project',command_id='off',expected_release='release',expected_generation=1)
+            return repository.publish(**(args | {'release_id':'new','expected_generation':1}))
+        except VerificationError as error:
+            assert str(error) == 'release_conflict'
+            return None
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(run,[True,False]))
+    assert sum(value is not None for value in results) == 1
+    with sqlite3.connect(path) as db:
+        current = db.execute('SELECT release_id,live,generation FROM release_publications').fetchone()
+        assert current in [('release',0,2),('new',1,2)]
+        assert db.execute('SELECT count(*) FROM command_receipts').fetchone() == (2,)

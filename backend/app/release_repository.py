@@ -18,6 +18,13 @@ class ReleaseReceipt:
     slug: str
 
 
+@dataclass(frozen=True)
+class UnpublishReceipt:
+    command_id: str
+    release_id: str
+    generation: int
+
+
 class ReleaseRepository:
     def __init__(self, path, *, lock_timeout=3):
         self._ledger = VerificationRepository(path, lock_timeout=lock_timeout)
@@ -89,6 +96,41 @@ class ReleaseRepository:
                 ON CONFLICT(project_id) DO UPDATE SET release_id=excluded.release_id,generation=excluded.generation,live=1''',
                 (project_id,slug,release_id,generation))
             receipt = ReleaseReceipt(release_id,expected_revision,generation,slug)
+            db.execute('INSERT INTO command_receipts(project_id,key,digest,response_json,created_at) VALUES (?,?,?,?,?)',
+                (project_id,key,digest,json.dumps(receipt.__dict__,sort_keys=True,separators=(',',':')),datetime.now(timezone.utc).isoformat()))
+            return receipt
+
+    def unpublish(self, *, owner, project_id, command_id, expected_release, expected_generation) -> UnpublishReceipt:
+        for value in (owner,project_id,command_id,expected_release):
+            if not isinstance(value,str) or re.fullmatch(r'[A-Za-z0-9_.-]{1,100}',value) is None:
+                raise VerificationError('invalid_release_request')
+        if type(expected_generation) is not int or not 1 <= expected_generation < 2**63-1:
+            raise VerificationError('invalid_release_request')
+        intent = dict(owner=owner,project_id=project_id,command_id=command_id,
+                      expected_release=expected_release,expected_generation=expected_generation)
+        digest = hashlib.sha256(json.dumps(intent,sort_keys=True,separators=(',',':')).encode()).hexdigest()
+        key = 'unpublish:' + command_id
+        with self._ledger._transaction() as db:
+            if db.execute('SELECT 1 FROM projects WHERE id=? AND user_id=?',(project_id,owner)).fetchone() is None:
+                raise VerificationError('release_not_found')
+            prior = db.execute('SELECT digest,response_json FROM command_receipts WHERE project_id=? AND key=?',(project_id,key)).fetchone()
+            receipt = UnpublishReceipt(command_id,expected_release,expected_generation+1)
+            if prior is not None:
+                if prior['digest'] != digest:
+                    raise VerificationError('release_conflict')
+                try:
+                    recorded = UnpublishReceipt(**json.loads(prior['response_json']))
+                except (TypeError,ValueError):
+                    raise VerificationError('release_corrupt') from None
+                if recorded != receipt:
+                    raise VerificationError('release_corrupt')
+                return recorded
+            pointer = db.execute('SELECT * FROM release_publications WHERE project_id=?',(project_id,)).fetchone()
+            if (pointer is None or pointer['release_id'] != expected_release
+                or pointer['generation'] != expected_generation or not pointer['live']):
+                raise VerificationError('release_conflict')
+            db.execute('UPDATE release_publications SET live=0,generation=? WHERE project_id=?',
+                       (receipt.generation,project_id))
             db.execute('INSERT INTO command_receipts(project_id,key,digest,response_json,created_at) VALUES (?,?,?,?,?)',
                 (project_id,key,digest,json.dumps(receipt.__dict__,sort_keys=True,separators=(',',':')),datetime.now(timezone.utc).isoformat()))
             return receipt

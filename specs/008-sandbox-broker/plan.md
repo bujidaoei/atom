@@ -110,3 +110,5 @@ T016 result component: trusted internal record_report resolves owner-scoped inte
 T016 terminal component: terminate records explicit interruption under writer exclusion; expired returns bounded owner/request pairs for trusted recovery. Timed-out decisions require current time strictly after the inclusive report deadline. No background sweeper or browser stop is implied by a ledger decision.
 
 T016 release metadata component implemented in release_repository.py using the v2 ledger transaction boundary. Immutable release records also record creator/previous release for audit provenance; existing command_receipts stores a reserved release:<id> request digest and response in the same transaction. Dedicated event delivery/outbox, artifact-serving promotion and verifier provenance remain unfinished.
+
+T016 unpublish metadata uses the existing writer transaction and project-scoped unpublish:<command_id> receipt namespace. Every accepted visibility change increments generation. Public route and pinned resource visibility enforcement remain unimplemented.

@@ -121,3 +121,5 @@ Verification result registration derives outcome/counts from exact complete cove
 Verification interruption must persist cancelled/timed_out separately from observed check results. A report and interruption racing for the same request can commit only one immutable terminal result. Expiry inventory must be bounded and reject capacity overflow without partial mutation.
 
 Release metadata promotion must recheck owner, idle main workspace, expected head, current contract, passing evidence, policy and runner in the same transaction that advances the publication generation. Release record, pointer and idempotency receipt commit together; historical replay must not repromote old content.
+
+Unpublish must compare expected release and generation, atomically disable visibility and save an idempotency receipt, preserving artifact/history. Exact historical replay cannot disable a subsequently published release.

@@ -110,3 +110,5 @@ T016 continuation: internal trusted result registration now atomically computes 
 T016 continuation: immutable interruption and bounded expired-request inventory now pass actual SQLite replay/concurrency tests. A synchronized report/cancel race commits one result; interruption does not invent check observations. Verifier process shutdown, sweeper/auth/environment, adoption/release transactions and application integration remain open.
 
 T016 continuation: internal atomic release metadata/pointer/receipt promotion implemented with current contract/evidence/head/policy checks. Real concurrency/replay and late write-failure rollback tests pass. Trusted verifier provenance, artifact validation/serving, event delivery, unpublish/rollback, adoption and API/UI integration remain open; task stays unchecked.
+
+T016 continuation: atomic unpublish metadata/receipt and monotonic generation implemented with concurrent publish competition and late-failure rollback evidence. Route/resource visibility, rollback/adoption, verifier provenance and application rollout remain open.
