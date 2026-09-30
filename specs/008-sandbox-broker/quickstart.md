@@ -87,3 +87,5 @@ Offline Python API: backup_database(absolute_source, new_absolute_backup) return
 Disposable/offline databases only: python -m app.migrations ABSOLUTE_DATABASE --backup NEW_ABSOLUTE_BACKUP --target-version 2. Default stays 1. Backups retain source version; verify_backup requires that expected version. Current RevisionRepository intentionally rejects v2, so do not migrate a serving database. Linux fixture exercises v2 crash/retry and snapshot verification.
 
 Codec verification: python -m pytest backend/tests/test_verification_contract.py backend/tests/test_acceptance.py. Covers fixed encoding, roundtrip, source-mutation isolation, semantic changes, rejection limits and exact report coverage. These are content-validation tests, not browser or API integration evidence.
+
+Run tests/test_verification_repository.py with tests/test_verification_contract.py for actual SQLite reservation/concurrent retry, durable reopen, foreign/stale input denial, expired historical replay, active-run rejection, bounded lock contention and schema drift. Tests use synthetic ledger artifact descriptors; they are not physical artifact or browser acceptance.

@@ -130,3 +130,5 @@ T027 / feature008 T015 continuation: baseline/v1 backup prerequisite now preserv
 T027 / feature008 T015: explicit offline v2 verification/release schema and migration component implemented and fault-tested; runtime remains v1-only. Adoption/full verifier identity/application cutover and enterprise release remain open.
 
 T027 / feature008 T016: canonical contract and complete report content validation now tested; trusted execution, persistence and release authorization remain open.
+
+T027 / feature008 T016: immutable verification-intent reservation and exact replay now pass real SQLite concurrency/scope/drift tests. Verifier execution, result registration and release integration remain unfinished.

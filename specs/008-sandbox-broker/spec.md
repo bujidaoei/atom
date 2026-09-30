@@ -113,3 +113,5 @@ FR-006 next-version migration prerequisite: verified backups must retain the exa
 FR-006 migration extension: explicit target v2 may add verification/release identity tables while preserving exact v1 business and journal records. Original evidence is not backfilled or promoted. Runtime startup remains v1-only until repositories, verifier and application adoption pass their gates.
 
 Verification contract identity includes ordered requirements/checks/setup, title/detail, selectors and exact input/expected text. Strict versioned encoding rejects unknown fields, duplicate keys and invalid Unicode; it must not silently repair or discard checks. Complete results require exact unique check identities and actual booleans.
+
+Verification intent reservation must capture the stored project contract under the same writer transaction as owner/current-head/idle checks. Exact request replay preserves original identity and deadline; replay is historical evidence, not renewed dispatch permission.

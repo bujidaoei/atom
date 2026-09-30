@@ -102,3 +102,5 @@ T015 continuation: implemented writer-excluded baseline/v1 backup and explicit v
 T015 continuation: explicit offline baseline/v1 to v2 migration, journal preservation, backup/replay/downgrade handling and structural evidence/release tables implemented. Real constraint, rollback and process-exit tests plus Linux crash/retry pass. Adoption provenance and complete verifier identity/application migration remain open, so T015 stays unchecked.
 
 T016 continuation: strict versioned contract/report codec implemented with real encoding/validation tests. No repository publication or verifier authority added. T015 complete provenance/adoption and T016 transactional repository behavior remain open; no checkbox closure.
+
+T016 continuation: v2 VerificationRepository now reserves immutable intents from stored requirements with owner/current-head/idle checks and exact non-renewing replay. Real SQLite concurrent/reopen/conflict tests pass. Result registration, verifier authority/provenance, release/adoption transactions and application wiring remain open; task stays unchecked.
