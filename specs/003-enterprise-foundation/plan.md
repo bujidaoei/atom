@@ -23,6 +23,8 @@ The same bounded process applies to `005-configuration-guards`, which closes dem
 
 `006-sandbox-snapshots` implements the researched immutable-transfer component after local isolation/quota probes. Its explicit component readiness, Linux filesystem tests and malformed-stream evidence permit this foundation independently of paid competitor access. Broker, grant validation, runtime integration, fenced registration and crash cleanup remain open; no production isolation claim follows from a serialization component.
 
+`007-sandbox-lifecycle` closes source-identified post-acquisition cleanup gaps before real containers are introduced. Require reproduction through actual ProductAgentRuntime, exit-path tests and real Pi regression. This is adapter ownership only, not verified container termination or broker acceptance.
+
 ## Project Structure
 - `backend/app`: control plane and current authorization, provider and orchestration paths.
 - `runtime/src`: own runtime adapters; place isolation boundaries here or a dedicated worker adapter without changing `runtime/pi`.

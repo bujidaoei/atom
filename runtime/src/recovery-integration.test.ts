@@ -25,11 +25,18 @@ test('real Pi session recovers length stop without replaying successful tool', a
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   const root = await mkdtemp(join(tmpdir(), 'atom-recovery-'));
   let writes = 0;
+  let acquisitions = 0;
+  let releases = 0;
   try {
     const workspacePath = join(root, 'workspace');
+    const local = new LocalSandboxClient({ resolveWorkspace: () => workspacePath });
     const runtime = new ProductAgentRuntime({
       aiGateway: { baseUrl: `http://127.0.0.1:${(server.address() as any).port}/v1`, masterKey: 'test-key', model: 'test-model', requestTimeoutMs: 5000 },
-      agentDir: join(root, 'agent'), sandbox: new LocalSandboxClient({ resolveWorkspace: () => workspacePath }),
+      agentDir: join(root, 'agent'), sandbox: {
+        async create(runId, workspaceId) { acquisitions++; return local.create(runId, workspaceId); },
+        async destroy(id) { releases++; await local.destroy(id); },
+        exec: local.exec.bind(local), writeFile: local.writeFile.bind(local),
+      },
       approvals: { request: async () => 'approved' },
       workspaceToolNames: ['write', 'edit', 'read_file', 'glob', 'grep'],
       events: { async emit(type, payload) { if (type === 'tool.completed' && payload.toolName === 'write') writes++; } },
@@ -39,6 +46,8 @@ test('real Pi session recovers length stop without replaying successful tool', a
     });
     assert.equal(result.resultText, 'recovered');
     assert.equal(writes, 1);
+    assert.equal(acquisitions, 2);
+    assert.equal(releases, acquisitions);
     assert.equal(requests.length, 3);
     assert.ok(!requests[0].tools.some((tool: any) => tool.function.name === 'sandbox_exec'));
     assert.equal(await readFile(join(workspacePath, 'index.html'), 'utf8'), '<h1>retained</h1>');
