@@ -75,3 +75,5 @@ Grant, broker attempt registry, operation receipt, immutable snapshot, registere
 
 ## Assumptions
 Initial deployment is a single trusted private-team Docker host, not a hostile public multi-tenant isolation claim or HA milestone. Broker-local registry is separate from future PostgreSQL control-plane execution ownership. Paid models and full enterprise release remain parent gates. First profile only permits controlled file helpers; arbitrary user shell/background processes and dependency-network access are excluded until separately designed.
+
+FR-007 lifecycle ownership: one sandbox acquisition and one final checkpoint MUST cover the entire model recovery sequence. Work results must not return before verified completion and cleanup; failures preserve their original and cleanup causes.
