@@ -28,8 +28,12 @@ Duplicate creates, same identity/different grant, lost create response, worker o
 - FR-007: Own runtime and existing file tools MUST use the broker; production MUST fail closed without it. Explicit development local mode remains visibly non-isolated.
 - FR-008: Real integration, fault injection and deployment migration evidence MUST precede acceptance. No component test may close whole feature.
 
+FR-006 registration semantics: a durable checkpoint, a successfully terminated execution and independently accepted product output are separate facts. A later failed/cancelled run must preserve any committed revision without being reported successful. Lost acknowledgements must resolve an immutable receipt; retries must not advance a newer head. Unknown termination retains ownership until reconciliation confirms release.
+
+FR-006 migration prerequisite: reject unsupported API schema drift, preserve existing business rows, create a verified exclusive backup before transactional changes, and recover interrupted DDL. New scoped workspace heads start empty; legacy status cannot invent verified artifacts, accepted revisions or terminated attempts. Offline migration alone does not satisfy revision registration or application adoption.
+
 ## Key Entities
-Verified artifacts must be immutable and durably acknowledged before any revision head can advance. Local storage uses exact-byte digest identity separate from the canonical revision digest; no materialization or registration is implied by storage. Missing versioned API migration and durable execution ownership are explicit prerequisites in contracts/revision-registration.md.
+Verified artifacts must be immutable and durably acknowledged before any revision head can advance. Local storage uses exact-byte digest identity separate from the canonical revision digest; no materialization or registration is implied by storage. Offline API migration and trusted execution/revision repository now exist; production adoption remains an explicit prerequisite in contracts/revision-registration.md.
 
 Verified export serializes with file operations, durably enters quiescing, exports while the worker is alive and verifies every returned byte before delivery. Repeat export is read-only and requires current authorization. An in-memory verified export is not a stored artifact or registered revision; checkpointed remains unavailable until trusted registration is implemented (contracts/checkpoint-export.md).
 
@@ -50,6 +54,4 @@ Grant, broker attempt registry, operation receipt, immutable snapshot, registere
 - SC-004: Cancellation/timeout and orphan reconciliation are measured against configured deadlines; unknown outcomes are visible and prevent unsafe replacement.
 
 ## Assumptions
-FR-006 migration prerequisite: reject unsupported API schema drift, preserve existing business rows, create a verified exclusive backup before transactional changes, and recover interrupted DDL. New scoped workspace heads start empty; legacy status cannot invent verified artifacts, accepted revisions or terminated attempts. Offline migration alone does not satisfy revision registration or application adoption.
-
 Initial deployment is a single trusted private-team Docker host, not a hostile public multi-tenant isolation claim or HA milestone. Broker-local registry is separate from future PostgreSQL control-plane execution ownership. Paid models and full enterprise release remain parent gates. First profile only permits controlled file helpers; arbitrary user shell/background processes and dependency-network access are excluded until separately designed.

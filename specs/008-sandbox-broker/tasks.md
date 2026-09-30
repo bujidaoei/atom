@@ -18,6 +18,8 @@
 - [ ] T011 Run real broker/container/Pi/cancel/crash/security scenarios and relevant product regressions; record measured limits and missing gates in specs/008-sandbox-broker/evidence.md (FR-008/SC-001…004).
 - [ ] T012 Review Spec Kit/code alignment and rollout readiness in specs/008-sandbox-broker/evidence.md; update parent specs/003-enterprise-foundation/tasks.md without closing enterprise release early.
 ## Dependencies
+T009/T010 continuation: trusted revision repository now implements owner-scoped bootstrap, fenced allocation, cancellation, atomic registration/outbox, exact receipt replay/lookup and separately observed termination. Real SQLite tests and Linux export→storage→registration→confirmed-release integration exercise these components. No production registration endpoint, coordinator, outbox delivery, legacy Run synchronization or preview migration is enabled; both tasks remain open.
+
 T010 continuation: offline API migration v1 is implemented in backend/app/migrations with backup, restore rehearsal, WAL/crash and scoped-constraint tests. Application repositories, workspace import/creation/deletion, revision registration, preview/runtime adoption and live migration acceptance remain open. No live database has been migrated; T010 remains unchecked.
 
 T009/T010 continuation: immutable local artifact storage implemented in backend/app/artifacts.py; real Linux unit scenarios and a Docker-volume cross-container persistence test are in tests/test_snapshot_artifacts.py and tests/integration/test_artifact_store.py. It is not wired to project revision registration. Versioned API migration, tenant/run/workspace ownership, fenced head changes and normal runtime completion ordering remain open in contracts/revision-registration.md.

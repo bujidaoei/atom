@@ -96,3 +96,8 @@
 - 同一有验收标准的小项目基准：真实模型、同一仓库、相同权限、成本、成功率、人工干预、失败恢复，不以官网营销描述估算效果。
 - Atom 现有实现逐项 gap mapping，由主任务结合 code/spec/plan/tasks 完成；本子研究未读应用代码，不能认定缺失项已存在或已解决。
 - 所有高可用、安全、灾备与线上验收维持未完成，直到对应测试/部署证据入库。
+
+## Recovery-boundary refinement (2026-10-01)
+Rechecked Replit's official checkpoint documentation: project/context restoration is distinct from optional development-database restoration, and production-database restoration is not automatic in that operation. Source: https://docs.replit.com/features/version-control/checkpoints-and-rollbacks . Its development/production documentation separates the environments, says Agent cannot directly modify production data, and discusses planned schema changes during publishing and isolated deployment previews. Source: https://docs.replit.com/features/data-and-storage/development-and-production . These are documented capabilities, not paid-account hands-on acceptance. The attempted Lovable version-history URL did not return usable content; no conclusion relies on it.
+
+Atom design inference: show recovery scope explicitly across files, development data, production data, agent context and external effects. An immutable file revision must never promise complete environment rollback. Keep checkpoint durability, execution termination, independent acceptance and publication as separate evidence. Current 008 implements file artifacts and the registration ledger only; database restore is a separate offline operator workflow, and product-level recovery UX, database policy and preview acceptance remain open. This is a proposed cohesive product advantage, not a claim that competitors lack these capabilities.
