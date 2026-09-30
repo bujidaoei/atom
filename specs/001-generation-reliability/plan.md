@@ -21,3 +21,5 @@ Provider latency can still exhaust budget; report timed_out. Current local shell
 
 ## Evidence-driven change 2026-09-30
 Live tests showed Alex spending the remaining budget constructing fake DOM harnesses after working files were complete. Static builder now exposes only file tools through ProductAgentRuntime.workspaceToolNames. Shell remains available to other runtime consumers, but not the Atom sidecar. Backend performs actual resource/JavaScript syntax validation as a completion gate. This removes unnecessary authority and makes validation deterministic; it does not claim browser acceptance.
+
+Production follow-up: acceptance now waits at most 1.5 seconds for temporarily disabled controls, including each setup action and the final click. Permanently disabled controls still fail. Contract instructions define setup versus final-trigger semantics, reset state between scenarios, and disallow impossible reverse-direction snake checks. Generation instructions require responsive 360px sizing. These improve generation constraints without rewriting failed test results or claiming arbitrary generated apps are certified.

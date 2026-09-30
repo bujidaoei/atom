@@ -1,0 +1,206 @@
+[
+  {
+    "name": "calculator",
+    "id": "7eebfa2a8fee4f8e89bf97c44ce0f3e5",
+    "status": "timed_out",
+    "http": 200,
+    "errors": [],
+    "checks": [
+      {
+        "key": "display-area",
+        "checkIndex": 0,
+        "passed": true,
+        "note": "匹配到 [data-testid='calc-display']"
+      },
+      {
+        "key": "display-area",
+        "checkIndex": 1,
+        "passed": true,
+        "note": "包含「0」"
+      },
+      {
+        "key": "four-operations",
+        "checkIndex": 0,
+        "passed": true,
+        "note": "点击后出现了 [data-testid='calc-display'][data-value='12']"
+      },
+      {
+        "key": "four-operations",
+        "checkIndex": 1,
+        "passed": true,
+        "note": "点击后出现了 [data-testid='calc-display'][data-value='48']"
+      },
+      {
+        "key": "clear-and-zero-division",
+        "checkIndex": 0,
+        "passed": true,
+        "note": "点击后出现了 [data-testid='calc-display'][data-value='0']"
+      },
+      {
+        "key": "clear-and-zero-division",
+        "checkIndex": 1,
+        "passed": true,
+        "note": "点击后出现了 [data-testid='calc-error']:not([hidden])"
+      },
+      {
+        "key": "keyboard-input",
+        "checkIndex": 0,
+        "passed": true,
+        "note": "点击后出现了 [data-testid='calc-display'][data-value='5']"
+      }
+    ],
+    "passed": 7,
+    "total": 7,
+    "mobileOverflow": false
+  },
+  {
+    "name": "lottery",
+    "id": "40f9f3b53efd4058a7b018b5a6fbd35e",
+    "status": "ready",
+    "http": 200,
+    "errors": [],
+    "checks": [
+      {
+        "key": "name-entry",
+        "checkIndex": 0,
+        "passed": true,
+        "note": "匹配到 [data-testid='name-input']"
+      },
+      {
+        "key": "name-entry",
+        "checkIndex": 1,
+        "passed": true,
+        "note": "匹配到 [data-testid='add-btn']"
+      },
+      {
+        "key": "name-entry",
+        "checkIndex": 2,
+        "passed": true,
+        "note": "点击后出现了 [data-testid='name-item']"
+      },
+      {
+        "key": "draw-random",
+        "checkIndex": 0,
+        "passed": true,
+        "note": "匹配到 [data-testid='draw-btn']"
+      },
+      {
+        "key": "draw-random",
+        "checkIndex": 1,
+        "passed": true,
+        "note": "点击后出现了 [data-testid='winner-name']"
+      },
+      {
+        "key": "no-repeat",
+        "checkIndex": 0,
+        "passed": true,
+        "note": "匹配到 [data-testid='winner-history']"
+      },
+      {
+        "key": "no-repeat",
+        "checkIndex": 1,
+        "passed": false,
+        "note": "前置步骤 5 的控件不可用"
+      },
+      {
+        "key": "no-repeat",
+        "checkIndex": 2,
+        "passed": true,
+        "note": "包含「0」"
+      },
+      {
+        "key": "reset-record",
+        "checkIndex": 0,
+        "passed": true,
+        "note": "匹配到 [data-testid='reset-btn']"
+      },
+      {
+        "key": "reset-record",
+        "checkIndex": 1,
+        "passed": true,
+        "note": "匹配到 [data-testid='clear-names-btn']"
+      },
+      {
+        "key": "reset-record",
+        "checkIndex": 2,
+        "passed": false,
+        "note": "前置步骤 3 的控件不可用"
+      }
+    ],
+    "passed": 9,
+    "total": 11,
+    "mobileOverflow": false
+  },
+  {
+    "name": "snake",
+    "id": "26ac9474f9574a9f80fdc1b6fa4e451f",
+    "status": "ready",
+    "http": 200,
+    "errors": [],
+    "checks": [
+      {
+        "key": "board-and-hud",
+        "checkIndex": 0,
+        "passed": true,
+        "note": "匹配到 [data-testid='game-board']"
+      },
+      {
+        "key": "board-and-hud",
+        "checkIndex": 1,
+        "passed": true,
+        "note": "匹配到 [data-testid='score-value']"
+      },
+      {
+        "key": "board-and-hud",
+        "checkIndex": 2,
+        "passed": true,
+        "note": "匹配到 [data-testid='high-score-value']"
+      },
+      {
+        "key": "start-pause-resume",
+        "checkIndex": 0,
+        "passed": true,
+        "note": "点击后出现了 [data-testid='state-running']"
+      },
+      {
+        "key": "start-pause-resume",
+        "checkIndex": 1,
+        "passed": true,
+        "note": "点击后出现了 [data-testid='pause-overlay']"
+      },
+      {
+        "key": "start-pause-resume",
+        "checkIndex": 2,
+        "passed": true,
+        "note": "点击后出现了 [data-testid='state-running']"
+      },
+      {
+        "key": "restart-flow",
+        "checkIndex": 0,
+        "passed": true,
+        "note": "匹配到 [data-testid='restart-btn']"
+      },
+      {
+        "key": "restart-flow",
+        "checkIndex": 1,
+        "passed": true,
+        "note": "点击后出现了 [data-testid='start-overlay']"
+      },
+      {
+        "key": "arrow-control",
+        "checkIndex": 0,
+        "passed": false,
+        "note": "点击后 1.5s 内没有出现 [data-testid='dir-left']"
+      },
+      {
+        "key": "arrow-control",
+        "checkIndex": 1,
+        "passed": true,
+        "note": "点击后出现了 [data-testid='dir-down']"
+      }
+    ],
+    "passed": 9,
+    "total": 10,
+    "mobileOverflow": true
+  }
+]

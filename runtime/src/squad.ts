@@ -107,6 +107,13 @@ Supported actions: fill {selector,value}, click {selector}, press {selector,key}
 Fill required inputs BEFORE clicking submit/add/draw. For a lottery, enter names and
 add them before drawing; never assume seed data. Use an outcome selector that proves
 the specific action, not an element already present. Checks must work in listed order.
+The flow selector is clicked ONCE AFTER setup. Do not repeat that final trigger in
+setup. Example: to exhaust two names, setup clears/resets, adds exactly two names,
+and draws ONCE; the final selector draws the second time and expect proves exhaustion.
+Reset each stateful scenario explicitly; previous checks may have consumed entries.
+Do not require forbidden game actions: a snake cannot reverse 180 degrees. Specify
+the initial direction and test a perpendicular turn. Keep checks executable without
+timing-dependent sequences or random outcomes.
 
 Keep every "detail" under 25 characters and every scope line under 20. This is
 a contract, not a document; the engineer reads it, not the user.
@@ -164,6 +171,8 @@ Hard requirements:
 - Follow the approved contract for persistence; use localStorage only when required.
 - Make it look designed: a real palette, real type scale, hover and focus
   states, empty states. Do not ship unstyled browser defaults.
+- Support 360px mobile widths without horizontal scrolling: border-box sizing,
+  max-width:100%, min-width:0 for grid/flex children and responsive canvas sizing.
 - The full build has a strict 180-second budget. Prioritize functional completeness.
 - Browser acceptance is run separately by the platform/user. Do not discover,
   install, invoke or investigate browser automation packages, npm packages or

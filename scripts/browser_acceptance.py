@@ -25,9 +25,9 @@ with sync_playwright() as p:
     page.set_content("""<iframe></iframe>""")
     frame = page.frames[1]
     frame.set_content("""<label>Name<input id="name" required></label><button id="add" disabled>Add</button><ul id="list"></ul>
-    <script>nameInput=document.querySelector('#name');
+    <button id="locked" disabled>Locked</button><script>nameInput=document.querySelector('#name');
     nameInput.addEventListener('input',()=>document.querySelector('#add').disabled=!nameInput.value);
-    document.querySelector('#add').onclick=()=>{const li=document.createElement('li');li.textContent=nameInput.value;document.querySelector('#list').append(li)};
+    document.querySelector('#add').onclick=()=>{const li=document.createElement('li');li.textContent=nameInput.value;document.querySelector('#list').append(li);document.querySelector('#add').disabled=true;setTimeout(()=>document.querySelector('#add').disabled=false,150)};
     nameInput.onkeydown=e=>{if(e.key==='Enter')document.querySelector('#add').click()};</script>""")
     page.add_script_tag(path=str(BUNDLE))
     page.locator('iframe').evaluate("el => el.style.display = 'none'")
@@ -56,12 +56,14 @@ with sync_playwright() as p:
             "expect": "li",
         },
         {"type": "text", "selector": "li", "contains": "Alice"},
+        {"type": "flow", "setup": [{"action": "click", "selector": "#add"}, {"action": "click", "selector": "#add"}], "selector": "#add", "expect": "li:nth-child(6)"},
+        {"type": "flow", "setup": [{"action": "click", "selector": "#locked"}], "selector": "#add", "expect": "li"},
     ]
     results = page.evaluate(
         '(checks)=>AtomAcceptance.runAcceptance(document.querySelector("iframe").contentDocument,[{key:"form",checks}])',
         checks,
     )
-    assert [r["passed"] for r in results] == [False, True, True, False, False, True], (
+    assert [r["passed"] for r in results] == [False, True, True, False, False, True, True, False], (
         results
     )
     print(

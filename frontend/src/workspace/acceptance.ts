@@ -5,9 +5,8 @@ async function prepare(doc: Document, steps: SetupStep[]) {
   const win = doc.defaultView;
   if (!win) throw new Error("预览窗口不可用");
   for (const [index, step] of steps.entries()) {
-    const el = await waitFor(doc, step.selector);
-    if (!el) throw new Error(`前置步骤 ${index + 1} 找不到 ${step.selector}`);
-    if (el.matches(":disabled")) throw new Error(`前置步骤 ${index + 1} 的控件不可用`);
+    const el = await waitFor(doc, step.selector, 1500, false, true);
+    if (!el) throw new Error(`前置步骤 ${index + 1} 找不到可用控件 ${step.selector}`);
     if (step.action === "fill") {
       if (!el.matches("input,textarea,select")) throw new Error(`前置步骤 ${index + 1} 需要输入控件`);
       const input = el as HTMLInputElement;
@@ -49,13 +48,13 @@ function visibleWithinPreview(doc: Document, element: Element): boolean {
 }
 
 /** Poll for a selector so `flow` checks tolerate async re-renders. */
-async function waitFor(doc: Document, selector: string, timeout = 1500, visible = false): Promise<Element | null> {
+async function waitFor(doc: Document, selector: string, timeout = 1500, visible = false, enabled = false): Promise<Element | null> {
   const deadline = Date.now() + timeout;
   for (;;) {
     let found: Element | null;
     try { found = doc.querySelector(selector); }
     catch { throw new Error(`选择器无效：${selector}`); }
-    if (found && (!visible || visibleWithinPreview(doc, found))) return found;
+    if (found && (!visible || visibleWithinPreview(doc, found)) && (!enabled || !found.matches(":disabled"))) return found;
     if (Date.now() >= deadline) return null;
     await sleep(60);
   }
@@ -98,8 +97,7 @@ async function runCheck(doc: Document, check: Check): Promise<{ passed: boolean;
 
   // flow: click, let the page settle, then assert the follow-up appears.
   await prepare(doc, check.setup ?? []);
-  const { el, error } = query(doc, check.selector);
-  if (error) return { passed: false, note: error };
+  const el = await waitFor(doc, check.selector, 1500, false, true);
   if (!el) return { passed: false, note: `点不到 ${check.selector}` };
   if (el.matches(":disabled")) return { passed: false, note: `${check.selector} 不可点击，请检查前置输入` };
   try {

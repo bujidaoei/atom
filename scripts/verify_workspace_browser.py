@@ -8,7 +8,7 @@ from playwright.sync_api import sync_playwright
 
 root = Path(__file__).resolve().parents[1]
 base = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:5181"
-source = root / ".logs/live-generation-v2.json"
+source = Path(sys.argv[2]) if len(sys.argv) > 2 else root / ".logs/live-generation-v2.json"
 row = json.loads(source.read_text(encoding="utf-8"))[0]
 with sync_playwright() as p:
     browser = p.chromium.launch()
