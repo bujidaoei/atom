@@ -76,9 +76,16 @@ file API, preview and Chromium showed the same verified bytes, explicit
 continue action and disabled Publish. A subsequent API restart kept the receipt
 and head without duplication, but revealed a sidecar namespace restart defect
 that required broker recreation. The installed coordinated restart entry point
-passes a systemd restart exercise. Before-receipt process death remains unaccepted. A subsequent fresh live
+passes a systemd restart exercise. A separate live provider `edit` was followed
+by SIGKILL of the API child before any partial receipt: startup reconciliation
+closed the attempt with no receipt or new head, revoked the worker, and Chromium
+showed only the prior files with retry wording. A fresh live
 model-requested/Stop case had zero writes, a null incomplete receipt and the
-correct browser retry wording. A live deadline-after-write case stays open.
+correct browser retry wording. A later live 180-second deadline after six edits
+registered a `timed_out` receipt and exposed the exact files in Chromium; both
+the Publish button and API rejected publication. The unfinished generated
+preview threw its own `mode is not defined` error, while the Atom workspace
+had no page error. Generated-app correctness was not accepted by this gate.
 
 ## Acceptance gates
 
@@ -96,6 +103,6 @@ correct browser retry wording. A live deadline-after-write case stays open.
    must agree. A second live run with no writes must show “重新生成”. Browser
    preview and publication must not claim acceptance of an incomplete output.
 
-This contract governs work in progress. T039.2c/d passed deployed live-browser
-acceptance; T039.3 remains open until the remaining fault, process-death and
-live deadline gate pass.
+This contract governs work in progress. T039.2 and T039.3b/c passed deployed
+live-browser and recovery acceptance. T039.3a remains open for the complete
+fault and concurrent-operation matrix.
