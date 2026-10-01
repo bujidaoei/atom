@@ -1,4 +1,4 @@
-# Partial checkpoint contract (implementation in progress)
+# Partial checkpoint contract (T039 accepted)
 
 ## User-visible boundary
 
@@ -103,6 +103,11 @@ had no page error. Generated-app correctness was not accepted by this gate.
    must agree. A second live run with no writes must show “重新生成”. Browser
    preview and publication must not claim acceptance of an incomplete output.
 
-This contract governs work in progress. T039.2 and T039.3b/c passed deployed
-live-browser and recovery acceptance. T039.3a remains open for the complete
-fault and concurrent-operation matrix.
+T039.2 and T039.3 passed their scoped acceptance. The full 27-case real Linux
+broker/Docker/store/HTTP/Node integration file passed on 2026-10-02, including
+a real concurrent write/export lock race and injected failures during broker
+export, artifact put, ledger registration, broker confirmation and revocation.
+Production live-provider Stop/deadline, process-death recovery and authenticated
+browser evidence established the user-visible boundary. These gates accept only
+verified incomplete-revision behavior; verified publication and enterprise
+release acceptance remain separate and open.
