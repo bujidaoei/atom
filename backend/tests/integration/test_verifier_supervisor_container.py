@@ -121,6 +121,21 @@ def test_killed_browser_container_leaves_no_result_or_container(assignment):
     inventory = subprocess.run(['docker', 'ps', '-aq', '--filter', label],
                                capture_output=True, timeout=10, check=True)
     assert not inventory.stdout.strip()
+    ledger = VerificationRepository(path)
+    closed = ledger.terminate(owner='user', request_id=dispatched.request.id,
+                              outcome='cancelled')
+    assert closed.outcome == 'cancelled'
+    assert ledger.terminate(owner='user', request_id=dispatched.request.id,
+                            outcome='cancelled') == closed
+    with pytest.raises(VerificationError, match='verification_expired'):
+        authority.register(request_id=dispatched.request.id,
+            route_id=dispatched.route_id, verifier_id=dispatched.verifier_id,
+            environment_digest=dispatched.environment_digest,
+            artifact=dispatched.artifact, credential=dispatched.credential,
+            results=[{'key': 'page', 'checkIndex': 0, 'passed': True, 'note': 'observed'}])
+    with sqlite3.connect(path) as db:
+        assert db.execute('SELECT outcome FROM verification_results').fetchone() == ('cancelled',)
+        assert db.execute('SELECT count(*) FROM verification_attestations').fetchone() == (0,)
 
 
 def test_changed_contract_during_real_browser_execution_cannot_register(assignment):
