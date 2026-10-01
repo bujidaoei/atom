@@ -1,0 +1,32 @@
+# Latest-release deployment record — 2026-10-01
+
+User priority is to finish and view the latest release. This is an in-progress deployment, not complete enterprise acceptance.
+
+## Observed remote state
+
+SSH access recovered after earlier intermittent banner failures. Host159.75.231.98 runs Ubuntu24.04.4. Existing Atom remains on revision8e1ea6c6ac4fea229630b5c7dbcb647b24c43588 with image5238a3136df0f7f319aeed71211615814e00c4dc05f02627d6d1d101104c77e5, volume atom_atom-data and /atom/ HTTP reverse proxy. The source database is schema0; zero queued/running runs were observed before backup. Original checkout is clean and was preserved.
+
+## Completed staging work
+
+- Fetched published application revision94bfcd77876e056daff35096df8bd9623926fa86 into detached /home/ubuntu/atom-releases/94bfcd7.
+- Built image atom-release:94bfcd7 on the server, ID sha256:65f5b5c95fa32aacf9b1414a60b0eb6d72efd3c3f8243d8a88ceee242274d15d. Frontend base is /atom/. Build log is /home/ubuntu/atom-backups/release-94bfcd7/build.log. The remote build uses configured mirrors; its ID differs from the separately verified local build.
+- Retained atom-demo:before-94bfcd7 as the previous image.
+- SQLite online backup integrity is ok. Protected source.db hash is3223c0e145510f843028020de36ee44e5b48764fb229b39738ad9d60ac970627. Files archive files.tar.gz hash is03db0df9558a5bd5e03b75f81c71020c12e7e71359f8bbea4afce219bc1d496d. Both are in /home/ubuntu/atom-backups/release-94bfcd7. Files were copied while the old service stayed running; this is a rehearsal backup, not the final quiesced cutover snapshot.
+- Restored into /home/ubuntu/atom-staging/94bfcd7/data and explicitly migrated that disposable copy0→10. Migration backup digest iscf06f28aee6ad672cbb96af2e1a0a3dcb5c7a9345462a932db5d6fd36f2e855a1. Verified all13 baseline business tables row-for-row before candidate test writes. Production database was not migrated. Schema11 pruning remains disabled.
+- Protected /home/ubuntu/.config/atom/production.env retains existing signing/runtime/provider configuration and generates distinct broker/grant/completion credentials without output. Production execution uses broker mode and secure cookies. Legacy session mode and /atom cookie path preserve the supported current installation layout; durable host-isolated enterprise rollout is not claimed.
+- Candidate containers atom-candidate and atom-candidate-broker run the exact server release image. Candidate API port is bound to host loopback127.0.0.1:18081 only. Broker shares candidate's network namespace, listens only on127.0.0.1:8766, receives its separate broker.env and private registry mount, and alone has the Docker socket/CLI. API has no Docker socket. Broker container is read-only/cap-drop-all/no-new-privileges. Sandbox image is pinned to the exact release image ID; workloads use the fixed existing isolated Docker profile.
+- Candidate health returns {"ok":true,"runtime":true,"broker":true}. Registration, Secure/HttpOnly cookies, login, create/read/list project checks pass on an isolated acceptance account in the candidate copy. Evidence is candidate-acceptance.json beside the backup. No live generation/publishing/browser/public TLS acceptance is claimed.
+
+The first backup validation attempt mounted a WAL-mode backup read-only and SQLite could not open it. Copying this immutable saved file to fresh writable temporary storage allowed normal SQLite verification; the product backup was not modified. Initial docker cp from the running container's tmpfs reported missing; reading the existing backup through docker exec to the protected host destination succeeded and was subsequently verified.
+
+## Public ingress blocker
+
+An independent Caddy container atom-tls was prepared on port443 for159-75-231-98.sslip.io. TLS-ALPN validation times out connecting to159.75.231.98:443. HTTP validation reaches a Tencent DNSPod webblock response instead of the challenge. External curl to443 also times out; host UFW is inactive. These observations support a cloud ingress/domain restriction; they do not prove its exact configuration. atom-tls is stopped to avoid repeated failed certificate orders. No old reverse-proxy configuration was changed. User was asked to allow TCP443 and supply an existing appropriately configured domain if available.
+
+Official references: Caddy automatic HTTPS and its HTTP/TLS-ALPN port requirements: https://caddyserver.com/docs/automatic-https ; sslip.io/nip.io service and individual certificates: https://nip.io/ . Public certificate issuance failed here; service documentation is not acceptance evidence.
+
+## Remaining cutover and rollback
+
+After cloud ingress/domain is available, validate a publicly trusted certificate and browser access before switching Atom traffic. Verify no active old runs, quiesce old writers, take a fresh verified database/files backup, refresh candidate storage from that final snapshot and migrate10. Do not promote the test-modified rehearsal database as production. Confirm all original business data, import/preview compatibility, real generation and restart behavior, then update only Atom's proxy route and recheck login/projects/preview. Preserve the old image, original volume and configuration for rollback.
+
+Currently no production traffic was switched, so rollback of staging means stopping only atom-candidate-broker and atom-candidate (and already-stopped atom-tls); retain staging and backup data for diagnosis. After a future switch, preserve all new writes before routing back; never blindly restore the older database over user work. Whole enterprise completion, T034 acceptance and remote latest-version delivery remain open.
