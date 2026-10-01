@@ -304,3 +304,6 @@ Recovery client component regression: `backend/.venv/Scripts/python.exe -m pytes
 
 
 Recovery crash regression: set ATOM_TEST_DOCKER_IMAGE to the approved pinned sandbox image, then run `backend/.venv/Scripts/python.exe -m pytest backend/tests/integration/test_isolated_audit_recovery.py -q --junitxml=.logs/audit-recovery-crash.xml`. Includes three real abrupt broker exits and four actual worker success/fault cases; seven passed. No source migration or deployment is performed.
+
+
+Offline schema10 foundation regression: `backend/.venv/Scripts/python.exe -m pytest backend/tests/test_audit_isolated_migration.py backend/tests/test_audit_archive_migration.py -q --junitxml=.logs/audit-isolated-migration.xml`.62 passed. Migration CLI supports explicit target10 with required backup; default stays1. Serving consumers and archive owner still reject10, so this is not a rollout instruction.
