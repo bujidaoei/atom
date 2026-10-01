@@ -268,3 +268,6 @@ T031 consumer increment in progress: authentication/content/publication/revision
 
 
 T031 partial compatibility increment accepted at component scope:105 business/migration,67 HTTP/delivery,272 revision/publication,18 main-preflight and24 actual Linux main/runtime cases pass (overlap between suites). Pi1905 files verified. Business consumers support exact6 and preserve audit writes; configured exports still reject6. T031-T034 remain unchecked pending registry-aware exporter/administration and complete acceptance; no production upgrade.
+
+
+T031/T032 foundation increment: explicit offline schema7 adds immutable typed destination command receipts without changing v1-v6 definitions/hashes. Trusted operator repository and app.audit_admin implement register/suspend/resume/block/retire with expected generation, exact replay and atomic registry/receipt commit. Retirement rejects every unconfirmed scoped event, including never-enrolled rows.111 focused tests pass. Ordinary business/runtime/export consumers still refuse7; full integration, operational backlog coverage and T031-T034 acceptance remain open. No serving database upgrade authorized by this component evidence.

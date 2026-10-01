@@ -119,3 +119,7 @@ Audit delivery status adds unenrolled count, oldest_unenrolled_at, backlog and o
 
 
 Proposed next-schema entities (not present): durable destination registry with scope/generation/lifecycle/fixed terminal reason; idempotent administrative receipts; policy-generation/hold bindings; immutable archive manifests and retention plan/receipt/watermark. Existing destination identities absent from current config must migrate visibly rather than disappear. Tokens, their digests and arbitrary errors remain excluded. Detailed transition/acceptance contract is audit-governance.md; DDL and consumer compatibility remain pending.
+
+
+## Audit destination administrative receipts (offline schema7)
+security_audit_destination_commands stores global command_id, destination FK, trusted operator_id, fixed action, expected/result generation, resulting state, occurred_at, optional fixed block reason and retirement sequence watermark. Primary command id and destination/generation uniqueness prevent duplicate evidence. Immutable update/delete/replacement guards and an insert consistency guard bind the receipt to the current destination state. Exact replay compares typed inputs, including scope from the immutable destination, and returns the original outcome. No endpoint, token, credential hash or arbitrary payload column exists. State transition and receipt share the owning SQLite transaction. This table is local operator evidence; export/tenant reader integration remains open.

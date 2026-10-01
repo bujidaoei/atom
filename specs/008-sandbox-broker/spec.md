@@ -264,3 +264,6 @@ Audit governance boundary: removal from runtime config cannot discharge historic
 
 
 T031 partial increment: explicit offline schema6 registry migration preserves historical destination scopes, rejects mixed scope, and adds generation/state and active-scope delivery guards. 99 focused migration/delivery/configuration tests pass. Authentication, content, publication, revision and audit-read consumers now accept exact schema6 and retain transactional audit writes. Export delivery remains exact5 pending governance integration; do not upgrade serving databases yet. Administration/retention and complete T031-T034 acceptance remain open.
+
+
+T031/T032 foundation increment: explicit offline schema7 adds immutable typed destination command receipts without changing v1-v6 definitions/hashes. Trusted operator repository and app.audit_admin implement register/suspend/resume/block/retire with expected generation, exact replay and atomic registry/receipt commit. Retirement rejects every unconfirmed scoped event, including never-enrolled rows.111 focused tests pass. Ordinary business/runtime/export consumers still refuse7; full integration, operational backlog coverage and T031-T034 acceptance remain open. No serving database upgrade authorized by this component evidence.
