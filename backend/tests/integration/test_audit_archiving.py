@@ -20,6 +20,14 @@ def test_actual_store_source_registration_and_recovery(planned, tmp_path, scenar
     run_probe(path, scenario)
 
 
+@pytest.mark.parametrize('version',[9,10])
+@pytest.mark.parametrize('scenario',['capacity','source-capacity'])
+def test_actual_full_archive_filesystem_preserves_source_and_retries(planned,tmp_path,version,scenario):
+    path,_ = planned
+    migrate(path,tmp_path/'before-capacity.db',target_version=version)
+    run_probe(path,scenario)
+
+
 def run_probe(path, scenario):
     backend = Path(__file__).resolve().parents[2]
     # Fixture policy's actual configured opaque store ID.
@@ -32,6 +40,8 @@ def run_probe(path, scenario):
         '--mount',f'type=bind,source={path},target=/seed.db,readonly',
         '--workdir','/src','--env','PYTHONPATH=/src','--entrypoint','python',IMAGE,
         '-B','/src/tests/integration/_audit_archiving_probe.py',scenario,store_id]
+    if scenario in ('capacity','source-capacity'):
+        command[2:2]=['--tmpfs','/capacity:rw,nosuid,nodev,size=1m,uid=1000,gid=1000,mode=0700']
     status, out, err = run_bounded(command,timeout=30)
     assert status == 0, err.decode()
     assert json.loads(out)['scenario'] == scenario

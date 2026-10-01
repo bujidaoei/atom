@@ -1,5 +1,6 @@
 """Executed inside a real Linux container against a copied actual business fixture."""
 import json
+import errno
 import os
 from pathlib import Path
 import shutil
@@ -15,8 +16,9 @@ from app.audit_governance import AuditGovernanceRepository
 
 shutil.copyfile('/seed.db', '/tmp/source.db')
 os.chmod('/tmp/source.db', 0o600)
-Path('/tmp/archive').mkdir(mode=0o700)
-service = AuditArchiving(Path('/tmp/source.db'), store_id=sys.argv[2], root=Path('/tmp/archive'))
+archive_root = Path('/capacity/archive' if sys.argv[1] in ('capacity','source-capacity') else '/tmp/archive')
+archive_root.mkdir(mode=0o700)
+service = AuditArchiving(Path('/tmp/source.db'), store_id=sys.argv[2], root=archive_root)
 request = dict(archive_id='archive',operator_id='operator',policy_id='policy',expected_generation=1)
 
 
@@ -27,7 +29,36 @@ def counts():
 
 
 scenario = sys.argv[1]
-if scenario == 'authority-probe':
+if scenario in ('capacity','source-capacity'):
+    with sqlite3.connect('/tmp/source.db') as db:
+        before=list(db.iterdump())
+    filler=Path('/capacity/filler' if scenario=='capacity' else '/tmp/filler')
+    exhausted=False
+    with filler.open('wb',buffering=0) as stream:
+        try:
+            # Dedicated1/32MiB tmpfs, bounded writes; never fill a host filesystem.
+            for _ in range(257 if scenario=='capacity' else 8193):
+                stream.write(b'x'*4096)
+        except OSError as error:
+            assert error.errno==errno.ENOSPC
+            exhausted=True
+    assert exhausted and os.statvfs(filler.parent).f_bavail==0
+    try: service.archive(**request)
+    except (ArchiveError,RetentionError) as error:
+        assert str(error)==('archive_store_io_error' if scenario=='capacity' else 'retention_unavailable')
+    else: raise AssertionError('full store published archive')
+    assert counts()==(0,0)
+    if scenario=='capacity':assert not list(archive_root.iterdir())
+    else:assert len(list(archive_root.glob('*.atomaudit')))==1
+    with sqlite3.connect('/tmp/source.db') as db:
+        assert list(db.iterdump())==before
+    filler.unlink()
+    reopened=AuditArchiving(Path('/tmp/source.db'),store_id=sys.argv[2],root=archive_root)
+    registered=reopened.archive(**request)
+    assert reopened.archive(**request)==registered
+    assert counts()==(1,0)
+    assert len(reopened.store.read(expected_sha256=registered['archive_sha256']))==registered['archive_bytes']
+elif scenario == 'authority-probe':
     # Negative acceptance evidence: the current in-process recovery still has source write authority.
     service.archive(**request)
     from app.audit_archive import recover_archive as original_recovery

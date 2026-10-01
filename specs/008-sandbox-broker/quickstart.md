@@ -328,3 +328,6 @@ Current isolated archive acceptance suite includes13 cases: run `backend/.venv/S
 
 
 Cold recovery regression: with pinned API/sandbox images run `backend/.venv/Scripts/python.exe -m pytest backend/tests/integration/test_isolated_receipt.py -k "cold-read or happy" -q --junitxml=.logs/isolated-cold-recovery.xml`. Two cases pass. Dedicated test volume persists data only between writer/reader and is removed afterwards. Do not infer off-host recovery or production backup acceptance from this test.
+
+
+Real storage exhaustion regression: set the pinned ATOM_TEST_API_IMAGE and run `backend/.venv/Scripts/python.exe -m pytest backend/tests/integration/test_audit_archiving.py -k "full_archive or happy" -q --junitxml=.logs/archive-enospc.xml`. Five cases pass. Only disposable1MiB/32MiB container tmpfs mounts are filled; this is not a production load or capacity-sizing run.
