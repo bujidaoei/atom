@@ -1,5 +1,8 @@
 """Standalone public content ASGI service; no console credentials or API proxy."""
+import asyncio
+from dataclasses import dataclass
 import mimetypes
+from threading import BoundedSemaphore
 
 from starlette.concurrency import run_in_threadpool
 from starlette.responses import Response
@@ -18,9 +21,25 @@ HEADERS = {
 }
 
 
+@dataclass(frozen=True)
+class ContentLimits:
+    active_responses: int = 1
+    send_seconds: float = 10
+
+    def __post_init__(self):
+        if (type(self.active_responses) is not int or not 1 <= self.active_responses <= 32
+                or isinstance(self.send_seconds, bool)
+                or not isinstance(self.send_seconds, (int, float))
+                or not 0.01 <= self.send_seconds <= 60):
+            raise ValueError('invalid_content_limits')
+
+
 class ContentService:
-    def __init__(self, repository, store, hosts):
+    def __init__(self, repository, store, hosts, *, limits: ContentLimits = ContentLimits()):
         self.repository, self.store, self.hosts = repository, store, hosts
+        self.limits = limits
+        self._responses = BoundedSemaphore(limits.active_responses)
+        self._reads = set()
 
     def _read(self,binding,path,navigation):
         parts = path.split('/')
@@ -37,9 +56,7 @@ class ContentService:
             return Response(target.read_bytes(),media_type=media or 'application/octet-stream',
                 headers={**HEADERS,'X-Atom-Release':view.publication.release_id,'X-Atom-Revision':view.publication.revision_id})
 
-    async def __call__(self,scope,receive,send):
-        if scope['type']!='http':
-            raise RuntimeError('content_http_only')
+    def _response(self, scope):
         method = scope.get('method')
         try:
             binding = self.hosts.binding(scope.get('headers',[]))
@@ -48,7 +65,7 @@ class ContentService:
             else:
                 # Browser navigation metadata is a fallback hint, never auth.
                 navigation = any(k.lower()==b'sec-fetch-mode' and v==b'navigate' for k,v in scope['headers'])
-                response = await run_in_threadpool(self._read,binding,scope.get('path','/'),navigation)
+                response = self._read(binding,scope.get('path','/'),navigation)
         except ContentHostError:
             response = Response(status_code=404,headers=HEADERS)
         except VerificationError as error:
@@ -58,4 +75,40 @@ class ContentService:
             response = Response(status_code=503,headers=HEADERS)
         if method=='HEAD':
             response.body=b''
-        await response(scope,receive,send)
+        return response
+
+    def _finish_cancelled_read(self, task):
+        try:
+            # Retrieve any error; disconnected callers have no response channel.
+            if not task.cancelled():
+                task.exception()
+        finally:
+            self._responses.release()
+
+    async def _send(self, response, scope, receive, send):
+        async with asyncio.timeout(self.limits.send_seconds):
+            await response(scope, receive, send)
+
+    async def __call__(self, scope, receive, send):
+        if scope['type'] != 'http':
+            raise RuntimeError('content_http_only')
+        if not self._responses.acquire(blocking=False):
+            await self._send(Response(status_code=503, headers=HEADERS), scope, receive, send)
+            return
+        release_slot = True
+        try:
+            # Keep ownership independently of the caller: cancelling an asyncio
+            # waiter cannot stop synchronous artifact IO in its worker thread.
+            read = asyncio.create_task(run_in_threadpool(self._response, scope))
+            self._reads.add(read)
+            read.add_done_callback(self._reads.discard)
+            try:
+                response = await asyncio.shield(read)
+            except asyncio.CancelledError:
+                release_slot = False
+                read.add_done_callback(self._finish_cancelled_read)
+                raise
+            await self._send(response, scope, receive, send)
+        finally:
+            if release_slot:
+                self._responses.release()

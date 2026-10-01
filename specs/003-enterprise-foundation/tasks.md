@@ -158,3 +158,5 @@ T027 / feature008 T017: strict content Host codec now tested; real DNS/TLS/ingre
 Feature008 T017 progress: real Linux artifact-backed public content ASGI requests and related regressions pass. Component is not deployed or mounted in production. Private access, browser/transport isolation, trusted verification and enterprise release gates remain open; T027 remains unchecked.
 
 Feature008 T017 evidence extended: two distinct real snapshot versions remain consistent through intervening release promotion; conditional/Range/HEAD requests obey current privacy. Linux ASGI coverage only, with explicit fixture lineage/reports. Enterprise T027 and browser/production gates remain open.
+
+Feature008 T017 progress: bounded content response admission/send lifetime and cancelled-read ownership now pass Linux real-artifact ASGI fault injection plus configuration/host/repository regressions (57 tests). Real network limits, process shutdown, browser/private access and trusted verification remain unaccepted; T027 stays open.

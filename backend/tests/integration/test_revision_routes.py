@@ -202,7 +202,7 @@ release_view.receive_snapshot=receive
 migrate(settings.db_path,Path('/tmp/data/before-content.db'),target_version=3)
 from app.content_repository import ContentRepository
 from app.content_hosts import ContentHosts
-from app.content_service import ContentService
+from app.content_service import ContentService,ContentLimits
 releases.publish(owner='owner',project_id='p',release_id='http-release',verification_id=request.id,
     expected_revision=main.revision_id,expected_generation=4,policy_digest='c'*64,runner_version='fixture-runner',audience='public',slug='site')
 content=ContentRepository(settings.db_path)
@@ -218,6 +218,65 @@ async def content_test():
         assert page.headers['cache-control']=='no-store'
         assert page.headers['x-content-type-options']=='nosniff'
         assert "worker-src 'none'" in page.headers['content-security-policy']
+        limited=ContentService(content,store,hosts,limits=ContentLimits(send_seconds=0.1))
+        scope={'type':'http','method':'GET','path':'/',
+            'headers':[(b'host',hosts.hostname(binding.id).encode())]}
+        async def receive_http():return {'type':'http.request','body':b'','more_body':False}
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=limited),base_url=hosts.url(binding.id)) as bounded:
+            # Hold real response bytes at ASGI delivery, then timeout/cancel/error.
+            for outcome in ('timeout','cancel','error'):
+                started=asyncio.Event();unblock=asyncio.Event();sent=[]
+                async def slow_send(message):
+                    sent.append(message['type'])
+                    if message['type']=='http.response.body':
+                        started.set()
+                        await unblock.wait()
+                        raise OSError('fixture disconnected transport')
+                pending=asyncio.create_task(limited(scope,receive_http,slow_send))
+                await asyncio.wait_for(started.wait(),2)
+                assert (await bounded.get('/')).status_code==503
+                if outcome=='cancel':pending.cancel()
+                if outcome=='error':unblock.set()
+                done,_=await asyncio.wait({pending},timeout=1)
+                assert pending in done,'service failed to bound delivery independently of test timeout'
+                try:
+                    await pending
+                    raise AssertionError('delivery failure not propagated')
+                except (TimeoutError,asyncio.CancelledError,OSError) as error:
+                    expected={'timeout':TimeoutError,'cancel':asyncio.CancelledError,'error':OSError}[outcome]
+                    assert isinstance(error,expected)
+                assert sent==['http.response.start','http.response.body']
+                assert (await bounded.get('/')).status_code==200
+            # Cancellation cannot release a slot while actual synchronous IO runs.
+            from threading import Event
+            entered=Event();finish=Event();read_calls=[]
+            real_read=store.read
+            def held_read(key):
+                read_calls.append(key);entered.set()
+                assert finish.wait(2),'fixture release not signalled'
+                return real_read(key)
+            store.read=held_read
+            try:
+                pending=asyncio.create_task(bounded.get('/'))
+                assert await asyncio.to_thread(entered.wait,2)
+                owned=tuple(limited._reads)
+                assert len(owned)==1
+                pending.cancel()
+                try:
+                    await pending
+                    raise AssertionError('request cancellation swallowed')
+                except asyncio.CancelledError:pass
+                assert not owned[0].done()
+                assert (await bounded.get('/')).status_code==503
+                assert len(read_calls)==1
+            finally:
+                finish.set()
+                store.read=real_read
+            await asyncio.wait_for(asyncio.gather(*owned),2)
+            await asyncio.sleep(0) # Run completion callbacks that release ownership.
+            assert not limited._reads
+            assert (await bounded.get('/')).status_code==200
+            assert not list(Path('/tmp').glob('atom-release-*'))
         head=await client.head('/')
         assert head.status_code==200 and head.content==b''
         assert head.headers['content-length']==page.headers['content-length']
