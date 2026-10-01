@@ -3,7 +3,7 @@ from contextlib import contextmanager
 
 import pytest
 
-pytestmark = pytest.mark.parametrize('audit_schema_version', [5, 6, 7, 9])
+pytestmark = pytest.mark.parametrize('audit_schema_version', [5, 6, 7, 9, 10])
 from app.access_repository import AccessError
 from app.content_access import ContentAccessRepository, _hash
 from app.migrations import migrate

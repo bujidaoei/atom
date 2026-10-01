@@ -22,7 +22,7 @@ from test_audit_service import ENTRY
 from test_durable_auth_routes import durable_client, LOGIN, ORIGIN
 
 
-@pytest.mark.parametrize('schema_version', [5,7,9])
+@pytest.mark.parametrize('schema_version', [5,7,9,10])
 @pytest.mark.parametrize('mode', ['lost-ack', 'denied'])
 def test_main_tls_export_recovery_and_revocation(durable_client, certificate, tmp_path, monkeypatch, capsys, mode, schema_version):
     client, path = durable_client
@@ -40,7 +40,7 @@ def test_main_tls_export_recovery_and_revocation(durable_client, certificate, tm
     monkeypatch.setattr(config, 'audit_export_ca_file', cert)
     monkeypatch.setattr(app.state, 'audit_exports', None, raising=False)
     target = config.audit_destinations[0]
-    if schema_version in (7,9):
+    if schema_version in (7,9,10):
         from app.audit_governance import AuditGovernanceRepository
         governance = AuditGovernanceRepository(path)
         governance.execute(command_id='register', operator_id='operator', destination_id=target.destination_id,
@@ -121,7 +121,7 @@ def test_main_tls_export_recovery_and_revocation(durable_client, certificate, tm
                 wait_for(lambda: repo.status()['delivered'] == 2)
                 assert calls[0] == calls[1]
             else:
-                if schema_version in (7,9):
+                if schema_version in (7,9,10):
                     wait_for(lambda: repo.status()['registry_state'] == 'blocked')
                 else:
                     wait_for(lambda: app.state.audit_exports._exporters[0].last_error == 'audit_export_configuration')
@@ -141,7 +141,7 @@ def test_main_tls_export_recovery_and_revocation(durable_client, certificate, tm
             wall_time = time.time
             monkeypatch.setattr('app.audit_delivery.time.time', lambda: wall_time()+61)
             with TestClient(app):
-                if schema_version in (7,9):
+                if schema_version in (7,9,10):
                     wait_for(lambda: app.state.audit_exports._exporters[0].last_error == 'audit_export_destination_inactive')
                     assert len(calls) == 1 and repo.status()['registry_state'] == 'blocked'
                     governance.execute(command_id='resume', operator_id='operator', destination_id=target.destination_id,

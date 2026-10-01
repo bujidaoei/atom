@@ -2,7 +2,7 @@ import sqlite3
 
 import pytest
 
-pytestmark = pytest.mark.parametrize('audit_schema_version', [5, 6, 7, 9])
+pytestmark = pytest.mark.parametrize('audit_schema_version', [5, 6, 7, 9, 10])
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 from app.access_repository import AccessRepository

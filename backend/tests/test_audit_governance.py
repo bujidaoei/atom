@@ -12,7 +12,7 @@ from app.audit_governance import AuditGovernanceRepository, AuditGovernanceError
 from test_revision_migrations import legacy
 
 
-@pytest.fixture(params=[7,9])
+@pytest.fixture(params=[7,9,10])
 def registry(legacy, monkeypatch, request):
     path, backup = legacy
     migrate(path, backup, target_version=request.param)

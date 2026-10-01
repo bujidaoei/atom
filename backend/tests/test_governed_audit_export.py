@@ -12,7 +12,7 @@ from test_audit_destination import destination
 from test_audit_repository import reader, audited_release, release, ledger, legacy
 
 
-@pytest.fixture(params=[7,9])
+@pytest.fixture(params=[7,9,10])
 def governed(reader, tmp_path, request):
     path, *_ = reader
     target = destination()

@@ -7,7 +7,7 @@ import sys
 
 import pytest
 
-pytestmark = pytest.mark.parametrize('audit_schema_version', [5, 6, 7, 9])
+pytestmark = pytest.mark.parametrize('audit_schema_version', [5, 6, 7, 9, 10])
 from app.access_repository import AccessRepository
 from app.content_access import ContentAccessRepository
 from app.migrations import migrate, verify
