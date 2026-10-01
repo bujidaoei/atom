@@ -35,6 +35,7 @@ from app.execution import ExecutionCoordinator
 from app.execution_http import ExecutionAPI
 from app.migrations import migrate
 from app.sandbox.client import BrokerClient, BrokerClientError
+from app.sandbox.checkpoints import CheckpointOperations
 from app.sandbox.config import BrokerConfig
 from app.sandbox.docker_driver import DockerDriver, run_bounded
 from app.sandbox.file_ops import FileOperations
@@ -304,7 +305,7 @@ def test_partial_checkpoint_waits_for_real_file_write(tmp_path, monkeypatch):
     assert not driver.owned_inventory()
 
 
-@pytest.mark.parametrize('fault', ['artifact_put','registration','confirmation','revocation'])
+@pytest.mark.parametrize('fault', ['broker_export','artifact_put','registration','confirmation','revocation'])
 def test_partial_checkpoint_faults_preserve_only_registered_bytes(tmp_path, monkeypatch, fault):
     path = tmp_path / 'api.db'
     create_api_database(path)
@@ -337,7 +338,8 @@ def test_partial_checkpoint_faults_preserve_only_registered_bytes(tmp_path, monk
         status,_,error = run_bounded(['docker','exec',container.id,'python3','-c',
             "from pathlib import Path; Path('/workspace/result.txt').write_text('partial output')"],timeout=20)
         assert status == 0,error.decode()
-        target = {'artifact_put':(store,'put',ArtifactError('artifact_io_error')),
+        target = {'broker_export':(CheckpointOperations,'execute',RuntimeError('injected_export_failure')),
+                  'artifact_put':(store,'put',ArtifactError('artifact_io_error')),
                   'registration':(repository,'register',RevisionError('revision_unavailable')),
                   'confirmation':(broker,'confirm',BrokerClientError('broker_outcome_unknown')),
                   'revocation':(broker,'revoke',BrokerClientError('broker_outcome_unknown'))}[fault]
@@ -363,7 +365,7 @@ def test_partial_checkpoint_faults_preserve_only_registered_bytes(tmp_path, monk
         assert closed.state == 'closed' and closed.termination_state == 'confirmed'
         assert closed.outcome == 'timed_out'
         current = repository.current_revision('owner',workspace)
-        if fault in ('artifact_put','registration'):
+        if fault in ('broker_export','artifact_put','registration'):
             assert closed.receipt is None and current.revision_id == base_revision
         else:
             assert closed.receipt is not None and current.revision_id == closed.receipt.revision_id
