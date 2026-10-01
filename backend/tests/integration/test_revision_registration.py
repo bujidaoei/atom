@@ -17,6 +17,8 @@ import zipfile
 import uuid
 import subprocess
 import queue
+import select
+import socketserver
 from dataclasses import replace
 
 import pytest
@@ -53,6 +55,33 @@ def running_broker(path, *, provision_delay=0):
             return await call_next(request)
     listener = socket.socket()
     listener.bind(('127.0.0.1',0))
+    bridge_host = os.environ.get('ATOM_TEST_BROKER_BIND_HOST')
+    relay = None
+    relay_thread = None
+    if bridge_host:
+        if bridge_host in ('0.0.0.0','::','127.0.0.1'):
+            raise ValueError('test relay must bind a specific bridge interface')
+        broker_port = listener.getsockname()[1]
+
+        class RelayHandler(socketserver.BaseRequestHandler):
+            def handle(self):
+                with socket.create_connection(('127.0.0.1',broker_port),timeout=5) as upstream:
+                    channels = (self.request,upstream)
+                    while True:
+                        ready,_,_ = select.select(channels,[],[],15)
+                        for source in ready:
+                            data = source.recv(65536)
+                            if not data:
+                                return
+                            (upstream if source is self.request else self.request).sendall(data)
+
+        class RelayServer(socketserver.ThreadingTCPServer):
+            allow_reuse_address = True
+            daemon_threads = True
+
+        relay = RelayServer((bridge_host,broker_port),RelayHandler)
+        relay_thread = threading.Thread(target=relay.serve_forever,daemon=True)
+        relay_thread.start()
     server = uvicorn.Server(uvicorn.Config(app,log_level='error',access_log=False))
     thread = threading.Thread(target=server.run,kwargs={'sockets':[listener]},daemon=True)
     thread.start()
@@ -72,6 +101,10 @@ def running_broker(path, *, provision_delay=0):
         server.should_exit = True
         thread.join(timeout=20)
         listener.close()
+        if relay is not None:
+            relay.shutdown()
+            relay.server_close()
+            relay_thread.join(timeout=5)
     assert not thread.is_alive()
 
 
@@ -736,7 +769,8 @@ asyncio.run(main())
               'port':int(client._origin.rsplit(':',1)[1]),'admin':config.admin_token,'key':config.grant_key}
         try:
             command=['docker','run','--rm','--name',name,'--label',f'atom.coordinator-test={name}',
-                '--network=bridge','--read-only','--cap-drop=ALL','--security-opt=no-new-privileges',
+                '--network=bridge','--add-host','host.docker.internal:host-gateway',
+                '--read-only','--cap-drop=ALL','--security-opt=no-new-privileges',
                 '--user','1000:1000','--memory=256m','--pids-limit=64',
                 '--tmpfs','/tmp:rw,nosuid,nodev,size=64m,mode=1777',
                 '--tmpfs','/workspace:rw,nosuid,nodev,size=64m,mode=1777',
