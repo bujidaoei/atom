@@ -230,3 +230,6 @@ T029 increment: real authenticated GET /api/audit/events is mounted with strict 
 
 
 T029 increment: internal real SQLite delivery-state repository now implements bounded idempotent enrollment, scope-stable destination identities, exclusive/reclaimable leases, atomic stale-safe ack/retry and backlog status. Targeted regression includes8 actual subprocess before/after-commit crashes, concurrent enrollment/claim, byte/capacity/backoff bounds, late rollback and unchanged ledger. No remote receiver or production dispatcher is enabled. Authorized destination configuration, network protections/ack acceptance, scheduler lifecycle, UI and retention remain open; T029 not closed.
+
+
+T029 increment: researched official OWASP/Python transport requirements and implemented strict operator destination policy plus real TLS connection pinned to approved public IPs with hostname verification, finite failover/handshake and cancellation cleanup. Current77 policy/TLS/delivery regressions pass. Tests reroute only OS socket to disposable local TLS listener; no external receiver acceptance claim. Actual event HTTP sender/ack, unified configuration/authorization, scheduling/drain, egress deployment and retention remain open; T029 stays unchecked.

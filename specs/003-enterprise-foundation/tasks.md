@@ -248,3 +248,6 @@ T027/008-T029 increment: mounted actual signed-cookie audit read API, strict cur
 
 
 T027/008-T029 increment: durable audit delivery-state operations are implemented and tested with real ledger rows, concurrency and8 subprocess commit-boundary crashes. No network exporter is enabled; destination security, worker lifecycle, actual remote acknowledgement and retention remain open.
+
+
+T027/008-T029 increment: operator destination policy and verified public-IP-pinned TLS primitive implemented after official OWASP/Python research.77 targeted checks include real TLS host/trust/cancel/stall/failover and delivery-state regression. Actual event sender, destination management, lifecycle and production egress acceptance remain open.
