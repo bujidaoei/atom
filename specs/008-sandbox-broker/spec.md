@@ -219,3 +219,6 @@ Audit storage increment: explicit offline v5 defines immutable, typed event reco
 
 
 Console audit implementation increment: v5 session creation, single revoke and account-wide revoke must co-commit their typed event in the owning transaction. Single-revoke replay emits no duplicate event. v4 remains the explicit existing non-audited schema; accepting a broken v5 audit insert without rollback is prohibited.
+
+
+Content audit increment: on v5, successful handoff issuance and content-session redemption each co-commit one typed event with authoritative binding/project/release/revision/generation. Audit failures roll back credential insertion and both consumption markers; read-only scope inspection and replay denial must not fabricate committed events. Credential secrets, challenges and credential digests are excluded.

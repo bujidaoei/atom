@@ -205,3 +205,6 @@ Audit v5 migration implemented as an additive offline target with typed columns 
 
 
 AccessRepository now accepts fully verified4/5 at construction and each writer entry. Inside5, fixed record_console_transition writes event id/kind/time/user/scope/internal source/count on that same connection, before commit. Version4 remains unchanged; no runtime fallback from failed5 audit insert. Helper requires an active5 transaction and only three console event kinds. No free-form metadata/credentials are accepted. Content/release event writers and other exact-version consumers remain unported; no full main-runtime5 selection claim.
+
+
+Extend the typed audit writer with content transitions. Resolve project/release/revision using bound ledger rows in the already authorized transaction, not caller-provided display metadata. Issue and exchange append their event after credential mutation and before commit. Audit insert/late failure uses existing transaction rollback to preserve retryability. Version4 behavior remains explicit;5 now covers console/content transitions but release events/runtime consumer compatibility remain incomplete.

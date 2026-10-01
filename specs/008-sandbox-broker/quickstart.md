@@ -184,3 +184,6 @@ Audit schema checks: run test_audit_migration.py with test_access_migration.py a
 
 
 Console audit tests: run test_security_audit.py, test_access_repository.py, test_durable_credentials.py and test_durable_auth_routes.py. Complete access repository suite runs on4/5. Actual v5 auth route test migrates disposable4 database then registers/logs in/revokes all, checks exact typed event kinds/counts and scans event rows for actual password/email/JWT sentinels. Main orchestrator lifespan is not entered. Fault injection denies audit insert or fails after audit before commit, asserting unchanged source sessions and event ledger; collision/replay/concurrent revoke are independently checked.
+
+
+Content audit checks: run test_content_audit.py, test_content_access.py and test_security_audit.py. Complete content ledger suite runs4/5. Additional v5 tests compare all bootstrap/handoff/session/audit rows around audit insert and late failures, then retry actual exchange. Check stored project/release/revision/generation, unchanged state on read-only scope inspection/replay, and absence of raw bootstrap/handoff/session credentials and credential digests in event rows. This is real SQLite authorization, not new HTTP/browser acceptance.

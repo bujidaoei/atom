@@ -16,11 +16,11 @@ from app.migrations import migrate
 from test_content_repository import content, release, ledger, legacy
 
 
-@pytest.fixture
-def private(content,tmp_path,monkeypatch):
+@pytest.fixture(params=[4,5])
+def private(content,tmp_path,monkeypatch,request):
     path,repository,*_=content
     binding=repository.bind(owner='user',project_id='project',release_id='release')
-    migrate(path,tmp_path/'v3.db',target_version=4)
+    migrate(path,tmp_path/'v3.db',target_version=request.param)
     monkeypatch.setattr('app.content_access.time.time',lambda:100)
     access=ContentAccessRepository(path)
     source=access.create_console_session(user_id='user',lifetime_seconds=1000)

@@ -211,3 +211,6 @@ T026 increment: explicit offline audit v5 schema and migration now implemented; 
 
 
 T026/T027 increment: AccessRepository4/5 compatibility and transactional console create/revoke/account-revoke audit are implemented. Real SQLite tests cover before/after-audit rollback, event identity collision and concurrent replay count; actual password API flow on5 emits redacted events. Remaining content/release writers, runtime compatibility, denial observations/export/retention and whole-system audit acceptance remain open. Neither task is closed.
+
+
+T027 increment: content handoff issuance and session redemption now co-commit typed v5 events including authoritative artifact scope. 54 tests pass across content access4/5 and audit rollback/provenance/redaction/replay cases. Faulted redemption preserves credentials and consumption state, then retries successfully. Publication events and full application/runtime5 gates remain open; no task closure.

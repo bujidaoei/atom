@@ -36,3 +36,6 @@ Explicit --target-version 5 now supports source0-v4 with verified backup and jou
 
 
 Console audit compatibility update: AccessRepository now supports verified4/5 and writes atomic console transition events on5. Its ContentAccessRepository subclass inherits the schema acceptance, but content-event writes are not yet implemented; release/revision and main runtime compatibility is still incomplete. Do not select5 for production on the strength of auth-only tests. No migration is automatically performed.
+
+
+V5 content-audit update: ContentAccessRepository now emits handoff/session events with the same business transaction. Full content ledger test matrix runs on4/5. Revision/release/verification/content-serving consumer compatibility remains a separate incomplete migration gate, so this is still not production v5 selection.

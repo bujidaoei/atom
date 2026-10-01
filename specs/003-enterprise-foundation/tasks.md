@@ -228,3 +228,6 @@ T027/008-T026 increment: offline audit v5 schema foundation implemented and migr
 
 
 T027/008-T026-T027 increment: console-session security transitions now persist actual audit events atomically on5, including real password API evidence. Content/publication auditing, all runtime consumers and enterprise audit acceptance remain unfinished.
+
+
+T027/008-T027 increment: private credential transitions now carry actual transactional revision/release audit provenance; 54 scoped tests pass. Full publication audit, runtime compatibility, observation/export and enterprise acceptance remain unfinished.
