@@ -6,6 +6,7 @@ import os
 import hashlib
 import io
 import json
+import logging
 from pathlib import Path
 import re
 import threading
@@ -20,6 +21,9 @@ from .registry import Attempt, Registry, RegistryError
 from .seeding import MAX_SEED_BYTES, SeedOperations
 from .checkpoints import CheckpointExport, CheckpointOperations
 from ..snapshots import MAX_ARCHIVE_BYTES, SnapshotError, verify_snapshot
+
+
+_LOG = logging.getLogger("atom.sandbox.lifecycle")
 
 
 class LifecycleError(RuntimeError):
@@ -182,7 +186,9 @@ class Lifecycle:
                 if current.version != attempt.version:
                     raise LifecycleError("ownership_changed")
                 return current
-            except (DriverError, RegistryError, LifecycleError):
+            except (DriverError, RegistryError, LifecycleError) as error:
+                _LOG.warning("broker_provision_failed type=%s code=%s",
+                             type(error).__name__, error.code)
                 try:
                     self._stop(attempt.id)
                 except (DriverError, RegistryError, LifecycleError):
@@ -203,6 +209,9 @@ class Lifecycle:
                 SeedOperations(self.driver).execute(attempt, payload)
                 return self.registry.transition(grant, attempt.version, "ready")
             except BaseException as error:
+                _LOG.warning("broker_seed_failed type=%s code=%s",
+                             type(error).__name__,
+                             error.code if isinstance(error, (DriverError, RegistryError, LifecycleError)) else 'unknown')
                 self._retire_operation(attempt)
                 if not isinstance(error, Exception):
                     raise

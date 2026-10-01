@@ -17,6 +17,7 @@ import uvicorn
 from fastapi.testclient import TestClient
 
 from app.sandbox.config import BrokerConfig
+from app.sandbox.client import BrokerClient
 from app.sandbox.docker_driver import DockerDriver
 from app.sandbox.grants import Grant, GrantCodec
 from app.sandbox.registry import Registry
@@ -125,6 +126,30 @@ def test_slow_export_holds_slot_but_revocation_remains_available(environment):
                 assert not app.state.transfer_lock.locked()
                 assert messages[-1]['body'] == archive
                 assert app.state.lifecycle.registry.find(attempt).state == 'terminated'
+    asyncio.run(scenario())
+
+
+def test_trusted_seed_waits_for_actual_broker_transfer_contention(environment):
+    config, grant, _token, archive = environment
+    app = create_app(config)
+    async def scenario():
+        async with app.router.lifespan_context(app):
+            async with BrokerClient('http://127.0.0.1:1',config.admin_token,
+                                    GrantCodec(config.grant_key.encode())) as broker:
+                await broker._http.aclose()
+                broker._http = httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                                  base_url='http://broker')
+                created = await broker.provision(grant)
+                await app.state.transfer_lock.acquire()
+                seed = asyncio.create_task(broker.seed(grant,created.attempt_id,archive))
+                try:
+                    await asyncio.sleep(0.4)
+                    assert not seed.done()
+                    assert app.state.lifecycle.registry.find(created.attempt_id).state == 'provisioning'
+                finally:
+                    app.state.transfer_lock.release()
+                assert (await asyncio.wait_for(seed,10)).state == 'ready'
+                assert (await broker.revoke(grant.jti)) == 'terminated'
     asyncio.run(scenario())
 
 

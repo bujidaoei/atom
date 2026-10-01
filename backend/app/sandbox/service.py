@@ -199,8 +199,13 @@ def create_app(config: BrokerConfig | None = None) -> FastAPI:
         except LifecycleError as error:
             if error.code == "invalid_checkpoint_acknowledgement":
                 raise ServiceError(400, "invalid_checkpoint") from None
+            if error.code == "broker_busy":
+                # Lifecycle's control lock rejected before the operation ran.
+                raise ServiceError(503, "broker_busy") from None
+            _LOG.warning("broker_lifecycle_rejected code=%s", error.code)
             raise ServiceError(503, "lifecycle_unavailable") from None
-        except DriverError:
+        except DriverError as error:
+            _LOG.warning("broker_driver_rejected code=%s", error.code)
             raise ServiceError(503, "lifecycle_unavailable") from None
 
     @app.exception_handler(ServiceError)

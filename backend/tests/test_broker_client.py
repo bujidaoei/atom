@@ -53,6 +53,81 @@ def test_invalid_origin_rejected_without_network(origin):
         BrokerClient(origin,secrets.token_urlsafe(32),GrantCodec(b'k'*32))
 
 
+def test_actual_http_pre_dispatch_busy_retries_provision_and_seed_only():
+    manifest = b'{"files":[],"version":1}'
+    payload = b'ATOMSNAP1\n' + struct.pack('>I',len(manifest)) + manifest
+    revision = hashlib.sha256(manifest).hexdigest()
+    calls = {'provision':0,'seed':0}
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self,*args): pass
+        def do_POST(self):
+            phase = 'provision' if self.path.endswith('/provision') else 'seed'
+            calls[phase] += 1
+            data = self.rfile.read(int(self.headers['Content-Length']))
+            if calls[phase] < 3:
+                self.send_response(503)
+                self.send_header('Content-Type','application/json')
+                self.end_headers()
+                self.wfile.write(b'{"error":"broker_busy"}')
+                return
+            assert (data == payload) if phase == 'seed' else ('grant' in json.loads(data))
+            self.send_response(202 if phase == 'provision' else 200)
+            self.send_header('Content-Type','application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps({'attempt_id':'a'*32,
+                'state':'provisioning' if phase == 'provision' else 'ready',
+                'deadline':deadline}).encode())
+    server=ThreadingHTTPServer(('127.0.0.1',0),Handler)
+    thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
+    import time
+    now=int(time.time());deadline=now+120
+    grant=Grant('g','o','p','r','a'*32,1,revision,now,deadline)
+    async def scenario():
+        async with BrokerClient(f'http://127.0.0.1:{server.server_port}',
+                                secrets.token_urlsafe(32),GrantCodec(b'k'*32)) as client:
+            assert (await client.provision(grant)).state == 'provisioning'
+            assert (await client.seed(grant,'a'*32,payload)).state == 'ready'
+    try:
+        asyncio.run(scenario())
+        assert calls == {'provision':3,'seed':3}
+    finally:
+        server.shutdown();server.server_close();thread.join(timeout=3)
+
+
+@pytest.mark.parametrize('body,content_type,expected', [
+    (b'{"error":"lifecycle_unavailable"}','application/json','lifecycle_unavailable'),
+    (b'{"error":"broker_busy","other":1}','application/json','broker_http_error'),
+    (b'{"error":"broker_busy"}','text/plain','broker_http_error'),
+    (b'{"error":"broker_busy"}'+b' '*129,'application/json','broker_http_error'),
+])
+def test_nonexact_rejection_does_not_replay(body,content_type,expected):
+    calls=[]
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self,*args): pass
+        def do_POST(self):
+            calls.append(self.path)
+            self.rfile.read(int(self.headers['Content-Length']))
+            self.send_response(503)
+            self.send_header('Content-Type',content_type)
+            self.end_headers()
+            self.wfile.write(body)
+    server=ThreadingHTTPServer(('127.0.0.1',0),Handler)
+    thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
+    import time
+    now=int(time.time())
+    grant=Grant('g','o','p','r','a'*32,1,'b'*64,now,now+120)
+    async def scenario():
+        async with BrokerClient(f'http://127.0.0.1:{server.server_port}',
+                                secrets.token_urlsafe(32),GrantCodec(b'k'*32)) as client:
+            with pytest.raises(BrokerClientError,match=expected):
+                await client.provision(grant)
+    try:
+        asyncio.run(scenario())
+        assert calls == ['/v1/admin/provision']
+    finally:
+        server.shutdown();server.server_close();thread.join(timeout=3)
+
+
 @pytest.mark.parametrize('case', ['redirect','malformed','oversized','wrong_scope','compressed','slow','slow_body'])
 def test_actual_transport_rejects_uncertain_responses_without_retry(case):
     requests = []

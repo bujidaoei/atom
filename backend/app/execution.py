@@ -34,6 +34,7 @@ class ExecutionCoordinator:
         self.repository, self.broker = repository, broker
         self._completion_codec = completion_codec
         self._coordination = asyncio.Lock()
+        self._admission_waiters = 0
 
     async def _termination(self, owner: str, attempt_id: str, *, confirmed: bool,
                            outcome: str = 'cancelled') -> Recovery:
@@ -114,11 +115,19 @@ class ExecutionCoordinator:
 
     @asynccontextmanager
     async def _admission(self):
+        # Provision/seed is serialized with checkpoint registration, but four
+        # race heats must be allowed to wait their turn. Bound both queue depth
+        # and time so other work cannot wait indefinitely behind a slow broker.
+        if self._admission_waiters >= 8:
+            raise ExecutionError('execution_busy')
+        self._admission_waiters += 1
         try:
-            async with asyncio.timeout(3):
+            async with asyncio.timeout(45):
                 await self._coordination.acquire()
         except TimeoutError:
             raise ExecutionError('execution_busy') from None
+        finally:
+            self._admission_waiters -= 1
         try:
             yield
         finally:

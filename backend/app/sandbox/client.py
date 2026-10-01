@@ -5,6 +5,7 @@ import hashlib
 import io
 import json
 import re
+import time
 from urllib.parse import urlsplit
 
 import httpx
@@ -80,6 +81,18 @@ def _json(payload):
         raise BrokerClientError('invalid_broker_response') from None
 
 
+def _service_error(payload):
+    try:
+        value = _json(payload)
+    except BrokerClientError:
+        return None
+    if set(value) != {'error'}:
+        return None
+    code = value['error']
+    return code if code in {'broker_busy','broker_not_ready','registry_unavailable',
+                            'lifecycle_unavailable'} else None
+
+
 def _identifier(value):
     if not isinstance(value, str) or not _ID.fullmatch(value):
         raise BrokerClientError('invalid_broker_request')
@@ -126,6 +139,20 @@ class AdminTransport:
             async with asyncio.timeout(self._timeout):
                 async with self._http.stream(method,route,content=payload,headers=outgoing) as response:
                     if response.status_code != expected:
+                        # Only a small, exact broker-owned error envelope may be
+                        # classified. Arbitrary responses stay non-retryable.
+                        if (response.status_code == 503
+                                and response.headers.get_list('content-type') == ['application/json']
+                                and not response.headers.get_list('content-encoding')):
+                            data = bytearray()
+                            async for chunk in response.aiter_raw():
+                                if len(data) + len(chunk) > 128:
+                                    break
+                                data.extend(chunk)
+                            else:
+                                code = _service_error(bytes(data))
+                                if code:
+                                    raise BrokerClientError(code,status=503)
                         raise BrokerClientError('broker_http_error',status=response.status_code)
                     if ([v.lower() for v in response.headers.get_list('content-type')] != [media]
                             or response.headers.get_list('content-encoding')):
@@ -161,6 +188,19 @@ class BrokerClient(AdminTransport):
         """Issue scoped bearer authority for a trusted coordinator's ready lease."""
         return self._token(grant)
 
+    async def _pre_dispatch_busy(self, operation, grant: Grant):
+        """Repeat only an explicit broker busy rejection, never an unknown effect."""
+        end = time.monotonic() + min(20.0, max(0.0, grant.exp - time.time() - 5.0))
+        delay = 0.15
+        while True:
+            try:
+                return await operation()
+            except BrokerClientError as error:
+                if error.code != 'broker_busy' or time.monotonic() + delay >= end:
+                    raise
+                await asyncio.sleep(delay)
+                delay = min(delay * 2, 1.0)
+
     async def require_ready(self) -> None:
         try:
             async with asyncio.timeout(5):
@@ -181,15 +221,17 @@ class BrokerClient(AdminTransport):
         return Provisioned(**value)
 
     async def provision(self, grant: Grant) -> Provisioned:
-        result = await self._json_request('/v1/admin/provision',{'grant':self._token(grant)},expected=202)
+        result = await self._pre_dispatch_busy(
+            lambda: self._json_request('/v1/admin/provision',{'grant':self._token(grant)},expected=202), grant)
         return self._provisioned(result,grant,('provisioning','ready'))
 
     async def seed(self, grant: Grant, attempt_id: str, payload: bytes) -> Provisioned:
         _identifier(attempt_id)
         token = self._token(grant)
         _snapshot(payload,grant.base_revision)
-        _, result = await self._request('/v1/admin/seed',payload,headers={
-            'content-type':'application/octet-stream','x-atom-grant':token})
+        _, result = await self._pre_dispatch_busy(lambda: self._request(
+            '/v1/admin/seed',payload,headers={
+                'content-type':'application/octet-stream','x-atom-grant':token}), grant)
         return self._provisioned(_json(result),grant,('ready',),attempt_id)
 
     async def export(self, grant: Grant, attempt_id: str) -> CheckpointExport:
