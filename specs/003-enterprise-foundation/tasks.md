@@ -272,3 +272,6 @@ T027/008-T029/T030 increment: actual operator backlog inspection now counts unen
 
 
 T027/008-T029/T030 refinement: refreshed official Atoms/GitHub/GitLab governance evidence and verified removed/new receiver behavior in real SQLite (35 related checks pass). Add008-T031-T034 for persistent obligations/administration/archive/retention in dependency order. Recovery-manifest design refines FR-008; no implementation checkbox or production readiness claim is advanced.
+
+
+008-T031 partial increment: explicit offline schema6 registry migration preserves historical destination scopes, rejects mixed scope, and adds generation/state and active-scope delivery guards. 99 focused migration/delivery/configuration tests pass. Runtime consumers are not yet compatible with6; do not migrate serving databases. Administration/retention and complete T031-T034 acceptance remain open.

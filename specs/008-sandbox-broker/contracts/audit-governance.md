@@ -63,3 +63,7 @@ Extend the existing revision/verification/publication evidence chain with a reco
 5. Corrupt/missing archive, false receiver ack, partial local write and process exit leave source and recovery metadata consistent.
 6. Independent restore of an archive reproduces exact event dictionaries and exposes deliberate retention gaps to API/UI pagination.
 7. Full backend/runtime/content/browser compatibility, real capacity/backup/restore and production egress checks remain separate gates.
+
+
+## Implementation boundary
+T031 partial increment: explicit offline schema6 registry migration preserves historical destination scopes, rejects mixed scope, and adds generation/state and active-scope delivery guards. 99 focused migration/delivery/configuration tests pass. Runtime consumers are not yet compatible with6; do not migrate serving databases. Administration/retention and complete T031-T034 acceptance remain open. The administrative and retention portions above remain design. v1-v5 migration definitions and hashes remain unchanged.

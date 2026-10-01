@@ -261,3 +261,6 @@ Audit operational status: trusted process-operator inspection must distinguish u
 
 
 Audit governance boundary: removal from runtime config cannot discharge historical delivery obligations. A different logical receiver gets independent acknowledgement history; credential/IP rotation keeps existing identity. Retention must consider persisted required destinations, including unconfigured/blocked identities, under a captured policy/configuration generation. Current configured-only status and require-drained are not pruning authority. New contract contracts/audit-governance.md specifies registry, administrative receipts, immutable archive/restore proof and bounded race-safe retention; these capabilities are planned, not implemented.
+
+
+T031 partial increment: explicit offline schema6 registry migration preserves historical destination scopes, rejects mixed scope, and adds generation/state and active-scope delivery guards. 99 focused migration/delivery/configuration tests pass. Runtime consumers are not yet compatible with6; do not migrate serving databases. Administration/retention and complete T031-T034 acceptance remain open.

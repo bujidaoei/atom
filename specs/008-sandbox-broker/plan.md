@@ -251,3 +251,6 @@ AuditDeliveryRepository.status now uses mode=ro/BEGIN and adds unenrolled, oldes
 
 
 Research-backed ordering change within T029/T030: implement offline governance migration/registry before retention, then generation-fenced administrator pause/resume/block/retire, read-only retention plans and independently verified archive, finally authorized bounded prune/watermarks with full restore evidence. Existing5 delete guards remain unchanged until a new reviewed migration defines maintenance authority. Configure-only omissions and new receiver success cannot settle old backlog. Baseline regression test_audit_configuration_lifecycle.py records this real state behavior. See contracts/audit-governance.md; no retention cleanup or new migration has been executed.
+
+
+T031 partial increment: explicit offline schema6 registry migration preserves historical destination scopes, rejects mixed scope, and adds generation/state and active-scope delivery guards. 99 focused migration/delivery/configuration tests pass. Runtime consumers are not yet compatible with6; do not migrate serving databases. Administration/retention and complete T031-T034 acceptance remain open.

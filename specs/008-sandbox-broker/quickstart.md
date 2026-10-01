@@ -226,3 +226,6 @@ Operator status: from backend run python -m app.audit_status with the same prote
 
 
 Governance-gap regression: run test_audit_configuration_lifecycle.py, test_audit_status.py and test_audit_delivery.py. Actual5 event writers create retained ledger rows. Remove config and compare unchanged dump, restore config/reclaim expired lease, then acknowledge same source at a different receiver identity and verify original obligation remains. This deliberately documents configured-only status scope and is not a global drain/deletion test. No retention command is implemented or executed.
+
+
+T031 partial increment: explicit offline schema6 registry migration preserves historical destination scopes, rejects mixed scope, and adds generation/state and active-scope delivery guards. 99 focused migration/delivery/configuration tests pass. Runtime consumers are not yet compatible with6; do not migrate serving databases. Administration/retention and complete T031-T034 acceptance remain open.

@@ -259,3 +259,6 @@ T029/T030 increment: operator JSON backlog command and redacted exporter failure
 - [ ] T033 [T029/T030] Implement read-only policy-bound retention planning and bounded immutable archive/manifest creation with independent full-payload restore verification, holds and complete destination obligation coverage. Depends on T031/T032.
 - [ ] T034 [T029/T030] Implement explicitly authorized bounded pruning/receipt/watermark under new-schema maintenance authority; prove policy/hold/destination races, missing/corrupt archive, process crashes and reader gap semantics plus deployment backup/restore. Depends on T033; current delete guards remain active until then.
 Research/diagnostic increment:35 actual configuration-lifecycle/status/delivery tests pass, showing config omission retains old backlog and another receiver ack does not settle it. This justifies T031 before deletion work; none of T029-T034 is closed.
+
+
+T031 partial increment: explicit offline schema6 registry migration preserves historical destination scopes, rejects mixed scope, and adds generation/state and active-scope delivery guards. 99 focused migration/delivery/configuration tests pass. Runtime consumers are not yet compatible with6; do not migrate serving databases. Administration/retention and complete T031-T034 acceptance remain open.
