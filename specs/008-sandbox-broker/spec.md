@@ -213,3 +213,6 @@ Offer account-wide logout only when server user metadata advertises durable-sess
 
 ### Durable security audit requirement
 Follow contracts/security-audit.md: committed security transitions need atomic, redacted, immutable event records; denial observations remain distinct. Stable identity permits export deduplication and correlation to immutable release evidence without credentials/code. No plain logger call may satisfy durable audit acceptance. All migration/runtime/retention/privacy/export gates are explicit and presently unimplemented.
+
+
+Audit storage increment: explicit offline v5 defines immutable, typed event records and separate delivery ownership/state. Replacing an existing row must be rejected as well as ordinary mutation; exported state cannot silently regress or disappear. This schema is not enabled for application serving until all exact-version consumers, transactional event writers and their acceptance gates are implemented.

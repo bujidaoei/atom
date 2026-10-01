@@ -178,3 +178,6 @@ Account revocation tests: run test_access_repository.py, test_content_access.py,
 
 
 Account UI browser check: private-exchange harness retains single-session logout scenario, then logs in two independent Chromium contexts through actual login forms. First context obtains new private content access, opens settings, cancels confirmation (zero logout-all requests), then gets one injected 503. Both identities remain live. Explicit retry calls real logout-all; /me becomes 401 in both contexts and existing private Cookie yields 404. No session Cookie injection or fixture issuer used. Capability tests also verify legacy /me advertises false and logout-all returns 404.
+
+
+Audit schema checks: run test_audit_migration.py with test_access_migration.py and test_revision_migrations.py. Upgrade cases span0-v4 and verify source backups/restores/journal/replay. Test-only insertion proves append-only/replacement protection, foreign event refusal, delivery lease/terminal consistency and retained delivery rows. Subprocess exits after DDL before commit, reopens source4 and retries to5. These tests do not enable main application on5 or write real business audit events.

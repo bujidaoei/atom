@@ -222,3 +222,6 @@ T027 continuation (008/T022/T025): account settings action and two-browser real 
 
 
 T027 audit refinement: primary-source comparison and local code inspection now define 008/contracts/security-audit.md and open child T026-T030. Proposed distinction is durable security transitions versus telemetry/denial observations, correlated to immutable release evidence without storing code/credentials. No existing logging or contract document is counted as completed audit capability.
+
+
+T027/008-T026 increment: offline audit v5 schema foundation implemented and migration/constraint tests executed. Audit writers, all runtime consumer compatibility and enterprise export/retention remain open. No live database migration or audit feature closure.

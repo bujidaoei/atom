@@ -199,3 +199,6 @@ Add canRevokeSessions to serialized User and frontend type, derived from configu
 
 ### Audit architecture refinement from official research
 Implement contracts/security-audit.md through a new explicit offline version while preserving v1-v4 hashes. Co-commit committed event rows with existing credential/release transactions; separate bounded external-delivery state and security-denial observations. No remote call within a writer transaction. Update all exact-version consumers and main/runtime/content compatibility as one rollout obligation. Own-runtime/Pi and existing session behavior stay authoritative until the new schema is genuinely tested. The contract is design evidence only, not an audit implementation.
+
+
+Audit v5 migration implemented as an additive offline target with typed columns rather than arbitrary metadata JSON: stable event id/storage sequence, fixed kind/version, actor/scope, bounded internal references/counts. Event update/delete/replacement rejected. Separate destination/event delivery row validates lease/state/nullability, attempts, terminal acknowledgement and prevents scope change/replacement/deletion. No export credentials/URL/body stored. Future retention needs an explicit authorized maintenance design; ordinary delete is intentionally unavailable. Main consumers stay on verified v1/v4 while v5 business integration is pending.

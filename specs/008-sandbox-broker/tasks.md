@@ -205,3 +205,6 @@ T022/T025 continuation: settings account-wide logout action now uses actual capa
 - [ ] T029 [T022] Implement authorized bounded audit reads and at-least-once outbox export with stable pagination/id, destination protections, leases, deadlines, retry/restart/ack/retention acceptance. Depends on T026/T027.
 - [ ] T030 [T022/T025] Run full new-schema main/runtime/content/browser compatibility, privacy and failure matrix plus deployment backup/restore and audit readiness review. Depends on T026-T029.
 Research increment: official Cursor/GitHub/GitLab sources and local code audit establish missing durable ledger/export. Design is recorded; no implementation or task completion claimed.
+
+
+T026 increment: explicit offline audit v5 schema and migration now implemented; source0-v4 backup/restore/replay, late-DDL rollback, actual subprocess exit/retry and event/delivery constraints tested. Existing v1-v4 definitions unchanged. T026 remains open because exact-schema application/runtime compatibility and full integration have not been implemented; no event emission/export acceptance follows from empty tables.
