@@ -255,3 +255,10 @@ Run backend/.venv/Scripts/python.exe -m pytest backend/tests/test_audit_retentio
 
 
 Offline schema8 operator authority is now usable via `python -m app.retention_admin --database <absolute-isolated-db> policies` and `holds --policy-id <policy>`. Both support --after/--limit; full pages return a continuation cursor, not proof of exhaustion. `apply` always requires --command-id, --policy-id, --operator-id, --action and --expected-generation. create_policy additionally requires --scope-kind account|project, --scope-id, --event-kind, --state active|paused, --min-age-seconds and --archive-store-id. update_policy requires the three mutable settings only. place_hold requires --hold-id and --hold-kind legal|operational; release_hold requires --hold-id and derives its recorded kind. Use observed generation/new command id for each new change; identical retries return original receipt. Exit0 success,1 fixed-code failure,2 argparse misuse. No network endpoint/token accepted. Archive store id is a reference whose resolution/trust is still a later implementation gate, not evidence that an archive exists. Schema8 remains unsuitable for serving until full consumer compatibility is verified. No planning or deletion CLI exists yet.
+
+
+Offline schema8 planner inspection (from backend; use an explicitly prepared offline test database):
+```powershell
+python -m app.retention_admin --database <offline-database> plan --policy-id <policy-id> --expected-generation <generation> --limit 100 --max-bytes 262144
+```
+For a non-null next_after, pass it as --after together with --upper <upper_sequence> and --expected-context <context_sha256>. A generation/context conflict requires a fresh inspection. This command produces candidate and blocked events only; it does not archive, validate the store, restore or delete. Avoid putting full audit payload output in public logs. No serving database should be migrated to8 for this command.

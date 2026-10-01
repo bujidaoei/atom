@@ -63,3 +63,6 @@ No constitution exception requested. Research-dependent architecture choices rem
 
 
 Governance sequencing refinement: persistent destination obligations and administrative generation/receipts precede audit retention. Plan archive verification and isolated restore before authorizing any pruning. Extend release recovery evidence with separately assessed code/schema/data/external-effect/audit coverage. Official research refresh and current-schema configuration-change probes are recorded under008; new-schema rollout and recovery UI remain pending.
+
+
+008 T033 progress (2026-10-01): bounded exact8 read-only retention planner and operator CLI implemented,59 planner/authority/migration checks pass; details in ../008-sandbox-broker/evidence.md and contracts/audit-governance.md. Context/generation fencing includes active holds and all relevant registered destinations; output explicitly grants no deletion authority and has no archive validation. Archive/independent restore/runtime8 compatibility/production rollout remain open. This is a component increment, not enterprise acceptance.

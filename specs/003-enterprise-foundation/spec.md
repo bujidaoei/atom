@@ -92,3 +92,6 @@
 
 
 FR-008/FR-012 design refinement from official Atoms/GitHub/GitLab research: recovery evidence should state source/current revision, schema/data recovery point, publication generation, unresolved external effects and audit coverage independently. Audit retention must preserve historical receiver obligations absent from current config. Proposed governance/recovery-manifest contract is in008/contracts/audit-governance.md; no new acceptance/SLA claim.
+
+
+008 T033 progress (2026-10-01): bounded exact8 read-only retention planner and operator CLI implemented,59 planner/authority/migration checks pass; details in ../008-sandbox-broker/evidence.md and contracts/audit-governance.md. Context/generation fencing includes active holds and all relevant registered destinations; output explicitly grants no deletion authority and has no archive validation. Archive/independent restore/runtime8 compatibility/production rollout remain open. This is a component increment, not enterprise acceptance.

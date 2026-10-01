@@ -25,12 +25,22 @@ def main(argv=None):
     for name in ('scope-kind','scope-id','event-kind','state','archive-store-id','hold-id','hold-kind'):
         change.add_argument('--'+name)
     change.add_argument('--min-age-seconds', type=int)
+    plan = commands.add_parser('plan')
+    plan.add_argument('--policy-id', required=True)
+    plan.add_argument('--expected-generation', type=int, required=True)
+    plan.add_argument('--after', type=int, default=0)
+    plan.add_argument('--upper', type=int)
+    plan.add_argument('--expected-context')
+    plan.add_argument('--limit', type=int, default=100)
+    plan.add_argument('--max-bytes', type=int, default=262144)
     arguments = vars(parser.parse_args(argv))
     try:
         repository = RetentionRepository(arguments.pop('database'))
         operation = arguments.pop('command')
         if operation == 'apply':
             result = {'receipt': asdict(repository.execute(**arguments))}
+        elif operation == 'plan':
+            result = {'plan': repository.plan(**arguments)}
         else:
             rows = getattr(repository, operation)(**arguments)
             key = 'policy_id' if operation == 'policies' else 'hold_id'

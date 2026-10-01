@@ -305,3 +305,6 @@ Schema7 runtime follow-through:30 actual Linux main/own Node/broker cases pass a
 
 
 008-T033 authority increment: RetentionRepository and local app.retention_admin now implement explicit create/update policy and place/release independent holds. Expected policy generation fences every mutation; state/hold/typed immutable receipt commit atomically. Exact replay returns the original outcome, changed-payload command reuse fails, no defaults enable retention.78 focused tests pass. Planner/archive/restore and runtime8 compatibility remain open; no serving migration or deletion path. T033/T034 stay unchecked.
+
+
+008 T033 progress (2026-10-01): bounded exact8 read-only retention planner and operator CLI implemented,59 planner/authority/migration checks pass; details in ../008-sandbox-broker/evidence.md and contracts/audit-governance.md. Context/generation fencing includes active holds and all relevant registered destinations; output explicitly grants no deletion authority and has no archive validation. Archive/independent restore/runtime8 compatibility/production rollout remain open. This is a component increment, not enterprise acceptance.
