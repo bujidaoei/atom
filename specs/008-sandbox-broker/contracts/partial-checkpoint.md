@@ -67,8 +67,9 @@ with a receipt. Their behavior must be verified under each race before reuse;
 no schema change is assumed. The 380edf5 baseline allowed cancellation to
 override an unclosed success decision. A ledger correction now preserves
 the first terminal decision across all supported schema versions. The existing
-ledger/broker/coordinator paths passed 481 real Linux tests with exit code 0;
-production release verification and the new partial-checkpoint paths remain
+ledger/broker/coordinator paths passed 481 real Linux tests with locked
+development dependencies and exit code 0; the corrected ledger is deployed in
+the healthy 6386e47 API/broker pair. The new partial-checkpoint paths remain
 open. Current API timeout still
 eagerly revokes the worker and must be corrected before partial checkpoints
 can work. The broker's grant window and cleanup grace must be long enough to
