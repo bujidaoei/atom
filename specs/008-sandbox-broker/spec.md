@@ -285,3 +285,6 @@ T033 research increment: official SQLite backup/WAL and S3 version-lock/checksum
 
 
 T033 offline foundation increment: explicit schema8 adds typed retention policies, independent legal/operational holds and immutable administrative receipts; v1-v7 migration definitions remain unchanged. Migration creates no default policy or hold and authorizes no deletion.91 migration/constraint/recovery tests pass. Operator repository/CLI, bounded planning, archive/restore and runtime8 compatibility remain unimplemented; T033/T034 stay unchecked. Schema8 is isolated/offline only and must not be selected for serving databases.
+
+
+T033 authority increment: RetentionRepository and local app.retention_admin now implement explicit create/update policy and place/release independent holds. Expected policy generation fences every mutation; state/hold/typed immutable receipt commit atomically. Exact replay returns the original outcome, changed-payload command reuse fails, no defaults enable retention.78 focused tests pass. Planner/archive/restore and runtime8 compatibility remain open; no serving migration or deletion path. T033/T034 stay unchecked.
