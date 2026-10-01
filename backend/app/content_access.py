@@ -95,6 +95,28 @@ class ContentAccessRepository(AccessRepository):
             db.execute('INSERT INTO content_bootstraps VALUES (?,?,?,?,NULL)',(challenge,binding_id,now,expires))
             return BrowserBootstrap(secret,expires,challenge)
 
+    def describe_handoff(self,*,viewer_id: str,source_session_id: str,binding_id: str,challenge: str) -> dict:
+        """Authorized display metadata only; never allocates or consumes credentials."""
+        self._user(viewer_id);self._identity(source_session_id);self._identity(binding_id);_hex(challenge)
+        with self._transaction() as db:
+            now=int(time.time())
+            source=self._source(db,viewer_id,source_session_id,now)
+            generation=self._publication(db,binding_id,viewer_id)
+            bootstrap=db.execute('SELECT * FROM content_bootstraps WHERE nonce_hash=? AND binding_id=?',
+                                 (challenge,binding_id)).fetchone()
+            _active(bootstrap,now,'consumed_at')
+            if db.execute('SELECT 1 FROM content_handoffs WHERE bootstrap_hash=?',(challenge,)).fetchone():
+                raise AccessError('access_conflict')
+            row=db.execute('SELECT b.project_id,b.release_id,r.revision_id,r.audience,r.created_at,'
+                'o.title,p.release_id AS current_release_id FROM content_bindings b '
+                'JOIN release_records r ON r.id=b.release_id AND r.project_id=b.project_id '
+                'JOIN projects o ON o.id=b.project_id JOIN release_publications p ON p.project_id=b.project_id '
+                'WHERE b.id=?',(binding_id,)).fetchone()
+            return {'binding':binding_id,'projectId':row['project_id'],'projectTitle':row['title'],
+                    'releaseId':row['release_id'],'revisionId':row['revision_id'],'audience':row['audience'],
+                    'releaseCreatedAt':row['created_at'],'isCurrentRelease':row['release_id']==row['current_release_id'],
+                    'publicationGeneration':generation,'expiresAt':min(bootstrap['expires_at'],source['expires_at'])}
+
     def issue_handoff(self,*,viewer_id: str,source_session_id: str,binding_id: str,challenge: str) -> AccessCredential:
         """Only after authenticated, CSRF-protected console authorization."""
         self._user(viewer_id);self._identity(source_session_id);self._identity(binding_id);_hex(challenge)

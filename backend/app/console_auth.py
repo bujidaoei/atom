@@ -41,13 +41,18 @@ def request_session_token(request):
     return values[0] if values else None
 
 
+def require_console_host(request):
+    settings = get_settings()
+    hosts = request.headers.getlist('host')
+    if (request.url.scheme != 'https' or len(hosts) != 1 or settings.console_origin is None
+            or hosts[0].lower().removesuffix(':443') != settings.console_origin[8:]):
+        raise HTTPException(403, '请求来源无效')
+
+
 def require_auth_origin(request):
     settings = get_settings()
     if settings.session_mode != 'durable':
         return
-    hosts = request.headers.getlist('host')
-    origins = request.headers.getlist('origin')
-    if (request.url.scheme != 'https' or len(hosts) != 1
-            or hosts[0].lower().removesuffix(':443') != settings.console_origin[8:]
-            or origins != [settings.console_origin]):
+    require_console_host(request)
+    if request.headers.getlist('origin') != [settings.console_origin]:
         raise HTTPException(403, '请求来源无效')

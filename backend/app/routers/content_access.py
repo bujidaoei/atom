@@ -11,7 +11,7 @@ from starlette.requests import ClientDisconnect
 
 from ..access_repository import AccessError
 from ..config import get_settings
-from ..console_auth import credentials, request_session_token, require_auth_origin
+from ..console_auth import credentials, request_session_token, require_auth_origin, require_console_host
 from ..content_access import ContentAccessRepository
 from ..content_hosts import ContentHosts
 
@@ -49,6 +49,10 @@ async def _read(request):
         body = json.loads(payload.decode('utf-8'), object_pairs_hook=_fields)
     except (ValueError, UnicodeError, RecursionError):
         _deny(400)
+    return _validate_body(body)
+
+
+def _validate_body(body):
     if (not isinstance(body, dict) or set(body) != {'binding','challenge'}
             or not isinstance(body['binding'], str) or re.fullmatch(r'[0-9a-f]{32}', body['binding']) is None
             or not isinstance(body['challenge'], str) or re.fullmatch(r'[0-9a-f]{64}', body['challenge']) is None):
@@ -68,6 +72,16 @@ def _issue(token, body, suffix):
             'expiresAt':handoff.expires_at}
 
 
+def _describe(token, body, _suffix):
+    codec = credentials()
+    source = codec.authenticate(token)
+    if source is None:
+        _deny(401)
+    return ContentAccessRepository(codec.repository.path).describe_handoff(
+        viewer_id=source.user_id,source_session_id=source.id,
+        binding_id=body['binding'],challenge=body['challenge'])
+
+
 def _detached_done(worker):
     try:
         if not worker.cancelled():
@@ -78,20 +92,43 @@ def _detached_done(worker):
 
 @router.post('/handoff')
 async def handoff(request: Request):
+    return await _handle(request,read_only=False)
+
+
+@router.get('/request')
+async def inspect_request(request: Request):
+    return await _handle(request,read_only=True)
+
+
+async def _handle(request,*,read_only):
     settings = get_settings()
     if settings.session_mode != 'durable' or settings.content_host_suffix is None:
         _deny(404)
     try:
-        require_auth_origin(request)
-        if request.headers.getlist('x-atom-intent') != ['open-private-content']:
-            _deny(403)
-        if request.headers.getlist('content-type') != ['application/json']:
-            _deny(415)
-        lengths = request.headers.getlist('content-length')
-        if (len(lengths) != 1 or re.fullmatch(r'[0-9]{1,3}', lengths[0]) is None
-                or not 1 <= int(lengths[0]) <= 256 or request.url.query
-                or request.headers.getlist('content-encoding') or request.headers.getlist('transfer-encoding')):
-            _deny(400)
+        if read_only:
+            require_console_host(request)
+            origins=request.headers.getlist('origin')
+            if origins and origins != [settings.console_origin]:
+                _deny(403)
+            if request.headers.getlist('x-atom-intent') != ['inspect-private-content']:
+                _deny(403)
+            if len(request.scope.get('query_string',b''))>256:
+                _deny(400)
+            items=request.query_params.multi_items()
+            if len(items)!=2 or len(dict(items))!=2:
+                _deny(400)
+            body=_validate_body(dict(items))
+        else:
+            require_auth_origin(request)
+            if request.headers.getlist('x-atom-intent') != ['open-private-content']:
+                _deny(403)
+            if request.headers.getlist('content-type') != ['application/json']:
+                _deny(415)
+            lengths = request.headers.getlist('content-length')
+            if (len(lengths) != 1 or re.fullmatch(r'[0-9]{1,3}', lengths[0]) is None
+                    or not 1 <= int(lengths[0]) <= 256 or request.url.query
+                    or request.headers.getlist('content-encoding') or request.headers.getlist('transfer-encoding')):
+                _deny(400)
         token = request_session_token(request)
         if token is None:
             _deny(401)
@@ -99,8 +136,10 @@ async def handoff(request: Request):
             _deny(503)
         release = True
         try:
-            body = await _read(request)
-            worker = asyncio.create_task(run_in_threadpool(_issue, token, body, settings.content_host_suffix))
+            if not read_only:
+                body = await _read(request)
+            operation = _describe if read_only else _issue
+            worker = asyncio.create_task(run_in_threadpool(operation, token, body, settings.content_host_suffix))
             _WORKERS.add(worker)
             worker.add_done_callback(_WORKERS.discard)
             try:
