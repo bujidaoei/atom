@@ -101,3 +101,66 @@ test('tool abort closes dispatch but cannot cancel independent release', async (
     await client.destroy(id);
   } finally { await host.close(); }
 });
+
+
+test('parallel model reads use bounded FIFO admission and skip cancelled work', async () => {
+  const binding = lease();
+  const entered = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  const seen: string[] = [];
+  let busy = false;
+  const host = await server(async (req, res) => {
+    if (req.method === 'GET') return json(res, { attempt_id: binding.attemptId, state: 'ready', deadline: binding.deadline });
+    if (req.url!.endsWith('/release')) return json(res, { attempt_id: binding.attemptId, state: 'terminated' });
+    if (busy) { res.statusCode = 503; return json(res, { error: 'broker_busy' }); }
+    busy = true;
+    let text = ''; for await (const part of req) text += part;
+    const body = JSON.parse(text); seen.push(body.tool_call_id);
+    if (seen.length === 1) { entered.resolve(); await release.promise; }
+    busy = false;
+    json(res, { tool_call_id: body.tool_call_id, outcome: { ok: true, data: { text: '' } } });
+  });
+  try {
+    const client = new BrokerSandboxClient({ baseUrl: host.origin, lease: binding });
+    const id = await client.create('r', 'w');
+    const request = (toolCallId: string) => ({ toolCallId, operation: { op: 'glob' as const, pattern: '**', limit: 10 } });
+    const first = client.fileOperation(id, request('first'));
+    await entered.promise;
+    const abort = new AbortController();
+    const cancelled = assert.rejects(client.fileOperation(id, request('cancelled'), abort.signal), /abort/i);
+    abort.abort();
+    const queued = Array.from({ length: 14 }, (_, i) => client.fileOperation(id, request('queued'+i)));
+    const joined = Promise.all([first, ...queued]);
+    const overflow = assert.rejects(client.fileOperation(id, request('overflow')), /capacity/);
+    release.resolve();
+    await overflow; await cancelled; await joined;
+    await client.fileOperation(id, request('after'));
+    assert.deepEqual(seen, ['first', ...Array.from({ length: 14 }, (_, i) => 'queued'+i), 'after']);
+    await client.destroy(id);
+  } finally { release.resolve(); await host.close(); }
+});
+
+
+test('uncertain dispatched operation suppresses queued requests without replay', async () => {
+  const binding = lease();
+  const entered = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  let files = 0;
+  const host = await server(async (req, res) => {
+    if (req.method === 'GET') return json(res, { attempt_id: binding.attemptId, state: 'ready', deadline: binding.deadline });
+    if (req.url!.endsWith('/release')) return json(res, { attempt_id: binding.attemptId, state: 'terminated' });
+    files++; entered.resolve(); await release.promise;
+    res.statusCode = 503; json(res, { error: 'broker_busy' });
+  });
+  try {
+    const client = new BrokerSandboxClient({ baseUrl: host.origin, lease: binding });
+    const id = await client.create('r', 'w');
+    const request = { toolCallId: 'tool', operation: { op: 'glob' as const, pattern: '**', limit: 10 } };
+    const first = assert.rejects(client.fileOperation(id, request), /outcome is unknown/);
+    await entered.promise;
+    const second = assert.rejects(client.fileOperation(id, request), /closed or uncertain/);
+    release.resolve(); await first; await second;
+    assert.equal(files, 1);
+    await client.destroy(id);
+  } finally { release.resolve(); await host.close(); }
+});

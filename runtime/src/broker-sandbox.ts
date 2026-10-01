@@ -34,6 +34,8 @@ export class BrokerSandboxClient implements SandboxClient {
   #state: 'new' | 'active' | 'uncertain' | 'closing' | 'closed' = 'new';
   #creation?: Promise<string>;
   #release?: Promise<void>;
+  #fileTail: Promise<void> = Promise.resolve();
+  #pendingFiles = 0;
 
   constructor(options: { baseUrl: string; lease: BrokerLease; timeoutMs?: number }) {
     let url: URL;
@@ -116,6 +118,28 @@ export class BrokerSandboxClient implements SandboxClient {
   }
 
   async fileOperation(id: string, request: SandboxFileRequest, signal?: AbortSignal): Promise<SandboxFileResult> {
+    signal?.throwIfAborted();
+    if (id !== this.#lease.attemptId || this.#state !== 'active') throw new Error('Broker lease is closed or uncertain');
+    if (this.#pendingFiles >= 16) throw new Error('Broker file queue capacity exceeded');
+    const previous = this.#fileTail;
+    const slot = Promise.withResolvers<void>();
+    this.#fileTail = slot.promise;
+    this.#pendingFiles++;
+    const deadline = AbortSignal.timeout(this.#timeout);
+    const queuedSignal = signal ? AbortSignal.any([signal, deadline]) : deadline;
+    try {
+      // Model tools may run in parallel; the broker admits one transfer at a time.
+      // Never retry a dispatched operation whose outcome is unknown.
+      await previous;
+      queuedSignal.throwIfAborted();
+      return await this.#fileOperation(id, request, queuedSignal);
+    } finally {
+      this.#pendingFiles--;
+      slot.resolve();
+    }
+  }
+
+  async #fileOperation(id: string, request: SandboxFileRequest, signal?: AbortSignal): Promise<SandboxFileResult> {
     signal?.throwIfAborted();
     if (id !== this.#lease.attemptId || this.#state !== 'active') throw new Error('Broker lease is closed or uncertain');
     let result: SandboxFileResult | undefined;
