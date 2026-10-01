@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { setTimeout as delay } from 'node:timers/promises';
 import type { SandboxClient, SandboxExecRequest, SandboxExecResult, SandboxFileRequest, SandboxFileResult, WorkspaceFileData, WorkspaceFileOperation } from '../packages/product-contracts/src/index.ts';
 
 export interface BrokerLease {
@@ -8,6 +9,9 @@ export interface BrokerLease {
   grant: string;
   deadline: number;
 }
+
+class BrokerBusy extends Error {}
+class PreDispatchAbort extends Error {}
 
 function record(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -54,7 +58,7 @@ export class BrokerSandboxClient implements SandboxClient {
     this.#timeout = timeout;
   }
 
-  async #request(method: string, suffix: string, body?: unknown, signal?: AbortSignal): Promise<unknown> {
+  async #request(method: string, suffix: string, body?: unknown, signal?: AbortSignal, retryBusy = false): Promise<unknown> {
     const deadline = AbortSignal.timeout(this.#timeout);
     const combined = signal ? AbortSignal.any([signal, deadline]) : deadline;
     try {
@@ -66,7 +70,22 @@ export class BrokerSandboxClient implements SandboxClient {
         body: encoded,
       });
       if (!response.ok) {
-        await response.body?.cancel();
+        if (retryBusy && response.status === 503 && response.headers.get('content-type') === 'application/json') {
+          const reader = response.body?.getReader();
+          if (reader) {
+            let bytes = Buffer.alloc(0);
+            let oversized = false;
+            try {
+              for (;;) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                if (bytes.length + value.byteLength > 64) { oversized = true; break; }
+                bytes = Buffer.concat([bytes, value]);
+              }
+            } finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
+            if (!oversized && bytes.toString('utf8') === '{"error":"broker_busy"}') throw new BrokerBusy();
+          }
+        } else await response.body?.cancel();
         throw new Error('Broker request rejected');
       }
       if (response.headers.get('content-type')?.split(';')[0].trim().toLowerCase() !== 'application/json') {
@@ -88,7 +107,10 @@ export class BrokerSandboxClient implements SandboxClient {
         combined.throwIfAborted();
         return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks)));
       } finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
-    } catch { throw new Error('Broker request failed or outcome is unknown'); }
+    } catch (error) {
+      if (error instanceof BrokerBusy) throw error;
+      throw new Error('Broker request failed or outcome is unknown');
+    }
   }
 
   async create(runId: string, workspaceId: string): Promise<string> {
@@ -145,9 +167,24 @@ export class BrokerSandboxClient implements SandboxClient {
     let result: SandboxFileResult | undefined;
     let failure: string | undefined;
     try {
-      const response = await this.#request('POST', '/files', {
+      const body = {
         operation_id: randomUUID(), tool_call_id: request.toolCallId, operation: request.operation,
-      }, signal);
+      };
+      const retryEnd = Math.min(Date.now() + 20_000, this.#lease.deadline * 1000 - 5_000);
+      let waitMs = 150;
+      let response: unknown;
+      for (;;) {
+        try {
+          response = await this.#request('POST', '/files', body, signal, true);
+          break;
+        } catch (error) {
+          if (!(error instanceof BrokerBusy)) throw error;
+          if (Date.now() + waitMs >= retryEnd) throw error;
+          try { await delay(waitMs, undefined, { signal }); }
+          catch { throw new PreDispatchAbort(); }
+          waitMs = Math.min(waitMs * 2, 1_000);
+        }
+      }
       if (!record(response) || response.tool_call_id !== request.toolCallId || !record(response.outcome)
           || typeof response.outcome.ok !== 'boolean') throw new Error('Invalid broker file response');
       if (response.outcome.ok && !validData(response.outcome.data, request.operation)) throw new Error('Invalid broker file data');
@@ -157,7 +194,9 @@ export class BrokerSandboxClient implements SandboxClient {
       if (this.#state !== 'active') throw new Error('Broker lease no longer active');
       if (response.outcome.ok) result = { toolCallId: request.toolCallId, data: response.outcome.data as WorkspaceFileData };
       else failure = response.outcome.error as string;
-    } catch {
+    } catch (error) {
+      if (error instanceof BrokerBusy) throw new Error('Broker file operation is busy');
+      if (error instanceof PreDispatchAbort) throw new Error('Broker file operation cancelled before dispatch');
       if (this.#state === 'active') this.#state = 'uncertain';
       throw new Error('Broker file operation outcome is unknown');
     }

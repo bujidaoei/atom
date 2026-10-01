@@ -430,3 +430,11 @@ T036.3 deployment increment (2026-10-01): target image sha256:fa85571272fe6a9529
 - [ ] T037.3 Verify 30 IP key-based connections over at least 30 minutes without a banner timeout after correction and record the operational recovery/rollback path.
 
 T037 evidence (2026-10-01): TCP22 connected locally but some attempts timed out before the SSH banner. Server sshd was active with 0 of 10-100 startups, 1.7 GiB available memory, UFW inactive and no fail2ban installed. In a simultaneous all-port-22 eth0 capture, seven consecutive local banner timeouts produced no matching SYN at the instance; the following five successful key-authenticated IP connects produced five inbound SYNs. A separate six-connect series also passed. This locates those failures before the instance interface but does not identify the responsible upstream device/policy. Root-cause correction and sustained post-correction acceptance remain open.
+
+### T038 — Runtime file admission across racing leases (FR-009)
+
+- [x] T038.1 Classify only the exact broker `/files` pre-effect busy response; retry with one stable operation ID under the caller, grant and finite retry deadlines. Preserve unknown-outcome poison and safe pre-dispatch cancellation.
+- [x] T038.2 Exercise exact busy success, exhausted busy, cancellation, malformed/other failure and own-runtime lifecycle regressions. Keep immutable Pi verification passing.
+- [ ] T038.3 Build and deploy a pinned image with rollback, then repeat a real four-model production race and inspect all run events/artifacts. Do not equate model timeout or invalid output with transport admission success.
+
+T038 incident evidence (2026-10-01): production acceptance project `179d8af2dd50457eaf8f1af5801c2492` reached approval, then race `02a34258ce6c4143970df7891b8790ed` launched four heats. Sol and DeepSeek finished with three files each; Terra hit its selected 180-second cap with no files; Luna's first `glob` returned an unknown broker outcome and five later tool calls failed after the lease became uncertain, leaving no `index.html`. Node runtime code and tests implement the narrowly retryable global-transfer rejection; 22/22 related Node tests and locked Pi verification pass. This change is not yet in the production image, so T038.3 and full FR-009 acceptance remain open.

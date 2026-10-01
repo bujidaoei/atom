@@ -62,6 +62,83 @@ test('response timeout is bounded and cleanup uses an independent request', asyn
   } finally { await host.close(); }
 });
 
+test('exact pre-effect broker_busy retries one file operation without changing its identity', async () => {
+  const binding = lease();
+  const operations: string[] = [];
+  let calls = 0;
+  const host = await server(async (req, res) => {
+    if (req.method === 'GET') return json(res, { attempt_id: binding.attemptId, state: 'ready', deadline: binding.deadline });
+    if (req.url!.endsWith('/release')) return json(res, { attempt_id: binding.attemptId, state: 'terminated' });
+    let text = ''; for await (const part of req) text += part;
+    const body = JSON.parse(text);
+    operations.push(body.operation_id);
+    calls++;
+    if (calls === 1) { res.statusCode = 503; return json(res, { error: 'broker_busy' }); }
+    json(res, { tool_call_id: body.tool_call_id, outcome: { ok: true, data: { text: '' } } });
+  });
+  try {
+    const client = new BrokerSandboxClient({ baseUrl: host.origin, lease: binding });
+    const id = await client.create('r', 'w');
+    const result = await client.fileOperation(id, { toolCallId: 'tool', operation: { op: 'glob', pattern: '**', limit: 10 } });
+    assert.equal(result.toolCallId, 'tool');
+    assert.equal(calls, 2);
+    assert.deepEqual(operations, [operations[0], operations[0]]);
+    await client.destroy(id);
+  } finally { await host.close(); }
+});
+
+test('exhausted pre-effect busy does not poison a still-valid lease', async () => {
+  const binding = { ...lease(), deadline: Math.floor(Date.now() / 1000) + 5 };
+  let calls = 0;
+  const host = await server(async (req, res) => {
+    if (req.method === 'GET') return json(res, { attempt_id: binding.attemptId, state: 'ready', deadline: binding.deadline });
+    if (req.url!.endsWith('/release')) return json(res, { attempt_id: binding.attemptId, state: 'terminated' });
+    let text = ''; for await (const part of req) text += part;
+    calls++;
+    if (calls === 1) { res.statusCode = 503; return json(res, { error: 'broker_busy' }); }
+    json(res, { tool_call_id: JSON.parse(text).tool_call_id, outcome: { ok: true, data: { text: '' } } });
+  });
+  try {
+    const client = new BrokerSandboxClient({ baseUrl: host.origin, lease: binding });
+    const id = await client.create('r', 'w');
+    const operation = { toolCallId: 'tool', operation: { op: 'glob' as const, pattern: '**', limit: 10 } };
+    await assert.rejects(client.fileOperation(id, operation), /is busy/);
+    assert.equal(calls, 1);
+    await client.fileOperation(id, operation);
+    assert.equal(calls, 2);
+    await client.destroy(id);
+  } finally { await host.close(); }
+});
+
+test('cancelling a broker busy wait never dispatches a queued retry', async () => {
+  const binding = lease();
+  const firstRejected = Promise.withResolvers<void>();
+  let calls = 0;
+  const host = await server(async (req, res) => {
+    if (req.method === 'GET') return json(res, { attempt_id: binding.attemptId, state: 'ready', deadline: binding.deadline });
+    if (req.url!.endsWith('/release')) return json(res, { attempt_id: binding.attemptId, state: 'terminated' });
+    let text = ''; for await (const part of req) text += part;
+    calls++;
+    if (calls === 1) { res.statusCode = 503; json(res, { error: 'broker_busy' }); firstRejected.resolve(); return; }
+    json(res, { tool_call_id: JSON.parse(text).tool_call_id, outcome: { ok: true, data: { text: '' } } });
+  });
+  try {
+    const client = new BrokerSandboxClient({ baseUrl: host.origin, lease: binding });
+    const id = await client.create('r', 'w');
+    const controller = new AbortController();
+    const operation = { toolCallId: 'tool', operation: { op: 'glob' as const, pattern: '**', limit: 10 } };
+    const waiting = assert.rejects(client.fileOperation(id, operation, controller.signal), /cancelled before dispatch/);
+    await firstRejected.promise;
+    await new Promise(resolve => setTimeout(resolve, 30));
+    controller.abort();
+    await waiting;
+    assert.equal(calls, 1);
+    await client.fileOperation(id, operation);
+    assert.equal(calls, 2);
+    await client.destroy(id);
+  } finally { await host.close(); }
+});
+
 test('failed acquisition releases the pre-provisioned lease and failed release can retry', async () => {
   const binding = lease();
   let releases = 0;
@@ -150,7 +227,7 @@ test('uncertain dispatched operation suppresses queued requests without replay',
     if (req.method === 'GET') return json(res, { attempt_id: binding.attemptId, state: 'ready', deadline: binding.deadline });
     if (req.url!.endsWith('/release')) return json(res, { attempt_id: binding.attemptId, state: 'terminated' });
     files++; entered.resolve(); await release.promise;
-    res.statusCode = 503; json(res, { error: 'broker_busy' });
+    res.statusCode = 503; json(res, { error: 'lifecycle_unavailable' });
   });
   try {
     const client = new BrokerSandboxClient({ baseUrl: host.origin, lease: binding });
