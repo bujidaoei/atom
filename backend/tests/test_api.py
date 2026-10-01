@@ -143,6 +143,33 @@ def test_broker_publish_rejects_stale_legacy_workspace(signed_in: TestClient, mo
         assert session.query(Publication).count() == 0
 
 
+def test_broker_adoption_rejects_stale_legacy_heat(signed_in: TestClient, monkeypatch) -> None:
+    from app import storage
+    from app.config import get_settings
+    from app.db import session_scope
+    from app.models import Project, Race, RaceHeat
+
+    project_id = signed_in.post("/api/projects", json={"prompt": "赛道测试"}).json()["project"]["id"]
+    with session_scope() as session:
+        session.get(Project, project_id).status = "ready"
+        session.add(Race(id="race", project_id=project_id, status="done"))
+        session.add(RaceHeat(id="heat", race_id="race", model="fixture", status="done"))
+    main = storage.workspace_dir(project_id) / "index.html"
+    main.write_text("current main", encoding="utf-8")
+    branch = storage.workspace_dir(project_id, "heat")
+    branch.mkdir(parents=True)
+    (branch / "index.html").write_text("stale heat", encoding="utf-8")
+    monkeypatch.setattr(get_settings(), "sandbox_mode", "broker")
+
+    response = signed_in.post(f"/api/projects/{project_id}/race/heat/adopt")
+    assert response.status_code == 409
+    assert "旧目录复制" in response.json()["detail"]
+    assert main.read_text(encoding="utf-8") == "current main"
+    with session_scope() as session:
+        assert session.get(Race, "race").winner_heat_id is None
+        assert session.get(Project, project_id).status == "ready"
+
+
 def test_race_validates_model_selection(signed_in: TestClient) -> None:
     project_id = signed_in.post("/api/projects", json={"prompt": "落地页"}).json()["project"]["id"]
     # Fewer than two models never reaches the handler.

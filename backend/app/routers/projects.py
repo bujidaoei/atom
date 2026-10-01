@@ -412,6 +412,11 @@ def read_race(project: OwnedProject, session: DbSession, request: Request) -> di
 def adopt_heat(
     project: OwnedProject, heat_id: str, session: DbSession
 ) -> dict[str, bool]:
+    if get_settings().sandbox_mode == "broker":
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "隔离赛道尚无按修订确认的采用入口，不能通过旧目录复制采用",
+        )
     if orchestrator.active(project.id):
         raise HTTPException(status.HTTP_409_CONFLICT, "请等待所有赛道结束后再采用")
     heat = session.get(RaceHeat, heat_id)

@@ -69,6 +69,7 @@ def project_detail(session: Session, project: Project, *, catalog=None) -> dict[
             ),
             "buildBudgetSeconds": get_settings().build_budget_seconds,
             "legacyPublicationAvailable": get_settings().sandbox_mode != "broker",
+            "legacyAdoptionAvailable": get_settings().sandbox_mode != "broker",
             "messages": [
                 {
                     "id": message.id,

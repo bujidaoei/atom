@@ -133,6 +133,7 @@ export type ProjectDetail = ProjectSummary & {
   latestRun: { id: string; status: string; phase: string; error: string | null; startedAt: string; finishedAt: string | null } | null;
   buildBudgetSeconds: number;
   legacyPublicationAvailable: boolean;
+  legacyAdoptionAvailable: boolean;
   race: RaceSummary | null;
 };
 

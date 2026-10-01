@@ -11,6 +11,7 @@ import type { HeatActivity } from "./useProjectStream";
 
 type RaceTabProps = {
   projectId: string;
+  legacyAdoptionAvailable: boolean;
   initialRace: RaceSummary | null;
   heatActivity: Record<string, HeatActivity>;
   /** Called after a heat is adopted so the project and preview refresh. */
@@ -32,6 +33,7 @@ const HEAT_STATUS: Record<RaceHeat["status"], { label: string; tone: string }> =
 
 export function RaceTab({
   projectId,
+  legacyAdoptionAvailable,
   initialRace,
   heatActivity,
   onAdopted,
@@ -242,6 +244,7 @@ export function RaceTab({
                 <HeatCard
                   key={heat.id}
                   projectId={projectId}
+                  legacyAdoptionAvailable={legacyAdoptionAvailable}
                   heat={heat}
                   activity={heatActivity[heat.id]}
                   isWinner={race.winnerHeatId === heat.id}
@@ -266,6 +269,7 @@ export function RaceTab({
 
 function HeatCard({
   projectId,
+  legacyAdoptionAvailable,
   heat,
   activity,
   isWinner,
@@ -276,6 +280,7 @@ function HeatCard({
   onAdopted,
 }: {
   projectId: string;
+  legacyAdoptionAvailable: boolean;
   heat: RaceHeat;
   activity: HeatActivity | undefined;
   isWinner: boolean;
@@ -368,7 +373,8 @@ function HeatCard({
           size="sm"
           variant={isWinner ? "secondary" : "primary"}
           loading={adopting}
-          disabled={heat.status !== "done" || raceRunning}
+          disabled={heat.status !== "done" || raceRunning || !legacyAdoptionAvailable}
+          title={!legacyAdoptionAvailable ? "隔离赛道尚无按修订确认的采用入口" : undefined}
           onClick={() => {
             setAdopting(true);
             setAdoptError(null);
@@ -381,6 +387,9 @@ function HeatCard({
         >
           采用
         </Button>
+        {heat.status === "done" && !legacyAdoptionAvailable ? (
+          <span className="text-xs text-neutral-60">按修订采用尚未开放</span>
+        ) : null}
         {heat.previewUrl ? (
           <a
             href={withBase(heat.previewUrl)}

@@ -53,7 +53,7 @@ with session_scope() as s:
                Project(id='empty',user_id='owner',title='Empty',prompt='fixture'),
                Project(id='q',user_id='owner',title='Q',prompt='fixture')]);s.flush()
     s.add_all([Race(id='race',project_id='p'),Race(id='foreign-race',project_id='q')]);s.flush()
-    s.add_all([RaceHeat(id='heat',race_id='race',model='fixture',file_count=999,bytes=999),
+    s.add_all([RaceHeat(id='heat',race_id='race',model='fixture',status='done',file_count=999,bytes=999),
                RaceHeat(id='foreign',race_id='foreign-race',model='fixture')])
 settings=get_settings()
 migrate(settings.db_path,Path('/tmp/data/backup.db'))
@@ -67,6 +67,9 @@ main=import_workspace(repo,store,owner='owner',project_id='p',source=legacy)
 original_payload=store.read(main.artifact.key)
 branch=Path('/tmp/branch');branch.mkdir();(branch/'index.html').write_text('<h1>branch</h1>')
 heat=import_workspace(repo,store,owner='owner',project_id='p',heat_id='heat',source=branch)
+from app import storage
+legacy_heat=storage.workspace_dir('p','heat');legacy_heat.mkdir(parents=True)
+(legacy_heat/'index.html').write_text('<h1>stale heat directory</h1>')
 (legacy/'index.html').write_text('<h1>uncommitted stale legacy</h1>')
 (legacy/'legacy-only.txt').write_text('not committed')
 with session_scope() as s:
@@ -84,8 +87,17 @@ async def main_test():
         assert detail.status_code==200,detail.text
         project=detail.json()['project']
         assert project['legacyPublicationAvailable'] is False
+        assert project['legacyAdoptionAvailable'] is False
         denied=await client.post('/api/projects/p/publish',headers=headers)
         assert denied.status_code==409
+        denied_adoption=await client.post('/api/projects/p/race/heat/adopt',headers=headers)
+        assert denied_adoption.status_code==409
+        assert '旧目录复制' in denied_adoption.json()['detail']
+        with session_scope() as s:
+            assert s.get(Race,'race').winner_heat_id is None
+            assert s.get(Project,'p').status=='ready'
+        assert (legacy/'index.html').read_text()=='<h1>uncommitted stale legacy</h1>'
+        assert repo.current_revision('owner',main.workspace_id).revision_id==main.revision_id
         assert not (settings.published_dir/'published').exists()
         assert project['revisionId']==main.revision_id
         assert [item['path'] for item in project['files']]==['index.html','style.css']
