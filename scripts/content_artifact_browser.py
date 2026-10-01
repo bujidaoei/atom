@@ -36,7 +36,7 @@ def main():
     parser=argparse.ArgumentParser()
     parser.add_argument('--reserved-path',action='store_true',help='Verify rejection of an actual conflicting artifact')
     parser.add_argument('--private-exchange',action='store_true',help='Exercise real login, confirmation and private HTTP exchange')
-    parser.add_argument('--audit-schema',type=int,nargs='?',const=5,default=0,choices=(5,6,7,9),help='Select audited private browser schema (default5 when flag has no value)')
+    parser.add_argument('--audit-schema',type=int,nargs='?',const=5,default=0,choices=(5,6,7,9,10),help='Select audited private browser schema (default5 when flag has no value)')
     options=parser.parse_args()
     if options.audit_schema and not options.private_exchange:parser.error('audit schema requires private exchange')
     if options.private_exchange and options.reserved_path:parser.error('select one fixture mode')

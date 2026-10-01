@@ -316,3 +316,6 @@ Isolated recovery operator command (schema10 archive owner only; serving10 rollo
 
 
 Schema10 component acceptance: ordinary serving consumers now accept exact10; the earlier unsupported-serving10 warning is superseded only by the documented component/runtime evidence, not production rollout approval. Run revision tests with `-k schema-v10` and actual `backend/tests/integration/test_orchestrated_execution.py -k schema-v10` with the explicit pinned API/sandbox images. Browser10 and deployment acceptance remain outstanding. Run `node scripts/verify-pi-source.mjs` from runtime to verify all1905 locked files.
+
+
+Browser schema10 acceptance: build frontend, set the approved ATOM_TEST_API_IMAGE, run `python scripts/content_artifact_browser.py --private-exchange --audit-schema 10`. The script verifies actual database version and audit counts, not only page rendering. Local test TLS and seeded verification metadata do not satisfy production PKI or trusted-verifier acceptance.
