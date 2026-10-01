@@ -9,7 +9,7 @@ import pytest
 
 from app.migrations import MigrationError, migrate, verify, verify_backup
 from app.revisions import RevisionRepository
-from app.verification_repository import VerificationError, VerificationRepository
+from app.verification_repository import VerificationRepository
 from test_revision_migrations import legacy
 
 
@@ -76,8 +76,7 @@ def test_v12_rebuild_preserves_source_and_backup(populated, tmp_path):
         assert db.execute('PRAGMA foreign_key_check').fetchall() == []
         assert db.execute('SELECT revision_id FROM revision_receipts').fetchone() == ('main-result',)
     assert RevisionRepository(path).current_revision('user', main).revision_id == 'main-result'
-    with pytest.raises(VerificationError, match='verification_schema_required'):
-        VerificationRepository(path)
+    assert VerificationRepository(path).expired() == ()
 
 
 def test_adoption_scope_artifact_and_immutability(populated, tmp_path):
