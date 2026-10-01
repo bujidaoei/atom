@@ -231,3 +231,55 @@ def test_inspection_does_not_reoffer_already_issued_bootstrap(issuer):
     before=access_state(path)
     assert client.get(INSPECT,params=body,headers=INSPECT_HEADERS).status_code==409
     assert access_state(path)==before
+
+
+@pytest.mark.parametrize('failure',['timeout','disconnect','cancel'])
+@pytest.mark.parametrize('reply',['success','conflict','malformed'])
+def test_issuer_response_delivery_is_bounded_and_owned(issuer,monkeypatch,failure,reply):
+    import asyncio
+    from app.main import app
+    from app.content_issuer_lifecycle import ContentIssuerLifecycle
+    client,path,_,_,body=issuer
+    owner=ContentIssuerLifecycle(capacity=1,send_timeout=.05)
+    monkeypatch.setattr(app.state,'content_issuer',owner)
+    if reply=='conflict':assert client.post(PATH,json=body,headers=HEADERS).status_code==200
+    payload=json.dumps({} if reply=='malformed' else body).encode()
+    scope={'type':'http','asgi':{'version':'3.0'},'http_version':'1.1','scheme':'https',
+        'method':'POST','path':PATH,'raw_path':PATH.encode(),'query_string':b'',
+        'root_path':'','server':('console.example.com',443),'client':('127.0.0.1',1),
+        'headers':[(b'host',ORIGIN.removeprefix('https://').encode()),(b'origin',ORIGIN.encode()),
+            (b'x-atom-intent',b'open-private-content'),(b'content-type',b'application/json'),
+            (b'content-length',str(len(payload)).encode()),
+            (b'cookie',(DURABLE_COOKIE+'='+client.cookies.get(DURABLE_COOKIE)).encode())]}
+    async def scenario():
+        started=asyncio.Event()
+        async def receive():return {'type':'http.request','body':payload,'more_body':False}
+        async def send(event):
+            if event['type']=='http.response.start':
+                assert event['status']=={'success':200,'conflict':409,'malformed':400}[reply]
+                assert (b'cache-control',b'no-store') in event['headers']
+                return
+            if event['type']=='http.response.body':
+                assert owner.pending_count==1 and owner.acquire() is None
+                started.set()
+                if failure=='disconnect':raise OSError('test_transport_closed')
+                await asyncio.Event().wait()
+        task=asyncio.create_task(app(scope,receive,send))
+        await asyncio.wait_for(started.wait(),2)
+        if failure=='timeout':
+            with pytest.raises(RuntimeError,match='content_issuer_drain_timeout'):
+                await owner.drain(.01)
+            assert owner.pending_count==1 and owner.acquire() is None
+        if failure=='cancel':task.cancel()
+        expected={'cancel':asyncio.CancelledError,'disconnect':OSError,'timeout':TimeoutError}[failure]
+        with pytest.raises(expected):await task
+        assert owner.pending_count==0
+        owner.start()
+        slot=owner.acquire()
+        assert slot is not None
+        owner.release(slot)
+    asyncio.run(scenario())
+    # Delivery failure must not pretend the database commit was rolled back or reissue automatically.
+    with sqlite3.connect(path) as db:
+        assert db.execute('SELECT count(*) FROM content_handoffs').fetchone()==(0 if reply=='malformed' else 1,)
+    assert client.post(PATH,json=body,headers=HEADERS).status_code==(200 if reply=='malformed' else 409)

@@ -5,9 +5,12 @@ from threading import Lock
 
 
 class ContentIssuerLifecycle:
-    def __init__(self, capacity=8):
+    def __init__(self, capacity=8, send_timeout=10):
         if type(capacity) is not int or not 1 <= capacity <= 32:
             raise ValueError('invalid_issuer_capacity')
+        if type(send_timeout) not in (int, float) or not math.isfinite(send_timeout) or not .01 <= send_timeout <= 60:
+            raise ValueError('invalid_issuer_send_timeout')
+        self.send_timeout = send_timeout
         self._capacity = capacity
         self._lock = Lock()
         self._pending = set()

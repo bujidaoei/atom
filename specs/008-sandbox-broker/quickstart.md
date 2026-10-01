@@ -169,3 +169,6 @@ Session-check browser extension: private-exchange mode now injects a first /me 5
 
 
 Issuer lifecycle validation: run test_content_issuer_lifecycle.py, test_content_issuer.py, test_durable_auth_routes.py and test_api.py. Lifecycle tests cover timeout validation, retained ownership, closed admission, restart refusal and cancelled drain. Actual issuer test blocks real database issuance, cancels HTTP waiter, then verifies shutdown denial and eventual commit. Main TestClient lifespan test uses a short test drain deadline and held ownership token to prove failure propagation and cleanup; it is not process-kill recovery. Private browser command remains the normal-path regression.
+
+
+Issuer delivery tests: the issuer suite now parametrizes success/409/malformed-body responses against ASGI send timeout, OSError and cancellation. Actual mounted routes authenticate the fixture's real cookie and use real SQLite. The single test slot must remain unavailable while send is held; short drain must report failure, then send cleanup restores capacity. Committed handoffs remain exactly one and retry conflicts, malformed input creates none. These are injected ASGI transport faults, not a real slow TCP/production proxy test.

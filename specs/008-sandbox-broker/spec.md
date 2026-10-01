@@ -197,3 +197,7 @@ Initial network/server failure while checking the session must remain an unknown
 
 ### Issuer shutdown ownership
 Console content inspection and issuance must stop admission when main application shutdown starts. Admitted body intake and database work remain owned until actual completion, including a disconnected caller. Bounded drain timeout must propagate shutdown failure without reopening admission or discarding ownership. Restart cannot reset capacity while operations remain unfinished.
+
+
+### Bounded issuer response delivery
+After admission, content-scope and handoff responses, including recognized request/authorization errors, retain ownership until ASGI delivery finishes or fails. Send timeout or cancellation releases delivery ownership without reversing any committed credential. A retry after a committed but lost reply must not issue a duplicate handoff. Shutdown must observe blocked delivery as unfinished work.

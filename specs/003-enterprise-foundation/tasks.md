@@ -210,3 +210,6 @@ T027 continuation (008/T022/T025): session inspection now distinguishes unavaila
 
 
 T027 continuation (008/T022): issuer operations now participate in main application shutdown, retaining ownership after caller cancellation and reporting drain timeout truthfully. Related 63-test regression covers real ledger operation and actual main lifespan failure propagation. Enterprise operational and deployment acceptance remain open.
+
+
+T027 continuation (008/T022): issuer response delivery now participates in admission and drain with validated deadlines. 79 targeted tests pass, including real route/database plus injected ASGI send faults; committed-but-undelivered handoff cannot be issued again. Production ingress/recovery and enterprise acceptance remain unfinished.

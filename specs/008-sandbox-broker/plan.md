@@ -183,3 +183,7 @@ Unify boot and refresh through abortable ten-second /me checks with silent401, a
 
 ### Application-owned issuer lifecycle
 Replace the module semaphore with ContentIssuerLifecycle attached to main app.state. Its locked bounded token set spans accepted intake through response construction, transferring release to the detached worker callback on HTTP cancellation. Main lifespan starts only an empty owner, closes admission before drain, waits up to fifteen seconds, and always executes orchestrator/resource cleanup even if issuer drain fails. Timeout leaves owner closed with tokens retained; no worker cancellation or manufactured completion. Response socket send, distributed rate limits and forced process-death recovery remain independent obligations.
+
+
+### Issuer response ownership extension
+Owned JSONResponse transfers the existing admission token from route processing to ASGI send. The validated default send deadline is ten seconds; finally releases ownership on success, timeout, transport error or cancellation. Recognized admitted failures map to the same response wrapper; pre-admission rejections remain framework responses. This supersedes the earlier response-construction ownership boundary. No transactional rollback is inferred from delivery failure; duplicate issuance continues to conflict. Ingress/socket limits before admission and supervisor/process-death behavior remain deployment obligations.

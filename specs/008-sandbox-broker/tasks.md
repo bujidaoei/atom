@@ -187,3 +187,6 @@ T022/T025 continuation: initial authentication failure now stays unknown with ex
 
 
 T022 continuation: main application now owns bounded issuer admission and shutdown drain. 63 related tests pass, including real cancelled/held issuance with retained slot, timeout/new-request denial/restart refusal, actual eventual commit/release, and main lifespan propagating failed drain while clearing execution resources. Browser composition regression passes separately as recorded in evidence. Response delivery deadlines, supervisor/process-death recovery, distributed limits/audit/account-wide revoke/cleanup and broader enterprise gates remain open; no whole-task closure.
+
+
+T022 continuation: ownership now extends through bounded ASGI response delivery for admitted success and recognized error paths. 79 targeted tests pass; nine actual mounted-route transport fault combinations cover timeout/disconnect/cancellation across success/conflict/malformed-body replies, retained admission during send, drain timeout, cleanup and unchanged committed ledger semantics. Pre-admission ingress bounds, process-death recovery/distributed limits/audit/retention/account-wide revoke and enterprise acceptance remain open; no whole-task closure.

@@ -19,6 +19,20 @@ _HEADERS = {'Cache-Control':'no-store', 'Referrer-Policy':'no-referrer'}
 _WORKERS = set()
 
 
+class _OwnedResponse(JSONResponse):
+    def __init__(self, content, lifecycle, token, status_code=200, headers=None):
+        super().__init__(content, status_code=status_code, headers={**(headers or {}), **_HEADERS})
+        self._lifecycle = lifecycle
+        self._token = token
+
+    async def __call__(self, scope, receive, send):
+        try:
+            async with asyncio.timeout(self._lifecycle.send_timeout):
+                await super().__call__(scope, receive, send)
+        finally:
+            self._lifecycle.release(self._token)
+
+
 def _deny(status):
     raise HTTPException(status, '无法签发私有访问凭据', headers=_HEADERS)
 
@@ -100,6 +114,9 @@ async def inspect_request(request: Request):
 
 
 async def _handle(request,*,read_only):
+    lifecycle = None
+    admission = None
+    release = True
     settings = get_settings()
     if settings.session_mode != 'durable' or settings.content_host_suffix is None:
         _deny(404)
@@ -135,32 +152,40 @@ async def _handle(request,*,read_only):
         admission = lifecycle.acquire()
         if admission is None:
             _deny(503)
-        release = True
+        if not read_only:
+            body = await _read(request)
+        operation = _describe if read_only else _issue
+        worker = asyncio.create_task(run_in_threadpool(operation, token, body, settings.content_host_suffix))
+        _WORKERS.add(worker)
+        worker.add_done_callback(_WORKERS.discard)
         try:
-            if not read_only:
-                body = await _read(request)
-            operation = _describe if read_only else _issue
-            worker = asyncio.create_task(run_in_threadpool(operation, token, body, settings.content_host_suffix))
-            _WORKERS.add(worker)
-            worker.add_done_callback(_WORKERS.discard)
-            try:
-                result = await asyncio.shield(worker)
-            except asyncio.CancelledError:
-                release = False
-                worker.add_done_callback(lambda done: _detached_done(done, lifecycle, admission))
-                raise
-            return JSONResponse(result, headers=_HEADERS)
-        finally:
-            if release:
-                lifecycle.release(admission)
-    except ClientDisconnect:
-        _deny(400)
-    except TimeoutError:
-        _deny(408)
-    except AccessError as error:
-        _deny(404 if str(error) == 'content_access_denied' else
-              409 if str(error) == 'access_conflict' else
-              429 if str(error) == 'content_access_capacity' else 503)
-    except HTTPException as error:
-        error.headers = {**(error.headers or {}), **_HEADERS}
-        raise
+            result = await asyncio.shield(worker)
+        except asyncio.CancelledError:
+            release = False
+            worker.add_done_callback(lambda done: _detached_done(done, lifecycle, admission))
+            raise
+        response = _OwnedResponse(result, lifecycle, admission)
+        release = False  # Response delivery now owns the admission token.
+        return response
+    except (ClientDisconnect, TimeoutError, AccessError, HTTPException) as error:
+        headers = _HEADERS
+        detail = '无法签发私有访问凭据'
+        if isinstance(error, ClientDisconnect):
+            status = 400
+        elif isinstance(error, TimeoutError):
+            status = 408
+        elif isinstance(error, AccessError):
+            status = (404 if str(error) == 'content_access_denied' else
+                      409 if str(error) == 'access_conflict' else
+                      429 if str(error) == 'content_access_capacity' else 503)
+        else:
+            status, detail = error.status_code, error.detail
+            headers = {**(error.headers or {}), **_HEADERS}
+        if admission is None:
+            raise HTTPException(status, detail, headers=headers) from error
+        response = _OwnedResponse({'detail': detail}, lifecycle, admission, status, headers)
+        release = False
+        return response
+    finally:
+        if release and admission is not None:
+            lifecycle.release(admission)

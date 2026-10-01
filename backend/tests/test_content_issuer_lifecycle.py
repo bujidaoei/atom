@@ -71,3 +71,9 @@ def test_main_lifespan_reports_unfinished_issuer_shutdown(monkeypatch):
     finally:
         if token is not None:
             owner.release(token)
+
+
+@pytest.mark.parametrize('value', [0, -1, 61, float('nan'), float('inf'), True, '10'])
+def test_invalid_send_deadlines_rejected(value):
+    with pytest.raises(ValueError):
+        ContentIssuerLifecycle(send_timeout=value)

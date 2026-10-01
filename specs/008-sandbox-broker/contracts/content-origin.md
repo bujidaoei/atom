@@ -83,3 +83,6 @@ GET /api/content-access/request additionally returns contentOrigin derived only 
 
 ### Console issuer lifecycle
 Content inspection/issuance admission belongs to the main application. Shutdown closes new admission with no-store 503, retains accepted work until real completion and fails after bounded drain timeout. A cancelled HTTP waiter cannot release the database worker slot early. This ownership currently ends at response construction, not socket-send completion.
+
+
+Issuer delivery update: admitted responses now retain ownership through ASGI send, including recognized errors; default deadline ten seconds. Timeout/cancellation/transport failure releases delivery ownership but cannot undo credential commit. This supersedes the previous response-construction boundary. Pre-admission denial delivery remains subject to ingress/server limits.
