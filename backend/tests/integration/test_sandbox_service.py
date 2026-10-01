@@ -2,6 +2,8 @@ from dataclasses import replace
 import os
 import secrets
 import socket
+import sqlite3
+import subprocess
 import threading
 import time
 
@@ -67,6 +69,48 @@ def test_actual_http_admission_denials_revoke_and_shutdown(environment, monkeypa
         last = registry.find(response.json()["attempt_id"])
     assert registry.find(last.id).state == "terminated"
     assert driver.owned_inventory() == []
+
+
+def test_cloned_registry_cannot_reap_source_attempt_while_source_broker_runs(environment, tmp_path):
+    config, grant, codec, headers = environment
+    with TestClient(create_app(config)) as source:
+        response = source.post("/v1/admin/provision", json={"grant": codec.issue(grant)}, headers=headers)
+        assert response.status_code == 202
+        attempt = Registry(config.registry_path).find(response.json()["attempt_id"])
+        driver = DockerDriver(Registry(config.registry_path).broker_id, IMAGE)
+        assert driver.inspect(attempt).running
+        clone_path = tmp_path / "clone" / "registry.db"
+        clone_path.parent.mkdir()
+        with sqlite3.connect(config.registry_path) as original, sqlite3.connect(clone_path) as clone:
+            original.backup(clone)
+        clone_config = replace(config, registry_path=clone_path)
+        with TestClient(create_app(clone_config)) as copied:
+            assert copied.get("/ready", headers=headers).status_code == 503
+            assert copied.post("/v1/admin/provision", json={"grant": codec.issue(grant)},
+                               headers=headers).status_code == 503
+            assert source.get("/ready", headers=headers).status_code == 200
+            assert driver.inspect(attempt).running
+            assert Registry(config.registry_path).find(attempt.id).state == "provisioning"
+        revoked = source.post("/v1/admin/revoke", json={"grant_id": grant.jti}, headers=headers)
+        assert revoked.status_code == 200
+        assert driver.inspect(attempt) is None
+
+
+def test_lost_daemon_lease_fails_closed_without_new_container(environment):
+    config, grant, codec, headers = environment
+    with TestClient(create_app(config)) as client:
+        registry = Registry(config.registry_path)
+        lease_name = "atom-broker-lease-" + registry.broker_id
+        assert client.get("/ready", headers=headers).status_code == 200
+        subprocess.run(["docker", "container", "rm", "--force", lease_name],
+                       check=True, capture_output=True, timeout=10)
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline and client.get("/ready", headers=headers).status_code == 200:
+            time.sleep(0.1)
+        assert client.get("/ready", headers=headers).status_code == 503
+        assert client.post("/v1/admin/provision", json={"grant": codec.issue(grant)},
+                           headers=headers).status_code == 503
+        assert registry.unterminated() == []
 
 
 def test_scheduled_expiry_without_explicit_sweep(environment):

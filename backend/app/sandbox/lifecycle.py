@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from collections.abc import Callable
 import os
 import hashlib
 import io
@@ -61,13 +62,15 @@ class _ProcessLease:
 
 
 class Lifecycle:
-    def __init__(self, registry: Registry, driver: DockerDriver, *, batch_size: int = 100):
+    def __init__(self, registry: Registry, driver: DockerDriver, *, batch_size: int = 100,
+                 lease_alive: Callable[[], bool] | None = None):
         if registry.broker_id != driver.broker_id:
             raise LifecycleError("broker_identity_mismatch")
         if type(batch_size) is not int or not 1 <= batch_size <= 1000:
             raise LifecycleError("invalid_reconciliation_batch")
         self.registry, self.driver = registry, driver
         self._batch_size = batch_size
+        self._lease_alive = lease_alive or (lambda: True)
         self._control = threading.Lock()
         self._lease = _ProcessLease(registry.path.with_suffix(".lease"))
         self._ready = False
@@ -77,13 +80,19 @@ class Lifecycle:
 
     @property
     def ready(self) -> bool:
-        return self._ready and not self._closed
+        return self._ready and not self._closed and self._lease_alive()
 
     @contextmanager
     def _exclusive(self):
+        if not self._lease_alive():
+            self._ready = False
+            raise LifecycleError("broker_identity_lease_lost")
         if not self._control.acquire(timeout=3):
             raise LifecycleError("broker_busy")
         try:
+            if not self._lease_alive():
+                self._ready = False
+                raise LifecycleError("broker_identity_lease_lost")
             if self._closed:
                 raise LifecycleError("broker_closed")
             yield
@@ -364,6 +373,14 @@ class Lifecycle:
                 self._ready = False
                 self._closed = True
                 self._lease.close()
+
+    def abandon_after_lease_loss(self):
+        """Release only the local process lock; never touch Docker without daemon ownership."""
+        if self._lease_alive():
+            raise LifecycleError("broker_identity_lease_still_active")
+        self._ready = False
+        self._closed = True
+        self._lease.close()
 
     def verify_audit_archive(self, payload: bytes, *, expected_sha256: str) -> dict:
         """Trusted administrative entry; never accepts runtime grants or caller-selected code/mounts."""

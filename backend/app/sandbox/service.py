@@ -14,6 +14,7 @@ from starlette.requests import ClientDisconnect
 
 from .config import BrokerConfig
 from .docker_driver import DockerDriver, DriverError
+from .daemon_lease import BrokerDaemonLease, DaemonLeaseError
 from .grants import GrantCodec, GrantError
 from .lifecycle import Lifecycle, LifecycleError
 from .registry import Registry, RegistryError
@@ -101,20 +102,36 @@ def create_app(config: BrokerConfig | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app):
         registry = Registry(config.registry_path)
-        lifecycle = Lifecycle(registry, DockerDriver(registry.broker_id, config.image), batch_size=config.batch_size)
-        app.state.lifecycle = lifecycle
+        daemon_lease = BrokerDaemonLease(registry.broker_id, config.image)
+        lifecycle = None
+        app.state.lifecycle = None
         app.state.transfer_lock = asyncio.Lock()
         app.state.maintenance_ok = False
         stop = asyncio.Event()
 
         async def reconcile():
+            nonlocal lifecycle
             try:
+                if lifecycle is None:
+                    await run_in_threadpool(daemon_lease.acquire)
+                    try:
+                        lifecycle = Lifecycle(registry, DockerDriver(registry.broker_id, config.image),
+                                              batch_size=config.batch_size,
+                                              lease_alive=lambda: daemon_lease.alive)
+                    except Exception:
+                        await run_in_threadpool(daemon_lease.close)
+                        raise
+                    app.state.lifecycle = lifecycle
+                if not daemon_lease.alive:
+                    app.state.maintenance_ok = False
+                    _LOG.error("broker_identity_lease_lost")
+                    return
                 await run_in_threadpool(lifecycle.sweep)
                 # Cleanup old owned resources even if the configured next image
                 # is unavailable; readiness still requires that image to exist.
                 await run_in_threadpool(lifecycle.driver.validate_environment)
                 app.state.maintenance_ok = True
-            except (RegistryError, DriverError, LifecycleError):
+            except (RegistryError, DriverError, LifecycleError, DaemonLeaseError):
                 app.state.maintenance_ok = False
                 _LOG.warning("broker_reconciliation_failed")
             except Exception:
@@ -138,11 +155,19 @@ def create_app(config: BrokerConfig | None = None) -> FastAPI:
             stop.set()
             if task is not None:
                 await task
-            try:
-                await run_in_threadpool(lifecycle.close)
-            except (RegistryError, DriverError, LifecycleError):
-                _LOG.error("broker_shutdown_unconfirmed")
-                raise ServiceError(503, "shutdown_unconfirmed") from None
+            if lifecycle is not None:
+                try:
+                    if daemon_lease.alive:
+                        await run_in_threadpool(lifecycle.close)
+                    else:
+                        await run_in_threadpool(lifecycle.abandon_after_lease_loss)
+                except (RegistryError, DriverError, LifecycleError):
+                    _LOG.error("broker_shutdown_unconfirmed")
+                    raise ServiceError(503, "shutdown_unconfirmed") from None
+                finally:
+                    await run_in_threadpool(daemon_lease.close)
+            else:
+                await run_in_threadpool(daemon_lease.close)
 
     app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
 
