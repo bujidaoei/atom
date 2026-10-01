@@ -273,3 +273,6 @@ T031/T032 governed delivery increment: delivery repository and standalone export
 
 
 Current schema7 compatibility (supersedes earlier not-yet-compatible notes): authentication, content capabilities, revision/verification/publication, audit reads and governed export now accept their explicit verified schema7. Main plus actual TLS verifies lost acknowledgement and permanent rejection across restart; explicit operator registration/resume remains required.28 main/TLS/service checks and529 business/HTTP/revision checks pass. Global historical backlog reporting, full browser/production/retention gates remain open; this is not rollout approval.
+
+
+T032 operational visibility increment: audit_admin status now reads every registered historical obligation in one exact7 read-only snapshot, independently of process configuration. A bounded keyset detail page includes never-enrolled/pending/leased/delivered/expired counts and timestamps, while registered_drained is checked over the entire registry, not the page. Empty registry is not drained.64 focused tests pass. Scope is explicitly registered_destinations, not all possible unregistered business scopes or proof of active transport; retention/deployment/full-task gates remain open.

@@ -144,3 +144,46 @@ class AuditGovernanceRepository:
             rows = db.execute('SELECT * FROM security_audit_destinations WHERE destination_id>? ORDER BY destination_id LIMIT ?',
                               (after, limit)).fetchall()
             return tuple(dict(row) for row in rows)
+
+    def obligations(self, *, after='', limit=50):
+        """One read snapshot of registry-wide debt plus a bounded detail page."""
+        if after != '':
+            _identifier(after, 64)
+        if type(limit) is not int or not 1 <= limit <= 100:
+            raise AuditGovernanceError('invalid_audit_governance_request')
+        with self._transaction(read_only=True) as db:
+            now = int(time.time())
+            if not 0 <= now < 2**63:
+                raise AuditGovernanceError('audit_clock_unavailable')
+            upper = db.execute('SELECT coalesce(max(sequence),0) FROM security_audit_events').fetchone()[0]
+            count = db.execute('SELECT count(*) FROM security_audit_destinations').fetchone()[0]
+            # This check covers every registered identity, including outside the page.
+            unpaid = db.execute('SELECT 1 FROM security_audit_destinations r JOIN security_audit_events e '
+                'ON e.scope_kind=r.scope_kind AND e.scope_id=r.scope_id '
+                "WHERE e.sequence<=? AND (r.state<>'retired' OR e.sequence<=r.required_through_sequence) "
+                'AND NOT EXISTS(SELECT 1 FROM security_audit_delivery d WHERE d.destination_id=r.destination_id '
+                "AND d.event_id=e.event_id AND d.state='delivered') LIMIT 1", (upper,)).fetchone()
+            rows = db.execute('SELECT * FROM security_audit_destinations WHERE destination_id>? ORDER BY destination_id LIMIT ?',
+                              (after, limit+1)).fetchall()
+            destinations = []
+            for row in rows[:limit]:
+                through = min(upper, row['required_through_sequence']) if row['state'] == 'retired' else upper
+                counts = db.execute('SELECT count(*) AS required_events,'
+                    'coalesce(sum(d.event_id IS NULL),0) AS unenrolled,'
+                    "coalesce(sum(d.state='pending'),0) AS pending,"
+                    "coalesce(sum(d.state='leased'),0) AS leased,"
+                    "coalesce(sum(d.state='delivered'),0) AS delivered,"
+                    "coalesce(sum(d.state='leased' AND d.lease_expires_at<=?),0) AS expired_leases,"
+                    "min(CASE WHEN d.event_id IS NULL OR d.state<>'delivered' THEN e.occurred_at END) AS oldest_unacked_at,"
+                    'max(d.delivered_at) AS last_ack_at '
+                    'FROM security_audit_events e LEFT JOIN security_audit_delivery d '
+                    'ON d.event_id=e.event_id AND d.destination_id=? '
+                    'WHERE e.scope_kind=? AND e.scope_id=? AND e.sequence<=?',
+                    (now, row['destination_id'], row['scope_kind'], row['scope_id'], through)).fetchone()
+                detail = dict(row) | dict(counts)
+                detail['backlog'] = detail['unenrolled']+detail['pending']+detail['leased']
+                destinations.append(detail)
+            return {'coverage': 'registered_destinations', 'observed_at': now, 'upper_sequence': upper,
+                    'registry_count': count, 'registered_drained': count > 0 and unpaid is None,
+                    'destinations': tuple(destinations),
+                    'next_after': rows[limit-1]['destination_id'] if len(rows) > limit else None}

@@ -14,6 +14,11 @@ def main(argv=None):
     listing = commands.add_parser('list')
     listing.add_argument('--after', default='')
     listing.add_argument('--limit', type=int, default=50)
+    status = commands.add_parser('status')
+    status.add_argument('--after', default='')
+    status.add_argument('--limit', type=int, default=50)
+    status.add_argument('--require-drained', action='store_true',
+                        help='Exit2 for an empty registry or any registered historical obligation outstanding.')
     change = commands.add_parser('apply')
     change.add_argument('--command-id', required=True)
     change.add_argument('--operator-id', required=True)
@@ -27,13 +32,18 @@ def main(argv=None):
     try:
         repository = AuditGovernanceRepository(arguments.pop('database'))
         operation = arguments.pop('command')
+        require_drained = arguments.pop('require_drained', False)
         if operation == 'list':
             rows = repository.page(**arguments)
             # A full page is not proof of exhaustion; continue from the last id.
             result = {'destinations': rows, 'next_after': rows[-1]['destination_id'] if len(rows) == arguments['limit'] else None}
+        elif operation == 'status':
+            result = repository.obligations(**arguments)
         else:
             result = {'receipt': asdict(repository.execute(**arguments))}
         print(json.dumps({'ok': True, **result}, separators=(',', ':')))
+        if require_drained and not result['registered_drained']:
+            return 2
         return 0
     except AuditGovernanceError as error:
         print(json.dumps({'ok': False, 'error': str(error)}, separators=(',', ':')))

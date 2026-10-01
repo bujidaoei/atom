@@ -290,3 +290,6 @@ T027/008-T029/T030 refinement: refreshed official Atoms/GitHub/GitLab governance
 
 
 Schema7 runtime follow-through:30 actual Linux main/own Node/broker cases pass across1/4/5/6/7 with export disabled; separately28 main/TLS and529 consumer tests pass. Source Pi remains locked. Full T031/T032 and enterprise rollout remain open for wider required acceptance and historical operational visibility.
+
+
+008-T032 operational visibility increment: audit_admin status now reads every registered historical obligation in one exact7 read-only snapshot, independently of process configuration. A bounded keyset detail page includes never-enrolled/pending/leased/delivered/expired counts and timestamps, while registered_drained is checked over the entire registry, not the page. Empty registry is not drained.64 focused tests pass. Scope is explicitly registered_destinations, not all possible unregistered business scopes or proof of active transport; retention/deployment/full-task gates remain open.
