@@ -262,3 +262,6 @@ Offline schema8 planner inspection (from backend; use an explicitly prepared off
 python -m app.retention_admin --database <offline-database> plan --policy-id <policy-id> --expected-generation <generation> --limit 100 --max-bytes 262144
 ```
 For a non-null next_after, pass it as --after together with --upper <upper_sequence> and --expected-context <context_sha256>. A generation/context conflict requires a fresh inspection. This command produces candidate and blocked events only; it does not archive, validate the store, restore or delete. Avoid putting full audit payload output in public logs. No serving database should be migrated to8 for this command.
+
+
+Archive codec/recovery-core regression: `backend/.venv/Scripts/python.exe -m pytest backend/tests/test_audit_archive.py backend/tests/test_retention_plan.py -q`. This includes actual subprocess recovery of complete source event dictionaries. There is no production archive-storage/restore CLI yet; the library codec and isolated recovery target alone are not the T033 durable archive acceptance gate.
