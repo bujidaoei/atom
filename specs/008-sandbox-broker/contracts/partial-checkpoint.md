@@ -68,12 +68,17 @@ no schema change is assumed. The 380edf5 baseline allowed cancellation to
 override an unclosed success decision. A ledger correction now preserves
 the first terminal decision across all supported schema versions. The existing
 ledger/broker/coordinator paths passed 481 real Linux tests with locked
-development dependencies and exit code 0; the corrected ledger is deployed in
-the healthy 6386e47 API/broker pair. The scoped partial HTTP/coordinator path
-has now passed changed/unchanged broker tests and four fault-injection tests
-on Linux. Runtime abort, API orchestration and browser visibility are under
-implementation and have not passed the release gates below. The production
-pair still serves 6386e47, which does not contain partial checkpointing.
+development dependencies and exit code 0. The scoped partial HTTP/coordinator
+path passed changed/unchanged broker tests and four fault-injection tests on
+Linux. Production serves `64ed268` on both API and broker. A live provider
+`edit` followed by Stop registered a new cancelled revision; authenticated
+file API, preview and Chromium showed the same verified bytes, explicit
+continue action and disabled Publish. A subsequent API restart kept the receipt
+and head without duplication, but revealed a sidecar namespace restart defect
+that required broker recreation. The installed coordinated restart entry point
+passes a systemd restart exercise. Before-receipt process death remains unaccepted. A subsequent fresh live
+model-requested/Stop case had zero writes, a null incomplete receipt and the
+correct browser retry wording. A live deadline-after-write case stays open.
 
 ## Acceptance gates
 
@@ -91,5 +96,6 @@ pair still serves 6386e47, which does not contain partial checkpointing.
    must agree. A second live run with no writes must show “重新生成”. Browser
    preview and publication must not claim acceptance of an incomplete output.
 
-This contract governs work in progress. T039.2/3 remain open until the runtime,
-API orchestration, fault matrix and live browser acceptance satisfy these gates.
+This contract governs work in progress. T039.2c/d passed deployed live-browser
+acceptance; T039.3 remains open until the remaining fault, process-death and
+live deadline gate pass.
