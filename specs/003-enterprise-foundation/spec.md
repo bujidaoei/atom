@@ -98,3 +98,6 @@ FR-008/FR-012 design refinement from official Atoms/GitHub/GitLab research: reco
 
 
 008 T033 archive format/recovery-core increment:60 codec/planner checks pass, including actual independent subprocess recovery of full business-generated event dictionaries. Strict bounded canonical format binds captured context/plan metadata and requires an externally supplied archive digest. Durable storage, protected manifest authority, persisted recovery receipts and enterprise rollout remain open. See ../008-sandbox-broker/evidence.md; T033/T034 are not accepted.
+
+
+008 T033 local storage increment:9 actual Linux filesystem/process cases and1 independent-volume writer-removal/read-container test pass for private no-overwrite audit archives. Protected manifest authority, persisted recovery receipts and service integration remain open; local durability is not legal/cloud immutability or production acceptance. Details: ../008-sandbox-broker/evidence.md. T033/T034 remain unchecked.

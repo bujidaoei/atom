@@ -265,3 +265,6 @@ For a non-null next_after, pass it as --after together with --upper <upper_seque
 
 
 Archive codec/recovery-core regression: `backend/.venv/Scripts/python.exe -m pytest backend/tests/test_audit_archive.py backend/tests/test_retention_plan.py -q`. This includes actual subprocess recovery of complete source event dictionaries. There is no production archive-storage/restore CLI yet; the library codec and isolated recovery target alone are not the T033 durable archive acceptance gate.
+
+
+Actual Linux storage tests: run `python -B /src/tests/test_audit_archive_store.py -v` in the pinned API test image with backend source mounted read-only at /src, PYTHONPATH=/src, nonroot user1000:1000, network disabled, read-only root and writable bounded /tmp tmpfs. All9 tests must run without skips. Set ATOM_TEST_API_IMAGE to the explicit pinned local API image, then run `backend/.venv/Scripts/python.exe -m pytest backend/tests/integration/test_audit_archive_persistence.py -q` for independent volume/container persistence. That harness creates uniquely labelled test resources, verifies ownership before removal and deletes only its own containers/volume. These are local test commands, not deployment or archive registration commands.
