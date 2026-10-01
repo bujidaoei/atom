@@ -79,3 +79,7 @@ Trusted content promotion now has `ReleaseRepository.publish_verified(store, **i
 
 ### Confirmation response and client navigation
 GET /api/content-access/request additionally returns contentOrigin derived only from configured ContentHosts and the authorized binding. /content-access renders scope before explicit POST issuance; destination must equal that origin, /_atom/exchange path, no query/userinfo, and 64 lowercase hexadecimal fragment. Reject expired response. Referrer policy is no-referrer. Do not auto-retry an uncertain issuer response; return through project entry for a fresh browser bootstrap.
+
+
+### Console issuer lifecycle
+Content inspection/issuance admission belongs to the main application. Shutdown closes new admission with no-store 503, retains accepted work until real completion and fails after bounded drain timeout. A cancelled HTTP waiter cannot release the database worker slot early. This ownership currently ends at response construction, not socket-send completion.

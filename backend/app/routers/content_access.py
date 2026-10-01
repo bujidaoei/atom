@@ -2,7 +2,6 @@
 import asyncio
 import json
 import re
-from threading import BoundedSemaphore
 
 from fastapi import APIRouter, HTTPException, Request
 from starlette.concurrency import run_in_threadpool
@@ -17,7 +16,6 @@ from ..content_hosts import ContentHosts
 
 router = APIRouter(prefix='/content-access', tags=['content-access'])
 _HEADERS = {'Cache-Control':'no-store', 'Referrer-Policy':'no-referrer'}
-_ADMISSION = BoundedSemaphore(8)
 _WORKERS = set()
 
 
@@ -83,12 +81,12 @@ def _describe(token, body, suffix):
     return {**result, 'contentOrigin':ContentHosts(suffix).url(body['binding']).rstrip('/')}
 
 
-def _detached_done(worker):
+def _detached_done(worker, lifecycle, token):
     try:
         if not worker.cancelled():
             worker.exception()
     finally:
-        _ADMISSION.release()
+        lifecycle.release(token)
 
 
 @router.post('/handoff')
@@ -133,7 +131,9 @@ async def _handle(request,*,read_only):
         token = request_session_token(request)
         if token is None:
             _deny(401)
-        if not _ADMISSION.acquire(blocking=False):
+        lifecycle = request.app.state.content_issuer
+        admission = lifecycle.acquire()
+        if admission is None:
             _deny(503)
         release = True
         try:
@@ -147,12 +147,12 @@ async def _handle(request,*,read_only):
                 result = await asyncio.shield(worker)
             except asyncio.CancelledError:
                 release = False
-                worker.add_done_callback(_detached_done)
+                worker.add_done_callback(lambda done: _detached_done(done, lifecycle, admission))
                 raise
             return JSONResponse(result, headers=_HEADERS)
         finally:
             if release:
-                _ADMISSION.release()
+                lifecycle.release(admission)
     except ClientDisconnect:
         _deny(400)
     except TimeoutError:

@@ -166,3 +166,6 @@ Logout composition: the private-exchange browser command additionally opens actu
 
 
 Session-check browser extension: private-exchange mode now injects a first /me 503 before login and an aborted request after real login/reload. It must retain the original confirmation URL, show retryable uncertainty, avoid rendering login/issuance controls, retain the real session Cookie and recover through actual /me. A held response additionally exercises the production ten-second check deadline before another explicit retry. The rest of real confirmation/exchange/logout composition still executes. Fault responses are explicitly test-injected; successful auth/content operations are actual mounted APIs/storage.
+
+
+Issuer lifecycle validation: run test_content_issuer_lifecycle.py, test_content_issuer.py, test_durable_auth_routes.py and test_api.py. Lifecycle tests cover timeout validation, retained ownership, closed admission, restart refusal and cancelled drain. Actual issuer test blocks real database issuance, cancels HTTP waiter, then verifies shutdown denial and eventual commit. Main TestClient lifespan test uses a short test drain deadline and held ownership token to prove failure propagation and cleanup; it is not process-kill recovery. Private browser command remains the normal-path regression.

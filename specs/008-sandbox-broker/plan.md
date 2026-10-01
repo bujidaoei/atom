@@ -179,3 +179,7 @@ AuthProvider now waits for the expected logout acknowledgement before clearing i
 
 ### Session-check ownership and recovery
 Unify boot and refresh through abortable ten-second /me checks with silent401, a generation owner and cleanup. Sign-in, successful logout and global unauthorized handling invalidate pending checks. Preserve known user on non-401 failure, retain ready=false when no outcome was established, and expose retryable sessionError. SessionGate wraps login/register and protected initial states. Landing keeps informational content visible but hides anonymous assertions/actions until known. Existing workspace refresh uses the same implementation and retains its mounted state on failure. Full concurrent refresh/race acceptance remains separate from boot browser tests.
+
+
+### Application-owned issuer lifecycle
+Replace the module semaphore with ContentIssuerLifecycle attached to main app.state. Its locked bounded token set spans accepted intake through response construction, transferring release to the detached worker callback on HTTP cancellation. Main lifespan starts only an empty owner, closes admission before drain, waits up to fifteen seconds, and always executes orchestrator/resource cleanup even if issuer drain fails. Timeout leaves owner closed with tokens retained; no worker cancellation or manufactured completion. Response socket send, distributed rate limits and forced process-death recovery remain independent obligations.

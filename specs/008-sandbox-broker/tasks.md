@@ -184,3 +184,6 @@ T022/T025 continuation: logout no longer swallows failures; bounded request, exp
 
 
 T022/T025 continuation: initial authentication failure now stays unknown with explicit retry instead of redirecting to login; background refresh preserves prior identity on non-401 error. Checks have ten-second abort bound and generation ownership. Frontend build and actual browser bootstrap/login/consent/exchange/logout composition pass with injected initial 503 and authenticated reload network failure. Full refresh-versus-login/logout race matrix and remaining enterprise/operational gates stay open; no task closure.
+
+
+T022 continuation: main application now owns bounded issuer admission and shutdown drain. 63 related tests pass, including real cancelled/held issuance with retained slot, timeout/new-request denial/restart refusal, actual eventual commit/release, and main lifespan propagating failed drain while clearing execution resources. Browser composition regression passes separately as recorded in evidence. Response delivery deadlines, supervisor/process-death recovery, distributed limits/audit/account-wide revoke/cleanup and broader enterprise gates remain open; no whole-task closure.

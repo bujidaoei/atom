@@ -10,6 +10,7 @@ from starlette.routing import Route
 from .db import engine
 from .access_repository import AccessError
 from .console_auth import credentials
+from .content_issuer_lifecycle import ContentIssuerLifecycle
 from .config import get_settings
 from .execution_service import ExecutionGateway, execution_resources
 from .sandbox.client import BrokerClientError
@@ -35,16 +36,22 @@ async def lifespan(_app: FastAPI):
         orchestrator.execution = resources
         _app.state.execution = resources
         try:
+            _app.state.content_issuer.start()
             yield
         finally:
+            _app.state.content_issuer.close_admission()
             _app.state.execution = None
             try:
-                await orchestrator.shutdown()
+                try:
+                    await _app.state.content_issuer.drain()
+                finally:
+                    await orchestrator.shutdown()
             finally:
                 orchestrator.execution = None
 
 
 app = FastAPI(title="Atoms Demo API", version="1.0.0", lifespan=lifespan)
+app.state.content_issuer = ContentIssuerLifecycle()
 for action in ('complete', 'cancel'):
     app.router.routes.append(Route('/v1/executions/' + action, ExecutionGateway(), methods=['POST']))
 

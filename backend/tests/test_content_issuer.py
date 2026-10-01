@@ -26,6 +26,8 @@ HEADERS={'X-Atom-Intent':'open-private-content'}
 @pytest.fixture
 def issuer(durable_client,monkeypatch):
     client,path=durable_client
+    from app.main import app
+    app.state.content_issuer.start()
     owner=client.post('/api/auth/register',json=LOGIN).json()['id']
     monkeypatch.setattr(get_settings(),'content_host_suffix','content.example.net')
     engine=create_engine(f'sqlite:///{path}')
@@ -136,17 +138,30 @@ def test_cancelled_issuer_retains_worker_capacity_until_real_commit(issuer,monke
             assert started.is_set()
             task.cancel()
             with pytest.raises(asyncio.CancelledError):await task
-            claimed=0
+            claimed=[]
             try:
-                while endpoint._ADMISSION.acquire(blocking=False):claimed+=1
-                assert claimed==7 and endpoint._WORKERS
+                while (slot := app.state.content_issuer.acquire()) is not None:claimed.append(slot)
+                assert len(claimed)==7 and endpoint._WORKERS
             finally:
-                for _ in range(claimed):endpoint._ADMISSION.release()
+                for slot in claimed:app.state.content_issuer.release(slot)
+            try:
+                with pytest.raises(RuntimeError,match='content_issuer_drain_timeout'):
+                    await app.state.content_issuer.drain(.02)
+                assert app.state.content_issuer.pending_count==1
+                denied=await transport.post(PATH,json=body,headers=HEADERS|{
+                    'Origin':ORIGIN,'Cookie':DURABLE_COOKIE+'='+token})
+                assert denied.status_code==503 and denied.headers['cache-control']=='no-store'
+                with pytest.raises(RuntimeError,match='operations_pending'):
+                    app.state.content_issuer.start()
+            finally:
                 finish.set()
             for _ in range(200):
                 if not endpoint._WORKERS:break
                 await asyncio.sleep(.01)
             assert not endpoint._WORKERS
+            await app.state.content_issuer.drain(.02)
+            assert app.state.content_issuer.pending_count==0 and app.state.content_issuer.acquire() is None
+            app.state.content_issuer.start()
     try:asyncio.run(scenario())
     finally:finish.set()
     with sqlite3.connect(path) as db:assert db.execute('SELECT count(*) FROM content_handoffs').fetchone()==(1,)

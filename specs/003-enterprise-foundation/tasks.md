@@ -207,3 +207,6 @@ T027 continuation (008/T022/T025): truthful logout UI now retains identity on fa
 
 
 T027 continuation (008/T022/T025): session inspection now distinguishes unavailable from signed-out, preserving the original confirmation link through failed checks and explicit recovery. Actual browser flow and build pass; background/race matrix and enterprise rollout remain unfinished.
+
+
+T027 continuation (008/T022): issuer operations now participate in main application shutdown, retaining ownership after caller cancellation and reporting drain timeout truthfully. Related 63-test regression covers real ledger operation and actual main lifespan failure propagation. Enterprise operational and deployment acceptance remain open.

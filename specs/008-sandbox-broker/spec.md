@@ -193,3 +193,7 @@ Logout must preserve local identity and show an explicit uncertain/failure outco
 
 ### Unknown authentication state
 Initial network/server failure while checking the session must remain an unknown state, not an anonymous-session assertion. Protected and authentication routes show a bounded check or retryable error without losing the requested route. Public content remains readable; session-dependent actions wait for resolution. Later refresh failures preserve the prior identity and work surface while displaying uncertainty. Only authoritative 401 establishes an absent session. Obsolete checks must not overwrite newer sign-in/logout outcomes.
+
+
+### Issuer shutdown ownership
+Console content inspection and issuance must stop admission when main application shutdown starts. Admitted body intake and database work remain owned until actual completion, including a disconnected caller. Bounded drain timeout must propagate shutdown failure without reopening admission or discarding ownership. Restart cannot reset capacity while operations remain unfinished.
