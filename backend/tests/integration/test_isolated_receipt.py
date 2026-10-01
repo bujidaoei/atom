@@ -18,11 +18,19 @@ API_IMAGE = os.environ.get('ATOM_TEST_API_IMAGE')
 pytestmark = pytest.mark.skipif(not IMAGE or not API_IMAGE,reason='requires pinned API and sandbox images')
 
 
-@pytest.mark.parametrize('scenario',['happy','auth','policy','lost-result','worker','cancelled','cli','commit-before','commit-after',
-    'pages','pages-hold','missing','corrupt','cold-read','prune-happy','prune-reader','prune-cli','prune-commit-before','prune-commit-after','prune-hold','prune-corrupt','prune-verifier','prune-missing-receipt','prune-rollback'])
-def test_real_linux_owner_wire_worker_and_receipt(planned,recovery,tmp_path,monkeypatch,scenario):
+_V10_SCENARIOS = ['happy','auth','policy','lost-result','worker','cancelled','cli','commit-before','commit-after',
+    'pages','pages-hold','missing','corrupt','cold-read','prune-happy','prune-reader','prune-cli','prune-commit-before','prune-commit-after','prune-hold','prune-corrupt','prune-verifier','prune-missing-receipt','prune-rollback']
+_V13_SCENARIOS = ['happy','auth','lost-result','commit-before','commit-after','pages-hold']
+
+
+@pytest.mark.parametrize('scenario,schema_version',
+    [(scenario,10) for scenario in _V10_SCENARIOS] + [(scenario,13) for scenario in _V13_SCENARIOS])
+def test_real_linux_owner_wire_worker_and_receipt(planned,recovery,tmp_path,monkeypatch,scenario,schema_version):
     path,_ = planned
     migrate(path,tmp_path/'before-ten.db',target_version=10)
+    if schema_version == 13:
+        for version in (11, 12, 13):
+            migrate(path,tmp_path/f'before-{version}.db',target_version=version)
     if scenario in ('pages','pages-hold'):
         from app.access_repository import AccessRepository
         from app.audit_delivery import AuditDeliveryRepository
@@ -58,7 +66,8 @@ def test_real_linux_owner_wire_worker_and_receipt(planned,recovery,tmp_path,monk
             '--mount',f'type=bind,source={path},target=/seed.db,readonly',
             '--workdir','/src','--env','PYTHONPATH=/src','--entrypoint','/app/backend/.venv/bin/python',API_IMAGE,
             '-B','/src/tests/integration/_isolated_receipt_probe.py']
-        data = dict(port=port,token=config.admin_token,image=IMAGE,policy=app.state.lifecycle.driver.policy_digest,scenario=scenario)
+        data = dict(port=port,token=config.admin_token,image=IMAGE,policy=app.state.lifecycle.driver.policy_digest,
+                    scenario=scenario,schema_version=schema_version)
         if scenario=='cold-read':
             volume='atom-audit-cold-'+uuid.uuid4().hex
             status,_,err=run_bounded(['docker','volume','create','--label','atom.test=audit-cold',volume])
@@ -72,7 +81,7 @@ def test_real_linux_owner_wire_worker_and_receipt(planned,recovery,tmp_path,monk
                 input_data=json.dumps(dict(data,scenario='cold-write')).encode())
             assert status==0,err.decode()
             saved=json.loads(out)
-            assert saved['version']==10
+            assert saved['version']==schema_version
             data['backup_sha256']=saved['backup_sha256']
             # The --rm writer is gone; the reader receives only saved volume and application code.
             status,inventory,err=run_bounded(['docker','container','ls','--all','--filter',f'name=^/{writer}$','--format','{{.ID}}'])

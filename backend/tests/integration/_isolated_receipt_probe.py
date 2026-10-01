@@ -26,7 +26,7 @@ from app.audit_archive_store import AuditArchiveStore
 config = json.load(sys.stdin)
 if config['scenario']=='cold-read':
     assert not Path('/seed.db').exists()
-    assert verify_backup(Path('/saved/source.db'),expected_version=10)==config['backup_sha256']
+    assert verify_backup(Path('/saved/source.db'),expected_version=config['schema_version'])==config['backup_sha256']
     with sqlite3.connect('/saved/source.db') as saved, sqlite3.connect('/tmp/source.db') as restored:
         saved.backup(restored)
 else:
