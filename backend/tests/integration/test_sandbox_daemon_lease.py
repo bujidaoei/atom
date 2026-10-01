@@ -1,4 +1,5 @@
 import multiprocessing
+import json
 import os
 import subprocess
 import time
@@ -35,6 +36,13 @@ def test_same_daemon_clone_cannot_acquire_or_remove_source_lease():
     try:
         first.acquire()
         assert first.alive and _inventory(identity) == [first.name]
+        record = json.loads(subprocess.run(
+            ["docker", "container", "inspect", first.name], capture_output=True,
+            text=True, check=True, timeout=5).stdout)[0]
+        assert record["Config"]["Healthcheck"]["Test"] == ["NONE"]
+        assert record["HostConfig"]["NetworkMode"] == "none"
+        assert record["HostConfig"]["ReadonlyRootfs"] is True
+        assert record["Mounts"] == []
         with pytest.raises(DaemonLeaseError, match="^broker_identity_in_use$"):
             second.acquire()
         assert first.alive and _inventory(identity) == [first.name]

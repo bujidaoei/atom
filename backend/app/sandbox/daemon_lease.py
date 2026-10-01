@@ -71,7 +71,8 @@ class BrokerDaemonLease:
             raise DaemonLeaseError("daemon_lease_already_started")
         args = [self.executable, "run", "--rm", "-i", "--name", self.name,
                 "--label", "atom.broker-lease.owner=" + self._owner,
-                "--network", "none", "--read-only", "--cap-drop", "ALL",
+                "--network", "none", "--read-only", "--no-healthcheck", "--pull", "never",
+                "--cap-drop", "ALL",
                 "--pids-limit", "16", "--memory", "32m", "--cpus", "0.1",
                 "--security-opt", "no-new-privileges", self.image, "/bin/cat"]
         try:
