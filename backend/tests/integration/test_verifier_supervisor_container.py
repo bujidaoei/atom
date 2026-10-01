@@ -19,6 +19,8 @@ from app.verification_repository import VerificationRepository
 from app.verification_repository import VerificationError
 from app.verifier_authority import VerifierAuthority
 from app.verifier_supervisor import SupervisorError, VerifierSupervisor
+from app.verifier_coordinator import VerifierCoordinator
+from app.sandbox.daemon_lease import DaemonLeaseError
 from test_adoption_repository import Store, prepared, snapshot
 from test_adoption_verification_repository import adopted
 from test_revision_migrations import legacy
@@ -70,6 +72,85 @@ def test_actual_isolated_browser_registers_one_v13_result(assignment):
 def test_cold_start_reaper_finds_no_live_worker(assignment):
     _, supervisor, _, _, _ = assignment
     assert supervisor.reap_orphans() == 0
+
+
+def test_coordinator_lease_excludes_second_owner_and_recovers(assignment):
+    _, supervisor, _, _, _ = assignment
+    first = VerifierCoordinator(supervisor)
+    second = VerifierCoordinator(supervisor)
+    try:
+        assert first.start() == 0
+        with pytest.raises(DaemonLeaseError, match='^verifier_coordinator_identity_in_use$'):
+            second.start()
+        assert first.lease.alive
+    finally:
+        second.close()
+        first.close()
+    assert second.start() == 0
+    second.close()
+
+
+@pytest.mark.skipif(sys.platform != 'linux' or not os.environ.get('ATOM_VERIFIER_TEST_REAL_STORE'),
+                    reason='requires target Linux Docker daemon and process signals')
+@pytest.mark.parametrize('assignment', ['slow'], indirect=True)
+def test_second_coordinator_cannot_reap_live_browser_then_recovers_after_death(assignment):
+    path, supervisor, authority, dispatched, store = assignment
+    label = f'label=atom.verifier.request={dispatched.request.id}'
+
+    def run_coordinator():
+        with VerifierCoordinator(supervisor) as coordinator:
+            coordinator.verify_and_register(assignment=dispatched, store=store,
+                                            authority=authority, budget_seconds=20)
+
+    process = multiprocessing.get_context('fork').Process(target=run_coordinator)
+    process.start()
+    second = VerifierCoordinator(supervisor)
+    try:
+        deadline = time.monotonic() + 15
+        identity = ''
+        while time.monotonic() < deadline and process.is_alive():
+            inventory = subprocess.run(['docker', 'ps', '-q', '--filter', label],
+                                       capture_output=True, timeout=10, check=True)
+            identity = inventory.stdout.decode().strip()
+            if identity:
+                processes = subprocess.run(['docker', 'top', identity],
+                                           capture_output=True, timeout=10, check=False)
+                if processes.returncode == 0 and b'chrome-headless-shell' in processes.stdout:
+                    break
+            time.sleep(0.05)
+        else:
+            pytest.fail('coordinator browser was never observed running')
+        with pytest.raises(DaemonLeaseError, match='^verifier_coordinator_identity_in_use$'):
+            second.start()
+        assert subprocess.run(['docker', 'inspect', identity], capture_output=True,
+                              timeout=10).returncode == 0
+        os.kill(process.pid, signal.SIGKILL)
+        process.join(timeout=10)
+        assert process.exitcode == -signal.SIGKILL
+        deadline = time.monotonic() + 15
+        while time.monotonic() < deadline:
+            try:
+                reaped = second.start()
+                break
+            except DaemonLeaseError as exc:
+                if exc.code != 'verifier_coordinator_identity_in_use':
+                    raise
+                time.sleep(0.1)
+        else:
+            pytest.fail('successor could not acquire verifier identity')
+        assert reaped >= 1
+        assert subprocess.run(['docker', 'inspect', identity], capture_output=True,
+                              timeout=10).returncode != 0
+    finally:
+        if process.is_alive():
+            process.kill()
+            process.join(timeout=10)
+        second.close()
+    with sqlite3.connect(path) as db:
+        assert db.execute('SELECT count(*) FROM verification_attestations').fetchone() == (0,)
+        assert db.execute('SELECT count(*) FROM verification_results').fetchone() == (0,)
+    assert VerificationRepository(path).terminate(owner='user',
+        request_id=dispatched.request.id, outcome='cancelled').outcome == 'cancelled'
 
 
 def test_tampered_stored_artifact_never_starts_or_registers(assignment):

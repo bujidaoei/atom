@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import re
 import subprocess
 import time
@@ -20,22 +21,27 @@ class DaemonLeaseError(RuntimeError):
         super().__init__(code)
 
 
-class BrokerDaemonLease:
-    """An attached, auto-removed Docker container holds one broker identity.
+class _DaemonIdentityLease:
+    """An attached, auto-removed Docker container holds one daemon identity.
 
     The daemon arbitrates its fixed name. Its stdin belongs only to this process;
-    broker process death closes that pipe, ends /bin/cat and removes the lease.
+    owner process death closes that pipe, ends /bin/cat and removes the lease.
     It has no network, host mounts, secrets or Docker socket.
     """
 
-    def __init__(self, broker_id: str, image: str, *, executable: str = "docker"):
-        if not isinstance(broker_id, str) or not _IDENTITY.fullmatch(broker_id):
-            raise DaemonLeaseError("invalid_broker_identity")
+    def __init__(self, identity: str, image: str, *, namespace: str,
+                 executable: str = "docker"):
+        if namespace not in ("broker", "verifier-coordinator"):
+            raise DaemonLeaseError("invalid_daemon_lease_namespace")
+        if not isinstance(identity, str) or not _IDENTITY.fullmatch(identity):
+            raise DaemonLeaseError("invalid_daemon_identity")
         if not isinstance(image, str) or not _IMAGE.fullmatch(image):
             raise DaemonLeaseError("image_not_pinned")
         if not isinstance(executable, str) or not executable:
             raise DaemonLeaseError("invalid_docker_executable")
-        self.name = f"atom-broker-lease-{broker_id}"
+        self.name = f"atom-{namespace}-lease-{identity}"
+        self._namespace = namespace
+        self._owner_label = f"atom.{namespace}-lease.owner"
         self.image = image
         self.executable = executable
         self._owner = uuid.uuid4().hex
@@ -49,7 +55,7 @@ class BrokerDaemonLease:
         try:
             status, output, _ = run_bounded(
                 [self.executable, "container", "inspect", self.name, "--format",
-                 '{{json .Name}}|{{json .State.Running}}|{{json (index .Config.Labels "atom.broker-lease.owner")}}'],
+                 '{{json .Name}}|{{json .State.Running}}|{{json (index .Config.Labels "' + self._owner_label + '")}}'],
                 timeout=3, output_limit=1024)
         except DriverError:
             raise DaemonLeaseError("daemon_lease_inspection_failed") from None
@@ -70,11 +76,12 @@ class BrokerDaemonLease:
         if self._process is not None:
             raise DaemonLeaseError("daemon_lease_already_started")
         args = [self.executable, "run", "--rm", "-i", "--name", self.name,
-                "--label", "atom.broker-lease.owner=" + self._owner,
+                "--label", self._owner_label + "=" + self._owner,
                 "--network", "none", "--read-only", "--no-healthcheck", "--pull", "never",
                 "--cap-drop", "ALL",
                 "--pids-limit", "16", "--memory", "32m", "--cpus", "0.1",
-                "--security-opt", "no-new-privileges", self.image, "/bin/cat"]
+                "--security-opt", "no-new-privileges", "--entrypoint", "/bin/cat",
+                self.image]
         try:
             self._process = subprocess.Popen(args, stdin=subprocess.PIPE,
                                              stdout=subprocess.DEVNULL,
@@ -87,7 +94,7 @@ class BrokerDaemonLease:
                 observed = self._inspect()
                 if observed is not None:
                     if observed[2] != self._owner:
-                        raise DaemonLeaseError("broker_identity_in_use")
+                        raise DaemonLeaseError(self._namespace.replace("-", "_") + "_identity_in_use")
                     if observed[1] and self.alive:
                         return
                 if not self.alive:
@@ -118,3 +125,24 @@ class BrokerDaemonLease:
         observed = self._inspect()
         if observed is not None and observed[2] == self._owner:
             raise DaemonLeaseError("daemon_lease_release_unknown")
+
+
+class BrokerDaemonLease(_DaemonIdentityLease):
+    def __init__(self, broker_id: str, image: str, *, executable: str = "docker"):
+        if not isinstance(broker_id, str) or not _IDENTITY.fullmatch(broker_id):
+            raise DaemonLeaseError("invalid_broker_identity")
+        super().__init__(broker_id, image, namespace="broker", executable=executable)
+
+
+class VerifierCoordinatorLease(_DaemonIdentityLease):
+    """The same daemon arbitrates every process using one verifier identity."""
+
+    def __init__(self, verifier_id: str, image: str, *, executable: str = "docker"):
+        if (not isinstance(verifier_id, str) or not verifier_id
+                or len(verifier_id) > 128 or
+                re.fullmatch(r"[A-Za-z0-9_.-]+", verifier_id) is None):
+            raise DaemonLeaseError("invalid_verifier_identity")
+        identity = hashlib.sha256(b"atom-verifier-coordinator-v1\0" +
+                                  verifier_id.encode("ascii")).hexdigest()[:32]
+        super().__init__(identity, image, namespace="verifier-coordinator",
+                         executable=executable)
