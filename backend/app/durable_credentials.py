@@ -1,6 +1,6 @@
 """Strict signed console credentials bound to a persisted session.
 
-Not wired to legacy cookies: rollout requires explicit durable-session cutover.
+Selected only by explicit durable-session mode; legacy cookies are never accepted.
 """
 import re
 

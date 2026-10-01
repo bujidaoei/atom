@@ -190,3 +190,5 @@ T027 continuation (008/T016/T023): real content publication preflight now verifi
 T027 continuation (008/T023/T025): service-owned HTTP exchange now has strict metadata/body controls and actual Chromium cookie/private-artifact evidence. 56 tests and private/public browser scenarios pass. Bootstrap and console issuance are still fixture prerequisites; complete authentication, embedded access and enterprise deployment remain unfinished.
 
 T027 continuation (008/T023/T025): real HTTP bootstrap now supplies browser nonce and fixed console redirect; 76 tests and actual private/public Chromium paths pass. Console authorization/issuer is still a fixture, so complete authentication, embedded access and deployment remain unfinished.
+
+T027 continuation (008/T022): actual console auth routes now support explicit durable v4 session mode, real password login and revoke-before-clear logout. 88 targeted tests pass. Existing broker v1 compatibility, console handoff issuance, account-wide revoke/audit and production rollout remain unfinished; no enterprise task closure.

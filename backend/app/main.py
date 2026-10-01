@@ -8,6 +8,8 @@ from fastapi.responses import JSONResponse
 from starlette.routing import Route
 
 from .db import engine
+from .access_repository import AccessError
+from .console_auth import credentials
 from .config import get_settings
 from .execution_service import ExecutionGateway, execution_resources
 from .sandbox.client import BrokerClientError
@@ -21,6 +23,8 @@ from .services.runtime_client import runtime_client
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    if get_settings().session_mode == 'durable':
+        credentials()  # Fail closed on missing/offline migration before serving.
     _app.state.execution = None
     orchestrator.execution = None
     async with execution_resources(get_settings()) as resources:
@@ -43,6 +47,12 @@ async def lifespan(_app: FastAPI):
 app = FastAPI(title="Atoms Demo API", version="1.0.0", lifespan=lifespan)
 for action in ('complete', 'cancel'):
     app.router.routes.append(Route('/v1/executions/' + action, ExecutionGateway(), methods=['POST']))
+
+
+@app.exception_handler(AccessError)
+async def handle_access_error(_request: Request, error: AccessError) -> JSONResponse:
+    return JSONResponse(status_code=503, content={"detail": "认证服务暂时不可用"},
+                        headers={"Cache-Control": "no-store"})
 
 
 @app.exception_handler(AtomError)

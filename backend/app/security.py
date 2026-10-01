@@ -34,6 +34,11 @@ def verify_password(password: str, encoded: str) -> bool:
 
 def issue_session(user_id: str) -> str:
     settings = get_settings()
+    if settings.session_mode == 'durable':
+        from .console_auth import credentials
+        codec = credentials()
+        source = codec.repository.create_console_session(user_id=user_id,lifetime_seconds=settings.session_days*86400)
+        return codec.sign(user_id=user_id,session_id=source.id)
     now = datetime.now(timezone.utc)
     payload = {
         "sub": user_id,
@@ -44,6 +49,10 @@ def issue_session(user_id: str) -> str:
 
 
 def read_session(token: str) -> str | None:
+    if get_settings().session_mode == 'durable':
+        from .console_auth import credentials
+        source = credentials().authenticate(token)
+        return source.user_id if source else None
     try:
         payload = jwt.decode(token, get_settings().secret, algorithms=[_ALGORITHM])
     except jwt.PyJWTError:

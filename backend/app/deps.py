@@ -2,20 +2,22 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import Cookie, Depends, HTTPException, Path, status
+from fastapi import Request, Depends, HTTPException, Path, status
 from sqlalchemy.orm import Session
 
 from .db import get_db
 from .models import Project, User
 from .security import read_session
+from .console_auth import request_session_token
 
 SESSION_COOKIE = "atom_session"
 
 
 def current_user(
     session: Annotated[Session, Depends(get_db)],
-    atom_session: Annotated[str | None, Cookie(alias=SESSION_COOKIE)] = None,
+    request: Request,
 ) -> User:
+    atom_session = request_session_token(request)
     if not atom_session:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "请先登录")
     user_id = read_session(atom_session)
@@ -29,8 +31,9 @@ def current_user(
 
 def optional_user(
     session: Annotated[Session, Depends(get_db)],
-    atom_session: Annotated[str | None, Cookie(alias=SESSION_COOKIE)] = None,
+    request: Request,
 ) -> User | None:
+    atom_session = request_session_token(request)
     if not atom_session:
         return None
     user_id = read_session(atom_session)

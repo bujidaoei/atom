@@ -20,6 +20,8 @@ class Settings(BaseSettings):
     # --- security -------------------------------------------------------
     environment: Literal["development", "test", "production"] = "development"
     secret: str = Field(repr=False)
+    session_mode: Literal["legacy", "durable"] = "legacy"
+    console_origin: str | None = None
     cookie_secure: bool = False
     cookie_path: str = "/"
     session_days: int = Field(default=14, ge=1, le=90)
@@ -81,6 +83,11 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_transport(self) -> Settings:
+        if self.session_mode == 'durable':
+            from .content_bootstrap import ContentNavigation
+            ContentNavigation(self.console_origin)
+            if not self.cookie_secure or self.cookie_path != '/':
+                raise ValueError('durable sessions require secure root cookies')
         self.sandbox_mode = self.sandbox_mode or ('broker' if self.environment == 'production' else 'local')
         if self.environment == 'production' and self.sandbox_mode != 'broker':
             raise ValueError('production requires broker execution')
