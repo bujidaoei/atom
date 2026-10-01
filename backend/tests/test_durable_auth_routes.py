@@ -124,6 +124,7 @@ def test_logout_all_revokes_existing_devices_but_not_future_login(durable_client
     client,path=durable_client
     client.post('/api/auth/register',json=LOGIN)
     first=client.cookies.get(DURABLE_COOKIE)
+    assert client.get('/api/auth/me').json()['canRevokeSessions'] is True
     client.post('/api/auth/login',json=LOGIN)
     second=client.cookies.get(DURABLE_COOKIE)
     client.post('/api/auth/register',json=LOGIN|{'email':'independent@example.org'})

@@ -40,7 +40,7 @@ Atoms 用的是两步式：先填邮箱，后端回答这个邮箱是否已注�
 // req
 { "email": "a@b.com", "password": "..." }
 // res  -> 同时 Set-Cookie: atom_session
-{ "id": "...", "email": "a@b.com", "name": "a", "credits": 200 }
+{ "id": "...", "email": "a@b.com", "name": "a", "credits": 200, "canRevokeSessions": false }
 ```
 
 ### `POST /api/auth/register`
@@ -361,3 +361,6 @@ res: `{ "ok": true }`
 Plan, approve, revise, race and individual heat retry accept an optional `Idempotency-Key` header (1–128 characters). A matching project/key/action/body replays the original receipt even after completion or cancellation. Reusing a key for different input returns 409. The UI uses `initial-plan:<projectId>` for automatic first planning and fresh keys for intentional new operations. Network retries reuse the key. Receipts are durable; execution remains single-worker.
 
 Race creation accepts `budgetSeconds` (180–600, default 180). `POST /api/projects/{id}/race/{heatId}/retry` accepts `budgetSeconds` (same bounds, default 360) and returns `runId`. Only unsuccessful terminal heats in the current owned race may be retried. Files and previous runs are retained, other heats are unchanged, and adoption remains explicit. Heat details expose `runStartedAt` in UTC; elapsed time and usage accumulate across attempts. Partial files may have a preview URL without being eligible for adoption.
+
+
+账户会话能力：register/login/me 的 user 对象包含 canRevokeSessions，只有 durable 会话模式为 true。此字段用于显示操作入口，服务端仍独立鉴权。POST /api/auth/logout-all 要求正确 Origin 与 X-Atom-Intent: revoke-account-sessions；事务成功返回 {"ok":true} 并清除当前 Cookie。旧会话全部失效，之后重新登录仍允许；失败不得显示退出成功。

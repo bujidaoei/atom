@@ -11,7 +11,7 @@ type AuthContextValue = {
   ready: boolean;
   sessionError: boolean;
   signIn: (user: User) => void;
-  signOut: () => Promise<void>;
+  signOut: (allDevices?: boolean) => Promise<void>;
   refresh: () => Promise<void>;
   /** Locally adjust the credit counter after a run consumes one. */
   setCredits: (credits: number) => void;
@@ -79,11 +79,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     invalidateCheck(); setSessionError(false); setReady(true); setUser(next);
   }, [invalidateCheck]);
 
-  const signOut = useCallback(async () => {
+  const signOut = useCallback(async (allDevices = false) => {
     const controller = new AbortController();
     const timeout = window.setTimeout(() => controller.abort(), 10000);
     try {
-      const result = await api.logout(controller.signal);
+      const result = await (allDevices ? api.logoutAll(controller.signal) : api.logout(controller.signal));
       if (result?.ok !== true) throw new Error("退出结果无法确认。");
       invalidateCheck(); setSessionError(false); setReady(true);
       setUser(null);

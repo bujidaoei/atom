@@ -53,7 +53,7 @@ type RequestOptions = {
   silent401?: boolean;
   accept?: string;
   commandKey?: string;
-  intent?: "inspect-private-content" | "open-private-content";
+  intent?: "inspect-private-content" | "open-private-content" | "revoke-account-sessions";
   signal?: AbortSignal;
 };
 
@@ -122,6 +122,8 @@ export const api = {
       body: name ? { email, password, name } : { email, password },
     }),
   logout: (signal: AbortSignal) => request<{ ok: true }>("/api/auth/logout", { method: "POST", signal, silent401: true }),
+  logoutAll: (signal: AbortSignal) => request<{ ok: true }>("/api/auth/logout-all",
+    { method: "POST", signal, silent401: true, intent: "revoke-account-sessions" }),
   me: (silent401 = false, signal?: AbortSignal) => request<User>("/api/auth/me", { silent401, signal }),
 
   // ---- settings

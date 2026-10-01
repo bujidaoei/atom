@@ -5,6 +5,7 @@ export type User = {
   email: string;
   name: string;
   credits: number;
+  canRevokeSessions: boolean;
 };
 
 export type LookupResult = {

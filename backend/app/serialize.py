@@ -18,6 +18,7 @@ def user_json(user: User) -> dict[str, Any]:
         "email": user.email,
         "name": user.name,
         "credits": user.credits,
+        "canRevokeSessions": get_settings().session_mode == "durable",
     }
 
 

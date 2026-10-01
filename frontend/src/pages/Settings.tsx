@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { AccountSessions } from "../components/AccountSessions";
 import { Button } from "../components/ui/Button";
 import { Badge } from "../components/ui/Badge";
 import { Icon } from "../components/ui/Icon";
@@ -92,6 +93,7 @@ export function SettingsPage() {
         </p>
       </header>
 
+      <AccountSessions />
       {loading ? (
         <LoadingState label="读取设置" />
       ) : loadError ? (

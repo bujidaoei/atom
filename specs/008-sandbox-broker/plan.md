@@ -191,3 +191,7 @@ Owned JSONResponse transfers the existing admission token from route processing 
 
 ### Account-wide session revocation transaction and API
 Use existing v4 source rows and index without changing schema. AccessRepository.revoke_console_sessions rechecks source/user/lifetime under BEGIN IMMEDIATE, captures at most 129 unrevoked unexpired rows, rejects more than the supported 128 session maximum or future-created rows, and updates captured identities in one transaction. Expired history stays untouched. Durable-only POST /api/auth/logout-all requires canonical Origin and revoke-account-sessions intent, derives account solely from signed persisted source, and clears Cookie only after commit. Replays from revoked source return 401 and cannot affect new login. UI confirmation, audit event and broader account-security controls remain separate work.
+
+
+### Account settings integration
+Add canRevokeSessions to serialized User and frontend type, derived from configured durable mode. AccountSessions reuses current settings Panel/Button/ErrorState, with local confirmation/pending/failure state and immediate submission guard. AuthProvider signOut selects one-device or account endpoint, preserving the existing bounded request and success-only identity reset. Account-wide request supplies fixed intent and silent401 so uncertain revocation cannot appear successful. Backend continues independent source/Origin authorization.

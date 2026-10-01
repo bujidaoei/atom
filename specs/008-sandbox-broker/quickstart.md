@@ -175,3 +175,6 @@ Issuer delivery tests: the issuer suite now parametrizes success/409/malformed-b
 
 
 Account revocation tests: run test_access_repository.py, test_content_access.py, test_durable_auth_routes.py, test_content_issuer.py and test_api.py. Tests use actual SQLite and real signed/password-authenticated API sessions; no new browser/UI acceptance is implied. Scope tests prove independent account survives, all existing source cookies fail, later login survives replay, content reads and pending exchange fail. Concurrent login can serialize before (revoked) or after (valid) the revocation; existing sessions must always be revoked. A deliberately raised database error before commit proves all updates roll back.
+
+
+Account UI browser check: private-exchange harness retains single-session logout scenario, then logs in two independent Chromium contexts through actual login forms. First context obtains new private content access, opens settings, cancels confirmation (zero logout-all requests), then gets one injected 503. Both identities remain live. Explicit retry calls real logout-all; /me becomes 401 in both contexts and existing private Cookie yields 404. No session Cookie injection or fixture issuer used. Capability tests also verify legacy /me advertises false and logout-all returns 404.

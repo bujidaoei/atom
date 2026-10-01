@@ -151,3 +151,8 @@ def test_unknown_api_path_returns_json_404(client: TestClient) -> None:
     response = client.get("/api/definitely-not-a-route")
     assert response.status_code == 404
     assert "未知接口" in response.json()["detail"]
+
+
+def test_legacy_user_does_not_offer_account_revocation(signed_in):
+    assert signed_in.get('/api/auth/me').json()['canRevokeSessions'] is False
+    assert signed_in.post('/api/auth/logout-all').status_code == 404

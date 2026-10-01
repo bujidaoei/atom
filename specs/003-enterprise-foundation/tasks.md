@@ -216,3 +216,6 @@ T027 continuation (008/T022): issuer response delivery now participates in admis
 
 
 T027 continuation (008/T022): account-wide revocation now has actual transactional/API implementation with 109 related passing tests. Existing devices and derived content access are invalidated; fresh subsequent login survives old-source replay. UI/audit and production rollout remain unaccepted.
+
+
+T027 continuation (008/T022/T025): account settings action and two-browser real revocation acceptance now implemented locally. Build and 30 API tests pass; cancel/failure/retry and derived content denial verified. Audit and enterprise production acceptance remain unfinished.

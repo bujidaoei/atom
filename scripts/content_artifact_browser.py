@@ -249,8 +249,43 @@ sys.path.insert(0,str(root));runpy.run_path(str(root/'fixture.py'),run_name='__m
                             # Existing content cookie remains, but its durable source has been revoked.
                             assert any(c['name']=='__Host-atom_content' for c in context.cookies())
                             assert page.goto(base+'/',timeout=5000).status==404
+                            # New actual sessions for account-wide UI revocation, independent of single-device logout.
+                            def login_device(device_page):
+                                device_page.goto(console+'/login',wait_until='domcontentloaded',timeout=10000)
+                                device_page.get_by_label('邮箱',exact=True).fill('owner@example.org')
+                                device_page.get_by_role('button',name='继续',exact=True).click()
+                                device_page.get_by_label('密码',exact=True).fill('Fixture-login-pass-713!')
+                                device_page.get_by_role('button',name='登录',exact=True).click()
+                                device_page.wait_for_url(console+'/app',timeout=10000)
+                            login_device(page)
+                            other_device=browser.new_context(ignore_https_errors=True)
+                            other_page=other_device.new_page()
+                            login_device(other_page)
+                            page.goto(base+'/_atom/bootstrap',wait_until='domcontentloaded',timeout=5000)
+                            page.get_by_role('heading',name='Fixture',exact=True).wait_for(timeout=5000)
+                            page.get_by_role('button',name='确认并打开',exact=True).click()
+                            page.wait_for_url(base+'/',wait_until='networkidle',timeout=15000)
+                            assert page.locator('h1').inner_text()=='Actual immutable artifact'
+                            page.goto(console+'/app/settings',wait_until='domcontentloaded',timeout=10000)
+                            page.get_by_role('button',name='退出所有设备',exact=True).click()
+                            page.get_by_role('button',name='取消',exact=True).click()
+                            assert not any(path=='/api/auth/logout-all' for path,_,_ in observed)
+                            page.get_by_role('button',name='退出所有设备',exact=True).click()
+                            context.route('**/api/auth/logout-all',lambda route:route.fulfill(status=503,
+                                content_type='application/json',body='{"detail":"Injected unavailable store"}'),times=1)
+                            page.get_by_role('button',name='确认退出所有设备',exact=True).click()
+                            page.get_by_role('alert').filter(has_text='退出未能确认完成').wait_for(timeout=5000)
+                            assert page.url==console+'/app/settings'
+                            assert other_page.evaluate("fetch('/api/auth/me').then(r=>r.status)")==200
+                            page.get_by_role('button',name='确认退出所有设备',exact=True).click()
+                            page.wait_for_url(console+'/',timeout=10000)
+                            assert page.evaluate("fetch('/api/auth/me').then(r=>r.status)")==401
+                            assert other_page.evaluate("fetch('/api/auth/me').then(r=>r.status)")==401
+                            assert page.goto(base+'/',timeout=5000).status==404
+                            other_device.close()
+
                         print(json.dumps({'browser':browser.version,'artifactRevision':metadata['revision'],
-                            'scripts':len(loaded),'styles':len(styles),'privateExchange':options.private_exchange,'httpBootstrap':options.private_exchange,'realLoginAndConsent':options.private_exchange,'logoutFailureAndRevocation':options.private_exchange,'sessionCheckRecovery':options.private_exchange,'responses':observed,
+                            'scripts':len(loaded),'styles':len(styles),'privateExchange':options.private_exchange,'httpBootstrap':options.private_exchange,'realLoginAndConsent':options.private_exchange,'logoutFailureAndRevocation':options.private_exchange,'sessionCheckRecovery':options.private_exchange,'accountRevocationUI':options.private_exchange,'responses':observed,
                             'scope':'actual Linux artifact HTTP to Chromium through local test TLS ingress'}))
                         browser.close()
                 finally:

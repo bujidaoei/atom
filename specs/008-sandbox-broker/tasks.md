@@ -193,3 +193,6 @@ T022 continuation: ownership now extends through bounded ASGI response delivery 
 
 
 T022 continuation: atomic account-wide live-session revocation and durable-only authenticated /api/auth/logout-all implemented. 109 related tests pass, including real passwords/cookies, independent account isolation, concurrent login serialization, late-failure rollback, clock rollback, source replay denial and derived content/pending-handoff rejection. Account settings action/browser acceptance, audit/security-event integration and enterprise operations remain open; no whole-task closure.
+
+
+T022/T025 continuation: settings account-wide logout action now uses actual capability metadata and explicit confirmation/cancel/error/retry. Frontend build, 30 auth/API tests and full private Chromium composition pass. Two independently logged-in browser contexts lose /me access after actual UI action; newly authorized private artifact is denied. Injected transport failure and cancel leave sessions live. Broader multi-browser/audit/security-event/operations gates remain open; no whole-task closure.

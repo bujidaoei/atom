@@ -205,3 +205,7 @@ After admission, content-scope and handoff responses, including recognized reque
 
 ### Account-wide self-service revocation
 A live durable console session may revoke all currently live console sessions of its own account. The writer transaction rechecks the authenticated source, bounds affected sessions and commits all revocations atomically. Derived content reads and unredeemed handoffs must fail through their source-session checks. Later password-authenticated login is allowed; an old revoked source must not revoke that later session. This operation is not an account lock or password reset.
+
+
+### Account settings revocation action
+Offer account-wide logout only when server user metadata advertises durable-session support. Explain current/other-device and private-access effects, require explicit confirmation, and allow cancellation before mutation. Pending action cannot be submitted twice. Failure stays visible without clearing identity; only acknowledged success navigates away. Capability display is not authorization.
