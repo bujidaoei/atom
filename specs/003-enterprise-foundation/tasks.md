@@ -260,3 +260,9 @@ T027/008-T029 increment: real audit ledger and HTTPS sender are composed by an o
 
 
 T027/008-T029 increment: operator export settings and real main startup/shutdown integration implemented with max4 destinations/process and all-before-send preflight.113 related regressions pass; main fixture uses injected sender outcome, with realTLS transport evidence kept separate. Production composition, operational visibility, retention and deployment remain open.
+
+
+T027/008-T029/T030 increment: true main-auth-export-TLS composition now tested without sender outcome substitution; independent receiver persists identical full event payloads through lost ack and rejected-collector/restart recovery, while account revoke remains available.28 focused checks pass. Production/global operations/retention remain open.
+
+
+Audit main integration regression:18 actual Linux main/own Node/broker execution cases pass across schema1/4/5 (exports disabled in this matrix). Separately28 enabled-export/main/TLS/service checks pass. Pi1905 files match locked SHA. Production combined deployment/observability/retention gates remain open.

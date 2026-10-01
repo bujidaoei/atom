@@ -242,3 +242,9 @@ T029 increment: standalone per-destination AuditExporter now composes real enrol
 
 
 T029 increment: unified operator settings and main lifespan now enable bounded audit export (default off, max4/process), all-destination preflight and truthful concurrent shutdown.113 service/exporter/config/auth/read/issuer-lifecycle regressions pass. Real main with schema5 performs configured ledger workflow using injected sender outcome; schema4 refuses before sending and stays4. Strict JSON/credential/redaction checks and all-close-attempt failure tests pass. Earlier standalone realTLS evidence remains distinct. Production main+TLS/runtime composition, operator operational visibility, persistent terminal error policy, retention and rollout remain open; T029 not closed.
+
+
+T029/T030 increment: real main+auth+exporter+TLS+independent-receiver composition now verifies lost ack recovery/dedup and collector rejection without blocking account-wide revocation.28 focused main/service/exporter checks pass; full received payload dictionaries equal actual source audit rows. Restart case explicitly advances lease clock61s. External egress, production receiver, runtime+enabled-export combined deployment, operational visibility/retention and rollout remain open. No whole task closure.
+
+
+Audit main integration regression:18 actual Linux main/own Node/broker execution cases pass across schema1/4/5 (exports disabled in this matrix). Separately28 enabled-export/main/TLS/service checks pass. Pi1905 files match locked SHA. Production combined deployment/observability/retention gates remain open.
