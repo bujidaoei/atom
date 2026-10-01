@@ -245,3 +245,6 @@ Historical obligation inspection (exact schema7): from backend run `python -m ap
 
 
 Governance-schema browser compatibility: build current frontend with `npm run build`, then from repo root set ATOM_TEST_API_IMAGE to the pinned API digest and run `python scripts/content_artifact_browser.py --private-exchange --audit-schema 7`. Run --audit-schema 5 for previous audited-schema regression. The optional integer selects5/6/7; bare --audit-schema retains5 default. Harness asserts actual persisted schema version and exact event counts, uses actual Linux content storage/auth APIs and current frontend, and tests session uncertainty/retry, copied handoff denial, single-device and account-wide logout. Fixture release verification report is explicitly synthetic; no trusted verifier/main runtime orchestration/live model claim follows. Local test TLS context accepts ephemeral certificate. Screenshots should be copied to versioned ignored paths before another harness run overwrites them.
+
+
+Archive boundary probes: backend/.venv/Scripts/python.exe -m pytest backend/tests/test_audit_archive_boundaries.py backend/tests/test_revision_migrations.py -q --tb=short --junitxml=.logs/audit-archive-boundaries.xml. The raw-copy path is an intentionally unsafe isolated test demonstrating missing WAL commits; do not use it for backup. No scoped archive or retention CLI exists yet.

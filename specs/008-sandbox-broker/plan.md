@@ -273,3 +273,6 @@ AuditGovernanceRepository.obligations uses one exact7 mode=ro/BEGIN transaction 
 
 
 T031/T032 are accepted at component scope: versioned governance schema and exact consumer compatibility, durable generation-fenced administration and registry-wide obligation inspection. Actual Chromium5/7 private content/auth/revocation checks supplement prior migration/crash/TLS/runtime evidence. This does not close retention, denial observation, trusted verifier, live model or enterprise production acceptance.
+
+
+T033 research increment: official SQLite backup/WAL and S3 version-lock/checksum documentation plus31 actual backup/probe tests establish separate disaster-recovery and scoped archive boundaries. A raw main-file copy can pass exact schema/integrity while missing committed WAL events; checked backup/restore preserves full payloads. Refined policy/hold authority, registry-set fencing, bounded extraction, manifest and independent restore protocol in contracts/audit-governance.md. No archive/pruning capability implemented or accepted.
