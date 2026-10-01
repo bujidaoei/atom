@@ -185,3 +185,7 @@ Consent preparation requirement: authenticated console must fetch authoritative 
 
 ### Explicit private-content confirmation
 The authenticated /content-access page must inspect authoritative stored scope without issuing credentials, display project/release/revision/current-or-historical status and expiry, and issue only on explicit activation. Reject ambiguous query and response destinations outside the inspected pinned HTTPS origin; credentials stay in the exchange fragment and HttpOnly cookies. Pending requests are bounded and obsolete route requests cannot update or navigate a newer page. Uncertain issuance is not automatically retried. Confirmation completion is not full enterprise or embedded-access acceptance.
+
+
+### Truthful logout outcome
+Logout must preserve local identity and show an explicit uncertain/failure outcome unless the server returns the expected success acknowledgement. A network failure, timeout, non-success status (including 401) or malformed success must not be presented as completed revocation. Bound waiting and prevent duplicate clicks; allow explicit retry. A successful durable logout must make an already-installed private-content credential unusable on the next read.

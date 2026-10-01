@@ -201,3 +201,6 @@ T027 continuation (008/T022/T023): authoritative consent scope API supplies stor
 
 
 T027 continuation (008/T022/T023/T025): actual frontend confirmation and real browser login/issuer composition now pass local TLS/artifact checks, alongside 72 backend regressions and three frontend boundary tests. Synthetic verification metadata remains explicitly seeded; independent verification, broader browser/logout UX, enterprise operations and production rollout remain unaccepted.
+
+
+T027 continuation (008/T022/T025): truthful logout UI now retains identity on failure and supports explicit retry. Composed browser test proves transport failure leaves actual session active and subsequent real logout invalidates existing content cookie. 40 backend regressions/build pass. Boot/refresh uncertainty, wider revocation/operations and production acceptance remain open.

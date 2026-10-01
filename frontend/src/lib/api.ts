@@ -121,7 +121,7 @@ export const api = {
       method: "POST",
       body: name ? { email, password, name } : { email, password },
     }),
-  logout: () => request<{ ok: true }>("/api/auth/logout", { method: "POST" }),
+  logout: (signal: AbortSignal) => request<{ ok: true }>("/api/auth/logout", { method: "POST", signal, silent401: true }),
   me: (silent401 = false) => request<User>("/api/auth/me", { silent401 }),
 
   // ---- settings

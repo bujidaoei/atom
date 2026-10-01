@@ -58,13 +58,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signIn = useCallback((next: User) => setUser(next), []);
 
   const signOut = useCallback(async () => {
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 10000);
     try {
-      await api.logout();
-    } catch {
-      /* the cookie is gone either way from the user's point of view */
-    }
-    setUser(null);
-    navigate("/", { replace: true });
+      const result = await api.logout(controller.signal);
+      if (result?.ok !== true) throw new Error("退出结果无法确认。");
+      setUser(null);
+      navigate("/", { replace: true });
+    } finally { window.clearTimeout(timeout); }
   }, [navigate]);
 
   const refresh = useCallback(async () => {

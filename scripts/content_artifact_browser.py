@@ -202,8 +202,29 @@ sys.path.insert(0,str(root));runpy.run_path(str(root/'fixture.py'),run_name='__m
                         assert denied.status==404
                         assert all(status==200 and revision==metadata['revision'] for path,status,revision in observed
                                    if not path.startswith('/api/') and path not in ('/favicon.ico','/_atom/access','/_atom/exchange','/_atom/bootstrap') and not (options.private_exchange and status==404))
+                        if options.private_exchange:
+                            console=f'https://console.atom-console.test:{server.server_port}'
+                            page.set_viewport_size({'width':1440,'height':900})
+                            page.goto(console+'/app',wait_until='networkidle',timeout=10000)
+                            # Transport-level fault: no server logout occurs, so credentials must remain live.
+                            context.route('**/api/auth/logout',lambda route:route.fulfill(status=503,
+                                content_type='application/json',body='{"detail":"Injected unavailable store"}'),times=1)
+                            page.get_by_role('button',name='退出登录',exact=True).click()
+                            page.get_by_role('alert').filter(has_text='退出未能确认完成').wait_for(timeout=5000)
+                            assert page.url==console+'/app'
+                            assert page.evaluate("fetch('/api/auth/me').then(r=>r.status)")==200
+                            private_probe=context.new_page()
+                            assert private_probe.goto(base+'/',timeout=5000).status==200
+                            private_probe.close()
+                            page.get_by_role('button',name='重试退出登录',exact=True).click()
+                            page.wait_for_url(console+'/',timeout=10000)
+                            assert not any(c['name']=='__Host-atom_console' for c in context.cookies())
+                            assert page.evaluate("fetch('/api/auth/me').then(r=>r.status)")==401
+                            # Existing content cookie remains, but its durable source has been revoked.
+                            assert any(c['name']=='__Host-atom_content' for c in context.cookies())
+                            assert page.goto(base+'/',timeout=5000).status==404
                         print(json.dumps({'browser':browser.version,'artifactRevision':metadata['revision'],
-                            'scripts':len(loaded),'styles':len(styles),'privateExchange':options.private_exchange,'httpBootstrap':options.private_exchange,'realLoginAndConsent':options.private_exchange,'responses':observed,
+                            'scripts':len(loaded),'styles':len(styles),'privateExchange':options.private_exchange,'httpBootstrap':options.private_exchange,'realLoginAndConsent':options.private_exchange,'logoutFailureAndRevocation':options.private_exchange,'responses':observed,
                             'scope':'actual Linux artifact HTTP to Chromium through local test TLS ingress'}))
                         browser.close()
                 finally:

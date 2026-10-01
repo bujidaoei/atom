@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { NavLink, useNavigate } from "react-router-dom";
+import { NavLink } from "react-router-dom";
 import { useAuth } from "../lib/auth";
 import { useProjects } from "../lib/projects";
 import { STATUS_LABEL, isRunningStatus } from "../lib/format";
@@ -210,7 +210,19 @@ const FOOTER_LINKS: { to: string; label: string; icon: IconName }[] = [
 
 function SidebarFooter({ collapsed }: { collapsed: boolean }) {
   const { user, signOut } = useAuth();
-  const navigate = useNavigate();
+  const [signingOut, setSigningOut] = useState(false);
+  const [logoutFailed, setLogoutFailed] = useState(false);
+  const logoutPending = useRef(false);
+
+  async function logout() {
+    if (logoutPending.current) return;
+    logoutPending.current = true;
+    setSigningOut(true);
+    setLogoutFailed(false);
+    try { await signOut(); }
+    catch { setLogoutFailed(true); }
+    finally { logoutPending.current = false; setSigningOut(false); }
+  }
 
   return (
     <div className="flex flex-col gap-xxs border-t border-neutral-12 p-s">
@@ -239,14 +251,20 @@ function SidebarFooter({ collapsed }: { collapsed: boolean }) {
       >
         <ThemeToggle />
         <IconButton
-          label="退出登录"
-          onClick={() => {
-            void signOut().then(() => navigate("/"));
-          }}
+          label={signingOut ? "正在退出登录" : "退出登录"}
+          disabled={signingOut}
+          aria-busy={signingOut}
+          onClick={() => void logout()}
         >
           <Icon name="logout" size={14} />
         </IconButton>
       </div>
+
+      {logoutFailed ? <div role="alert" className="fixed bottom-16 left-m z-50 max-w-[calc(100vw-2rem)] w-80 rounded-m border border-neutral-12 bg-base-default p-l text-sm text-neutral-95 shadow-lg">
+        <p>退出未能确认完成，会话可能仍然有效。请重试退出登录。</p>
+        <button type="button" className="mt-s mr-l underline" disabled={signingOut} onClick={() => void logout()}>重试退出登录</button>
+        <button type="button" className="mt-s underline" onClick={() => setLogoutFailed(false)}>关闭提示</button>
+      </div> : null}
 
       {collapsed ? null : (
         <div className="mt-xxs rounded-m bg-neutral-8 px-xs py-xs">
