@@ -1,6 +1,7 @@
 """Linux storage-to-adoption-to-release path with a real private artifact store."""
 import json
 import sqlite3
+import sys
 
 import pytest
 
@@ -14,6 +15,7 @@ from test_adoption_repository import adopt, prepared
 from test_revision_migrations import legacy
 
 
+@pytest.mark.skipif(sys.platform != 'linux', reason='ArtifactStore requires Linux filesystem semantics')
 def test_real_stored_adopted_artifact_publishes_only_after_verified_bytes(prepared, tmp_path):
     path, main, _, payload, artifact = prepared
     root = tmp_path / 'private-artifacts'
