@@ -174,13 +174,15 @@ def test_forged_digest_fails_final_promotion(adopted, tmp_path, forgery):
     digest = 'f' * 64 if forgery == 'digest' else hashlib.sha256(report.canonical).hexdigest()
     with sqlite3.connect(path) as db:
         db.execute('PRAGMA foreign_keys=ON')
+        issued_at, = db.execute('SELECT issued_at FROM verification_dispatches WHERE request_id=?',
+                                (request.id,)).fetchone()
         db.execute('''INSERT INTO verification_results VALUES (?,?,?,?,?,?,?,?,?,?)''',
             (request.id,request.workspace_id,request.revision_id,request.contract.digest,
              request.policy_digest,'passed',report.total,1,
-             report.canonical.decode(),request.created_at))
+             report.canonical.decode(),issued_at))
         db.execute('''INSERT INTO verification_attestations VALUES (?,?,?,?,?,?,?)''',
             (request.id,assignment.verifier_id,assignment.environment_digest,
-             receipt.artifact.key,receipt.artifact.revision,digest,request.created_at))
+             receipt.artifact.key,receipt.artifact.revision,digest,issued_at))
     payload, artifact = snapshot(b'<html>heat</html>')
     with pytest.raises(VerificationError, match='release_untrusted_evidence'):
         ReleaseRepository(path).publish_verified(Store(artifact.key, payload), **_intent(request))
