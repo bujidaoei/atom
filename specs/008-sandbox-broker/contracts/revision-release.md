@@ -22,6 +22,8 @@ A verification execution captures owner/project/workspace/revision, artifact dig
 
 A release records exact revision, trusted successful verification, contract/policy identity, audience, creator, previous release and serving descriptor. The public address points to a release ID. Insert release, advance pointer and record audit event in one transaction. Failed commits preserve the previous release. Live releases and retained rollback targets pin their artifacts against deletion.
 
+The internal v12 release repository now keeps the binding and audit event in the same SQLite commit as metadata, pointer and receipt, including for an adopted main revision. Its stored-byte preflight rejects corrupted archives before promotion and rechecks the artifact descriptor inside the commit. The current test report is fixture-supplied ledger data; this component cannot be exposed as enterprise publication until an isolated trusted verifier establishes result authority and the pinned content serving route passes its own gates.
+
 ## Operations
 
 1. Start verification after ownership, artifact and contract validation; capture identities and enqueue bounded execution. Later head changes do not retarget it.
