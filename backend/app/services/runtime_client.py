@@ -158,7 +158,9 @@ class RuntimeClient:
                             if parsed.is_terminal:
                                 return
                     raise RuntimeUnavailable(
-                        "运行时连接提前结束，未收到完成结果；已有文件已保留"
+                        "运行时连接提前结束，未收到完成结果；"
+                        + ('本轮未完成的文件未保存，已提交版本不受影响'
+                           if self._requires_lease else '已有文件已保留')
                     )
         except httpx.HTTPError as error:
             raise RuntimeUnavailable(

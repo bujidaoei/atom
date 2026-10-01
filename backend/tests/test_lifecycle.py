@@ -7,7 +7,7 @@ from sqlalchemy import select
 from app.config import get_settings
 from app.db import session_scope
 from app.events import EventBus
-from app.models import Project, Run, User
+from app.models import Project, Race, RaceHeat, Run, User
 from app.services.orchestrator import Orchestrator
 from app.services.runtime_client import GatewayConfig, RuntimeLine
 
@@ -90,6 +90,29 @@ def test_broker_deadline_does_not_claim_uncommitted_files_survived(signed_in, mo
     assert '已有文件已保留' not in result.error
     assert len(runtime.cancelled) == 1
     assert interruptions == [(user_id, 'execution', 'timed_out')]
+
+
+def test_broker_project_cancel_records_truthful_heat_error(signed_in, monkeypatch):
+    monkeypatch.setattr(get_settings(), 'sandbox_mode', 'broker')
+    project_id, _ = seed()
+    with session_scope() as session:
+        race = Race(project_id=project_id, status='running')
+        race.heats.append(RaceHeat(model='test-model', status='queued', position=0))
+        session.add(race)
+
+    async def scenario():
+        orchestration = Orchestrator(ScriptedRuntime('silent'))
+        orchestration._spawn(project_id, asyncio.sleep(60))
+        await asyncio.sleep(0)
+        await orchestration.cancel(project_id)
+
+    asyncio.run(scenario())
+    with session_scope() as session:
+        project = session.get(Project, project_id)
+        heat = session.scalar(select(RaceHeat).join(Race).where(Race.project_id == project_id))
+        assert project.status == heat.status == 'cancelled'
+        assert '未完成的文件未保存' in heat.error
+        assert '已有文件已保留' not in heat.error
 
 
 @pytest.mark.parametrize('reported,expected', [('cancelled','cancelled'),('timed_out','timed_out'),

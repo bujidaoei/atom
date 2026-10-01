@@ -1,11 +1,13 @@
 import asyncio
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import httpx
 import pytest
 
 from app.errors import RuntimeUnavailable
+from app.execution import ExecutionLease
 from app.services.runtime_client import GatewayConfig, RuntimeClient
 
 
@@ -42,6 +44,35 @@ def test_premature_eof_is_not_success(monkeypatch, body):
                 agent_dir=Path("."),
                 gateway=GatewayConfig("https://invalid", "test", "model"),
             ):
+                pass
+
+    asyncio.run(scenario())
+
+
+def test_broker_premature_eof_does_not_claim_uncommitted_files(monkeypatch):
+    from app.config import get_settings
+    monkeypatch.setattr(get_settings(), 'sandbox_mode', 'broker')
+    original = httpx.AsyncClient
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, text=''))
+    monkeypatch.setattr(httpx, 'AsyncClient',
+                        lambda **kwargs: original(transport=transport, **kwargs))
+    lease = ExecutionLease('run', 'workspace', 'a' * 32, 4102444800,
+                           'execution', 'grant-id', 'grant-token', 'completion-token')
+
+    class Repository:
+        def execution(self, owner, attempt_id):
+            assert owner == 'owner' and attempt_id == lease.execution_id
+            return SimpleNamespace(run_id=lease.run_id, workspace_id=lease.workspace_id,
+                broker_attempt_id=lease.attempt_id, grant_id=lease.grant_id,
+                deadline=lease.deadline)
+
+    async def scenario():
+        with pytest.raises(RuntimeUnavailable, match='未完成的文件未保存'):
+            async for _ in RuntimeClient().run(run_id='run', role='alex', prompt='test',
+                    workspace_path=Path('.'), session_path=Path('session'), agent_dir=Path('.'),
+                    gateway=GatewayConfig('https://invalid', 'test', 'model'),
+                    execution_lease=lease, execution_repository=Repository(),
+                    execution_owner='owner'):
                 pass
 
     asyncio.run(scenario())

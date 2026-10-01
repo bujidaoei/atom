@@ -49,6 +49,11 @@ ROLE_TITLES = {
 }
 
 
+def _unfinished_files_note() -> str:
+    return ('本轮未完成的文件未保存，已提交版本不受影响'
+            if get_settings().sandbox_mode == 'broker' else '已有文件已保留')
+
+
 @dataclass
 class TurnOutcome:
     text: str
@@ -147,7 +152,7 @@ class Orchestrator:
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
             # Covers cancellation before _guard has entered its try block.
-            await self._terminate(project_id, "cancelled", "任务已取消，已有文件已保留")
+            await self._terminate(project_id, "cancelled", f"任务已取消，{_unfinished_files_note()}")
         finally:
             self._cancellations.pop(project_id, None)
             self._stopping.discard(project_id)
@@ -184,7 +189,7 @@ class Orchestrator:
             await self._terminate(
                 project_id,
                 "interrupted",
-                "服务重启中断了任务，已有文件已保留，请继续生成",
+                f"服务重启中断了任务，{_unfinished_files_note()}",
             )
 
     async def _terminate(self, project_id: str, status: str, note: str) -> None:
@@ -259,7 +264,7 @@ class Orchestrator:
         try:
             await coro
         except asyncio.CancelledError:
-            await self._terminate(project_id, "cancelled", "任务已取消，已有文件已保留")
+            await self._terminate(project_id, "cancelled", f"任务已取消，{_unfinished_files_note()}")
             raise
         except OutOfCredits as error:
             await self._fail(project_id, str(error))
@@ -605,8 +610,7 @@ class Orchestrator:
         completed_revision = None
         execution_args = {}
         broker_mode = get_settings().sandbox_mode == 'broker'
-        unfinished_files = ('本轮未完成的文件未保存，已提交版本不受影响'
-                            if broker_mode else '已有文件已保留')
+        unfinished_files = _unfinished_files_note()
         try:
             async with asyncio.timeout(budget):
                 if broker_mode:

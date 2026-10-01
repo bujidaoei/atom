@@ -445,11 +445,13 @@ T038 deployment evidence (2026-10-01): fd01205 image sha256:edeffc8b16f31eb77725
 
 ### T039 — Incomplete run truth and partial checkpoint (FR-011)
 
-- [ ] T039.1 Align broker-mode timeout/cancel/no-result error text and retry labels with committed file state; verify backend/frontend behavior and deploy.
+- [ ] T039.1 Align every broker-mode timeout, explicit Stop, project job cancellation, restart interruption and premature-EOF error with committed file state; verify persisted run/heat errors plus browser retry labels after real cancellation, then deploy.
 - [ ] T039.2 Specify and implement an explicitly authorized partial checkpoint that can survive deadline/cancel without treating unverified sandbox writes as committed output.
 - [ ] T039.3 Prove revision/receipt integrity, deadline/cancel/process-death recovery, and browser-visible resume behavior using real runtime/broker/storage tests before claiming partial files are saved.
 
 T039 discovery and local verification (2026-10-01): the fd01205 real race recorded successful write tool events for Sol and Terra, yet both timed out with `fileCount=0`. `Orchestrator._turn` reported “已有文件已保留” on its local timeout, then cancelled the remote run; broker interruption revoked the uncommitted sandbox. The message was false in broker mode. The correction now states that unfinished files were not saved, preserves local-mode wording, and shows “重新生成” when the committed catalog is empty. Backend lifecycle tests passed 22/22, including the broker deadline assertion, and frontend TypeScript/Vite build passed. The correction was deployed in e1fba0a and retained in 37669d4. Browser observation remains necessary before T039.1 can be checked; durable partial checkpoint and resume remain open.
+
+T039 live browser finding (2026-10-01): project `25cd462f8e2b42aabe2b85be93d926dd` of a disposable acceptance account reached `awaiting_approval` on the live provider. Race `550b138c7564409892f97c116536e542` started Terra and Luna; the real Stop endpoint cancelled both. Each heat had `fileCount=0`, and Chromium showed two “重新生成此赛道” buttons with no page errors. Both persisted heat errors nonetheless said “任务已取消，已有文件已保留”; browser text contained that false statement. The run base revision IDs do not represent generated files. Local corrections now cover `_stop_job`, `_guard`, restart reconciliation and runtime premature EOF in broker mode. The focused lifecycle/protocol/startup suite passed 32/32; production deployment and the repeated browser acceptance are still required.
 
 ### T040 — Reliable API/broker startup (FR-012)
 
