@@ -46,6 +46,7 @@ html = '<h1>Actual immutable artifact</h1>' + ''.join(
     for index in range(8))
 (workspace/'index.html').write_text(html)
 conflict=os.environ.get('ATOM_FIXTURE_RESERVED_PATH')=='1'
+private_exchange=os.environ.get('ATOM_FIXTURE_PRIVATE_EXCHANGE')=='1'
 if conflict:
     (workspace/'_atom').mkdir()
     (workspace/'_atom'/'access').write_text('fixture-owned conflicting route')
@@ -64,7 +65,7 @@ verification.record_report(owner='owner',request_id=request.id,
 releases = ReleaseRepository(settings.db_path)
 intent=dict(owner='owner',project_id='project',release_id='fixture-release',verification_id=request.id,
     expected_revision=imported.revision_id,expected_generation=0,policy_digest='c'*64,
-    runner_version='fixture-report',audience='public',slug='fixture')
+    runner_version='fixture-report',audience='owner' if private_exchange else 'public',slug='fixture')
 if conflict:
     try:
         releases.publish_verified(store,**intent)
@@ -81,16 +82,28 @@ else:
 content = ContentRepository(settings.db_path)
 binding = content.bind(owner='owner',project_id='project',release_id='fixture-release')
 hosts = ContentHosts('atom-content.test')
-service = ContentService(content,store,hosts)
+access=None
+credentials={}
+if private_exchange:
+    from app.content_access import ContentAccessRepository
+    migrate(settings.db_path,Path('/tmp/data/before-v4.db'),target_version=4)
+    access=ContentAccessRepository(settings.db_path)
+    source=access.create_console_session(user_id='owner',lifetime_seconds=120)
+    nonce=access.bootstrap(binding_id=binding.id)
+    handoff=access.issue_handoff(viewer_id='owner',source_session_id=source.id,binding_id=binding.id,challenge=nonce.challenge)
+    # Synthetic fixture bootstrap/issuer only; never enabled in the real service.
+    credentials={'nonce':nonce.secret,'handoff':handoff.secret}
+service = ContentService(content,store,hosts,access=access)
 
 
 async def fixture(scope,receive,send):
     # Local harness metadata is intentionally separate from content authority.
     if (scope['type']=='http' and scope.get('path')=='/_fixture'
             and (b'host',b'fixture.invalid') in scope.get('headers',[])):
-        await JSONResponse({'host':hosts.hostname(binding.id),'revision':imported.revision_id,'conflict':conflict,'preflightChecked':True})(scope,receive,send)
+        await JSONResponse({'host':hosts.hostname(binding.id),'revision':imported.revision_id,'conflict':conflict,'preflightChecked':True,**credentials})(scope,receive,send)
     else:
-        await service(scope,receive,send)
+        # This disposable wrapper models the local TLS ingress termination.
+        await service(dict(scope,scheme='https') if scope['type']=='http' else scope,receive,send)
 
 
 uvicorn.run(fixture,host='0.0.0.0',port=8000,proxy_headers=False,access_log=False,log_level='error')

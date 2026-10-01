@@ -33,7 +33,9 @@ def docker(*args):
 def main():
     parser=argparse.ArgumentParser()
     parser.add_argument('--reserved-path',action='store_true',help='Verify rejection of an actual conflicting artifact')
+    parser.add_argument('--private-exchange',action='store_true',help='Exercise real HTTP exchange using fixture bootstrap/issuer')
     options=parser.parse_args()
+    if options.private_exchange and options.reserved_path:parser.error('select one fixture mode')
     image = os.environ.get('ATOM_TEST_API_IMAGE','')
     if re.fullmatch(r'sha256:[0-9a-f]{64}',image) is None:
         raise ValueError('explicit_API_image_digest_required')
@@ -47,6 +49,7 @@ from pathlib import Path
 root=Path('/tmp/code');root.mkdir()
 payload=json.loads(sys.stdin.buffer.read())
 os.environ['ATOM_FIXTURE_RESERVED_PATH']='1' if payload['conflict'] else '0'
+os.environ['ATOM_FIXTURE_PRIVATE_EXCHANGE']='1' if payload['private'] else '0'
 with zipfile.ZipFile(io.BytesIO(base64.b64decode(payload['code']))) as source:source.extractall(root)
 sys.path.insert(0,str(root));runpy.run_path(str(root/'fixture.py'),run_name='__main__')
 """
@@ -61,7 +64,7 @@ sys.path.insert(0,str(root));runpy.run_path(str(root/'fixture.py'),run_name='__m
                 '/app/backend/.venv/bin/python','-I','-c',bootstrap],stdin=subprocess.PIPE,stdout=log,stderr=log)
             try:
                 process.stdin.write(json.dumps({'code':base64.b64encode(archive.getvalue()).decode(),
-                    'conflict':options.reserved_path}).encode())
+                    'conflict':options.reserved_path,'private':options.private_exchange}).encode())
                 process.stdin.close()
                 deadline = time.monotonic()+20
                 metadata = None
@@ -91,8 +94,16 @@ sys.path.insert(0,str(root));runpy.run_path(str(root/'fixture.py'),run_name='__m
                             self.send_error(404);return
                         upstream=HTTPConnection('127.0.0.1',port,timeout=10)
                         try:
-                            upstream.request('GET',self.path,headers={'Host':host,
-                                'Sec-Fetch-Mode':self.headers.get('Sec-Fetch-Mode','')})
+                            headers={'Host':host,'Sec-Fetch-Mode':self.headers.get('Sec-Fetch-Mode','')}
+                            for field in ('Cookie','Content-Type','Content-Length','Origin'):
+                                if field in self.headers:headers[field]=self.headers[field]
+                            # Exact local test origin maps to the configured 443 origin.
+                            if headers.get('Origin')==f'https://{host}:{server.server_port}':
+                                headers['Origin']='https://'+host
+                            size=int(self.headers.get('Content-Length','0'))
+                            if not 0<=size<=64:self.send_error(413);return
+                            payload=self.rfile.read(size) if self.command=='POST' else None
+                            upstream.request(self.command,self.path,body=payload,headers=headers)
                             response=upstream.getresponse();body=response.read()
                             observed.append((self.path,response.status,response.getheader('X-Atom-Revision')))
                             self.send_response(response.status)
@@ -101,6 +112,7 @@ sys.path.insert(0,str(root));runpy.run_path(str(root/'fixture.py'),run_name='__m
                                     self.send_header(key,value)
                             self.end_headers();self.wfile.write(body)
                         finally:upstream.close()
+                    do_POST=do_GET
 
                 cert,key=certificate(root,(metadata['host'],))
                 server=ThreadingHTTPServer(('127.0.0.1',0),Ingress)
@@ -113,7 +125,30 @@ sys.path.insert(0,str(root));runpy.run_path(str(root/'fixture.py'),run_name='__m
                             '--host-resolver-rules=MAP '+metadata['host']+' 127.0.0.1'])
                         context=browser.new_context(ignore_https_errors=True)
                         page=context.new_page()
-                        response=page.goto(f'https://{metadata["host"]}:{server.server_port}/',wait_until='networkidle',timeout=15000)
+                        base=f'https://{metadata["host"]}:{server.server_port}'
+                        if options.private_exchange:
+                            assert page.goto(base+'/',timeout=5000).status==404
+                            copied=browser.new_context(ignore_https_errors=True)
+                            copied_page=copied.new_page()
+                            copied_page.goto(base+'/_atom/exchange#'+metadata['handoff'],timeout=5000)
+                            copied_page.wait_for_function("document.getElementById('status').textContent.includes('could not')")
+                            assert '#' not in copied_page.url
+                            assert not any(c['name']=='__Host-atom_content' for c in copied.cookies())
+                            copied.close()
+                            await_cookie={'name':'__Host-atom_bootstrap','value':metadata['nonce'],
+                                'domain':metadata['host'],'path':'/','secure':True,'httpOnly':True,'sameSite':'Lax'}
+                            context.add_cookies([await_cookie])
+                            page.goto(base+'/_atom/exchange#'+metadata['handoff'],timeout=5000)
+                            page.wait_for_url(base+'/',wait_until='networkidle',timeout=15000)
+                            jar={c['name']:c for c in context.cookies()}
+                            assert '__Host-atom_bootstrap' not in jar
+                            assert jar['__Host-atom_content']['httpOnly'] and jar['__Host-atom_content']['secure']
+                            assert jar['__Host-atom_content']['sameSite']=='Lax'
+                            assert page.evaluate('document.cookie')==''
+                            assert all(metadata['handoff'] not in path for path,_,_ in observed)
+                            response=None
+                        else:
+                            response=page.goto(base+'/',wait_until='networkidle',timeout=15000)
                         if options.reserved_path:
                             assert metadata['conflict'] and metadata['preflightChecked'] and response.status==503
                             assert page.locator('h1').count()==0
@@ -129,9 +164,9 @@ sys.path.insert(0,str(root));runpy.run_path(str(root/'fixture.py'),run_name='__m
                         denied=page.goto(f'https://{metadata["host"]}:{server.server_port}/_atom/access',timeout=5000)
                         assert denied.status==404
                         assert all(status==200 and revision==metadata['revision'] for path,status,revision in observed
-                                   if path not in ('/favicon.ico','/_atom/access'))
+                                   if path not in ('/favicon.ico','/_atom/access','/_atom/exchange') and not (options.private_exchange and status==404))
                         print(json.dumps({'browser':browser.version,'artifactRevision':metadata['revision'],
-                            'scripts':len(loaded),'styles':len(styles),'responses':observed,
+                            'scripts':len(loaded),'styles':len(styles),'privateExchange':options.private_exchange,'responses':observed,
                             'scope':'actual Linux artifact HTTP to Chromium through local test TLS ingress'}))
                         browser.close()
                 finally:

@@ -10,6 +10,8 @@ from starlette.responses import Response
 from .artifacts import ArtifactError
 from .access_repository import AccessError
 from .content_cookies import content_session_cookie
+from .content_exchange import (EXCHANGE_PATH, EXCHANGE_HEADERS, ExchangeRequestError,
+                               validate_exchange, receive_handoff, exchange_response)
 from .content_policy import ContentPolicyError, is_control_path
 from .content_hosts import ContentHostError
 from .release_view import materialized_content, materialized_private_content
@@ -29,12 +31,13 @@ class ContentLimits:
     active_responses: int = 8
     send_seconds: float = 10
     drain_seconds: float = 15
+    receive_seconds: float = 5
 
     def __post_init__(self):
         if (type(self.active_responses) is not int or not 1 <= self.active_responses <= 32
                 or any(isinstance(value, bool) or not isinstance(value, (int, float))
                        or not 0.01 <= value <= 60
-                       for value in (self.send_seconds, self.drain_seconds))):
+                       for value in (self.send_seconds, self.drain_seconds, self.receive_seconds))):
             raise ValueError('invalid_content_limits')
 
 
@@ -71,11 +74,13 @@ class ContentService:
             return Response(target.read_bytes(),media_type=media or 'application/octet-stream',
                 headers={**HEADERS,'X-Atom-Release':view.publication.release_id,'X-Atom-Revision':view.publication.revision_id})
 
-    def _response(self, scope):
+    def _response(self, scope, handoff=None):
         method = scope.get('method')
         try:
             binding = self.hosts.route(scope.get('headers',[]))
-            if method not in ('GET','HEAD'):
+            if self.access is not None and scope.get('path')==EXCHANGE_PATH:
+                response=exchange_response(scope,self.hosts,self.access,handoff)
+            elif method not in ('GET','HEAD'):
                 response = Response(status_code=405,headers={**HEADERS,'Allow':'GET, HEAD'})
             elif binding is None:
                 path = scope.get('path','/')
@@ -90,6 +95,8 @@ class ContentService:
                 navigation = any(k.lower()==b'sec-fetch-mode' and v==b'navigate' for k,v in scope['headers'])
                 response = self._read(binding,scope.get('path','/'),navigation,
                     content_session_cookie(scope.get('headers',[])))
+        except ExchangeRequestError as error:
+            response=Response(status_code=error.status,headers={**EXCHANGE_HEADERS,**({'Allow':'GET, HEAD, POST'} if error.status==405 else {})})
         except ContentHostError:
             response = Response(status_code=404,headers=HEADERS)
         except AccessError as error:
@@ -159,7 +166,18 @@ class ContentService:
         try:
             # Keep ownership independently of the caller: cancelling an asyncio
             # waiter cannot stop synchronous artifact IO in its worker thread.
-            read = asyncio.create_task(run_in_threadpool(self._response, scope))
+            handoff=None
+            if self.access is not None and scope.get('path')==EXCHANGE_PATH and scope.get('method')=='POST':
+                try:
+                    validate_exchange(scope,self.hosts)
+                    async with asyncio.timeout(self.limits.receive_seconds):
+                        handoff=await receive_handoff(receive)
+                except (ExchangeRequestError,ContentHostError,AccessError,TimeoutError) as error:
+                    status=(error.status if isinstance(error,ExchangeRequestError) else
+                            408 if isinstance(error,TimeoutError) else 404)
+                    await self._send(Response(status_code=status,headers=EXCHANGE_HEADERS),scope,receive,send)
+                    return
+            read = asyncio.create_task(run_in_threadpool(self._response, scope, handoff))
             self._reads.add(read)
             read.add_done_callback(self._reads.discard)
             try:

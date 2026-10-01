@@ -451,8 +451,15 @@ async def content_test():
                 bootstrap=access.bootstrap(binding_id=private_binding.id)
                 handoff=access.issue_handoff(viewer_id='owner',source_session_id=source.id,
                     binding_id=private_binding.id,challenge=bootstrap.challenge)
-                credential=access.exchange(binding_id=private_binding.id,handoff=handoff.secret,browser_nonce=bootstrap.secret)
-                cookie={'cookie':CONTENT_COOKIE+'='+credential.secret}
+                from http.cookies import SimpleCookie
+                from app.content_cookies import BOOTSTRAP_COOKIE
+                exchange=await authorized.post('/_atom/exchange',content=handoff.secret.encode(),headers={
+                    'origin':hosts.url(private_binding.id).rstrip('/'),'content-type':'application/octet-stream',
+                    'cookie':BOOTSTRAP_COOKIE+'='+bootstrap.secret})
+                assert exchange.status_code==204 and exchange.content==b''
+                parsed=SimpleCookie()
+                for value in exchange.headers.get_list('set-cookie'):parsed.load(value)
+                cookie={'cookie':CONTENT_COOKIE+'='+parsed[CONTENT_COOKIE].value}
                 result=await authorized.get('/',headers=cookie)
                 assert result.status_code==200 and result.text==(changed/'index.html').read_text()
                 assert result.headers['x-atom-revision']=='second-revision'

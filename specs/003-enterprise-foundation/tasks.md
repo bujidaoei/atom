@@ -186,3 +186,5 @@ Feature008 private-serving progress: dedicated content sessions now authorize re
 T027 continuation (008/T023): root authentication namespace now rejects conflicting verified content manifests and avoids SPA fallback. 14 targeted tests and real Chromium conflicting/normal artifact runs pass. Publication preflight and private exchange/browser acceptance remain unfinished; no enterprise task closure.
 
 T027 continuation (008/T016/T023): real content publication preflight now verifies stored artifacts before promotion and rejects stale state after IO. 34 tests and two actual Chromium runs pass, including corrupt/missing artifacts, publication race and offline replay preservation. Main API selection, trusted verifier and private exchange/enterprise deployment remain open.
+
+T027 continuation (008/T023/T025): service-owned HTTP exchange now has strict metadata/body controls and actual Chromium cookie/private-artifact evidence. 56 tests and private/public browser scenarios pass. Bootstrap and console issuance are still fixture prerequisites; complete authentication, embedded access and enterprise deployment remain unfinished.

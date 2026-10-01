@@ -1,6 +1,6 @@
 # Private content access and revocation
 
-Status: offline v4 data structures implemented/tested; access protocol and live authentication remain unimplemented/unaccepted. Source audit on
+Status: v4 repositories, private reads and HTTP exchange implemented/tested; full bootstrap/console authentication and deployment remain unaccepted. Source audit on
 897054d, 2026-10-01. Extends content-origin.md; prerequisites for T015–T019.
 
 ## Evidence and current gap
@@ -20,7 +20,7 @@ Primary sources retrieved 2026-10-01:
   describes cookie partitioning by top-level site. A cookie established in one
   context cannot simply be assumed available under another top-level site.
 
-Current security.py issues a subject/iat/exp JWT without a durable session ID.
+At the original source audit, security.py issues a subject/iat/exp JWT without a durable session ID.
 routers/auth.py logout only deletes the cookie. ContentService deliberately
 ignores console credentials and denies private content. No content access tables
 or browser handoff endpoints exist. Existing browser tests establish neither
@@ -166,3 +166,13 @@ Private materialization and dedicated Cookie parsing now exist when an access re
 The service-owned namespace is root `/_atom`, matched case-insensitively. Its root file or any descendant conflicts with the content profile and rejects the entire manifest before extraction. Nested project directories named `_atom` remain valid. Reserved requests bypass generated content and SPA fallback; they currently return 404 until explicit service endpoints are implemented. The future trusted publication coordinator must run the same verified-manifest check before promotion; today's metadata publication transaction does not implement that gate. Serving 503 is containment, not successful publication acceptance.
 
 Namespace publication preflight is now implemented in publish_verified and exercised by the real artifact browser fixture. The fixture explicitly uses metadata-only publication after a rejected conflicting preflight to verify the separate serving guard; this bypass is test setup, not application behavior. Console issuer/exchange endpoints and main publication route cutover remain unimplemented.
+
+## HTTP exchange increment (2026-10-01)
+
+When ContentService is explicitly configured with a v4 access repository, exact `/_atom/exchange` GET/HEAD serves a service-owned page; POST redeems a handoff. HTTPS scheme, configured pinned Host, empty query and unencoded canonical endpoint are mandatory. POST requires exactly one canonical HTTPS Origin, Content-Type application/octet-stream and Content-Length 64; Content-Encoding/Transfer-Encoding are rejected. The body must be exactly 64 lowercase hex bytes, no JSON or return target. Intake uses existing admission ownership, at most 128 ASGI request events and a validated receive deadline (default five seconds). Invalid metadata/body does not call the exchange repository.
+
+The page's only inline script is SHA-256 authorized by a separate CSP. It removes the fragment before POST, loads no generated/third-party code, and only navigates to root after empty 204. On failure it displays a fixed retry message without reflecting input. Successful exchange sets __Host-atom_content with Secure/HttpOnly/Path=/, no Domain, SameSite=Lax and repository absolute expiry; it clears __Host-atom_bootstrap. No session secret is returned in body or URL. Committed exchange with lost response stays consumed. ContentService retains worker ownership if its caller disconnects during repository work.
+
+MDN primary sources rechecked 2026-10-01: [Set-Cookie](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Set-Cookie), [Origin](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Origin), [script-src](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Content-Security-Policy/script-src). They document host-only/HttpOnly/Secure cookie attributes, Origin syntax and CSP hash authorization. This endpoint protocol is our design, not a standard supplied by those sources.
+
+Bootstrap HTTP, real authenticated console issuer/login/logout, global rate/retention, embedded transport and production ingress remain absent. The private browser fixture supplies nonce and handoff through its local harness and installs the initial nonce cookie; it proves actual exchange/Set-Cookie/artifact loading, not complete source authentication. Test TLS ingress normalizes only its exact ephemeral Origin and models HTTPS scheme in a dedicated fixture wrapper; production trusted proxy configuration is not inferred.
