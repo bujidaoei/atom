@@ -248,3 +248,7 @@ Governance-schema browser compatibility: build current frontend with `npm run bu
 
 
 Archive boundary probes: backend/.venv/Scripts/python.exe -m pytest backend/tests/test_audit_archive_boundaries.py backend/tests/test_revision_migrations.py -q --tb=short --junitxml=.logs/audit-archive-boundaries.xml. The raw-copy path is an intentionally unsafe isolated test demonstrating missing WAL commits; do not use it for backup. No scoped archive or retention CLI exists yet.
+
+
+Schema8 is an offline development foundation, not a serving target. --target-version8 is now accepted by the explicit migration tool, with a verified exclusive backup and exact journal/schema validation. Use only isolated copies with stopped writers. Ordinary business/governance/export consumers still require their previously accepted schemas and reject8. No retention policy is silently created. No operator retention CLI, planner, archive or prune action exists yet.
+Run backend/.venv/Scripts/python.exe -m pytest backend/tests/test_audit_retention_migration.py backend/tests/test_audit_governance_migration.py backend/tests/test_audit_governance.py backend/tests/test_revision_migrations.py -q --tb=short --junitxml=.logs/audit-retention-schema.xml.

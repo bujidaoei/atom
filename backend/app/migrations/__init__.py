@@ -47,7 +47,7 @@ def _open(path, *, readonly=False, timeout=3):
 
 def _schema(db):
     version = db.execute("PRAGMA user_version").fetchone()[0]
-    if version not in (0, 1, 2, 3, 4, 5, 6, 7):
+    if version not in (0, 1, 2, 3, 4, 5, 6, 7, 8):
         raise MigrationError("unsupported_schema")
     expected = SCHEMA
     hashes = [(1, MIGRATION_HASH)]
@@ -75,6 +75,10 @@ def _schema(db):
         from . import audit_commands_v7
         expected = {**expected, **audit_commands_v7.SCHEMA}
         hashes.append((7, audit_commands_v7.MIGRATION_HASH))
+    if version >= 8:
+        from . import audit_retention_v8
+        expected = {**expected, **audit_retention_v8.SCHEMA}
+        hashes.append((8, audit_retention_v8.MIGRATION_HASH))
     rows = db.execute("SELECT type,name,sql FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' AND sql IS NOT NULL ORDER BY type,name").fetchall()
     extension = {name: sql for kind, name, sql in rows if name in expected}
     baseline = [(kind, name, sql) for kind, name, sql in rows if name not in expected]
@@ -116,7 +120,7 @@ def _integrity(db):
 
 
 def verify_backup(path: Path, *, expected_version: int = 0) -> str:
-    if type(expected_version) is not int or expected_version not in (0, 1, 2, 3, 4, 5, 6, 7):
+    if type(expected_version) is not int or expected_version not in (0, 1, 2, 3, 4, 5, 6, 7, 8):
         raise MigrationError("invalid_backup_version")
     db = None
     try:
@@ -194,7 +198,7 @@ def backup_database(path: Path, backup: Path, *, lock_timeout: float = 3) -> Bac
 
 
 def migrate(path: Path, backup: Path, *, lock_timeout: float = 3, target_version: int = 1) -> MigrationResult:
-    if type(target_version) is not int or target_version not in (1, 2, 3, 4, 5, 6, 7):
+    if type(target_version) is not int or target_version not in (1, 2, 3, 4, 5, 6, 7, 8):
         raise MigrationError("invalid_target_version")
     if isinstance(lock_timeout, bool) or not isinstance(lock_timeout, (int, float)) or not 0 < lock_timeout <= 10:
         raise MigrationError("invalid_migration_timeout")
@@ -241,6 +245,10 @@ def migrate(path: Path, backup: Path, *, lock_timeout: float = 3, target_version
             from . import audit_commands_v7
             audit_commands_v7.apply(db)
             db.execute("INSERT INTO atom_schema_migrations VALUES (7,?,?,?)", (audit_commands_v7.MIGRATION_HASH, digest, int(time.time())))
+        if version < 8 <= target_version:
+            from . import audit_retention_v8
+            audit_retention_v8.apply(db)
+            db.execute("INSERT INTO atom_schema_migrations VALUES (8,?,?,?)", (audit_retention_v8.MIGRATION_HASH, digest, int(time.time())))
         db.execute(f"PRAGMA user_version={target_version}")
         _schema(db)
         _integrity(db)

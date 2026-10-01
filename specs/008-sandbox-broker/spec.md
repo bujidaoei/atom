@@ -282,3 +282,6 @@ T031/T032 are accepted at component scope: versioned governance schema and exact
 
 
 T033 research increment: official SQLite backup/WAL and S3 version-lock/checksum documentation plus31 actual backup/probe tests establish separate disaster-recovery and scoped archive boundaries. A raw main-file copy can pass exact schema/integrity while missing committed WAL events; checked backup/restore preserves full payloads. Refined policy/hold authority, registry-set fencing, bounded extraction, manifest and independent restore protocol in contracts/audit-governance.md. No archive/pruning capability implemented or accepted.
+
+
+T033 offline foundation increment: explicit schema8 adds typed retention policies, independent legal/operational holds and immutable administrative receipts; v1-v7 migration definitions remain unchanged. Migration creates no default policy or hold and authorizes no deletion.91 migration/constraint/recovery tests pass. Operator repository/CLI, bounded planning, archive/restore and runtime8 compatibility remain unimplemented; T033/T034 stay unchecked. Schema8 is isolated/offline only and must not be selected for serving databases.

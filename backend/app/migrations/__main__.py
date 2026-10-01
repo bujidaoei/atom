@@ -9,7 +9,7 @@ from . import MigrationError, migrate
 parser = argparse.ArgumentParser(description="Back up and migrate an explicitly selected supported Atom API database.")
 parser.add_argument("database", type=Path)
 parser.add_argument("--backup", type=Path, required=True)
-parser.add_argument("--target-version", type=int, choices=(1, 2, 3, 4, 5, 6, 7), default=1)
+parser.add_argument("--target-version", type=int, choices=(1, 2, 3, 4, 5, 6, 7, 8), default=1)
 arguments = parser.parse_args()
 try:
     print(json.dumps(asdict(migrate(arguments.database, arguments.backup, target_version=arguments.target_version))))
