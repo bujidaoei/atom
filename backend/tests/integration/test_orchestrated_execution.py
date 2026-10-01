@@ -21,8 +21,15 @@ pytestmark = pytest.mark.skipif(not IMAGE or not os.environ.get('ATOM_TEST_DOCKE
                                reason='requires explicit local API and sandbox image digests')
 
 
-@pytest.mark.parametrize('schema_version',[1,4,5,6,7,9,10],ids=lambda value: f'schema-v{value}')
-@pytest.mark.parametrize('valid,interrupt', [(True,None),(False,None),(None,None),(False,'cancel'),(False,'deadline'),(False,'deadline_checkpoint')])
+_LEGACY_CASES = [(True,None),(False,None),(None,None),(False,'cancel'),(False,'deadline'),
+                 (False,'deadline_checkpoint')]
+_CASES = [pytest.param(version,valid,interrupt,
+    id=f'schema-v{version}-{valid}-{interrupt or "normal"}')
+    for version in (1,4,5,6,7,9,10) for valid,interrupt in _LEGACY_CASES]
+_CASES.append(pytest.param(13,True,None,id='schema-v13-success'))
+
+
+@pytest.mark.parametrize('schema_version,valid,interrupt',_CASES)
 def test_actual_orchestrator_leases_and_validates_registered_output(tmp_path, valid, interrupt, schema_version):
     assert re.fullmatch(r'sha256:[0-9a-f]{64}', IMAGE)
     root=Path(__file__).resolve().parents[3]
@@ -74,7 +81,7 @@ os.environ.update(ATOM_ENVIRONMENT='production',ATOM_SANDBOX_MODE='broker',ATOM_
     ATOM_BROKER_ORIGIN='http://127.0.0.1:1',ATOM_BROKER_ADMIN_TOKEN=data['admin'],ATOM_BROKER_GRANT_KEY=data['key'],
     ATOM_COMPLETION_GRANT_KEY='c'*32,ATOM_LLM_API_KEY='synthetic-model-fixture-key',
     ATOM_LLM_BASE_URL='https://synthetic.invalid/v1',ATOM_RUNTIME_URL='http://127.0.0.1:1')
-if data['schema_version'] in (4,5,6,7,9,10):
+if data['schema_version'] in (4,5,6,7,9,10,13):
     os.environ.update(ATOM_SESSION_MODE='durable',ATOM_CONSOLE_ORIGIN='https://console.example.org',ATOM_COOKIE_SECURE='true')
 from app.main import app
 if data['interrupt']=='deadline_checkpoint':
@@ -95,8 +102,14 @@ Base.metadata.create_all(engine)
 with session_scope() as s:
     s.add(User(id='owner',email='owner@example.invalid',name='Owner',password_hash='fixture'));s.flush()
     s.add(Project(id='p',user_id='owner',title='P',prompt='fixture'))
-settings=get_settings();migrate(settings.db_path,Path('/tmp/data/backup.db'),target_version=data['schema_version']);settings.db_path.chmod(0o600)
-if data['schema_version'] in (4,5,6,7,9,10):
+settings=get_settings()
+if data['schema_version']==13:
+    for version in (11,12,13):
+        migrate(settings.db_path,Path(f'/tmp/data/before-v{version}.db'),target_version=version)
+else:
+    migrate(settings.db_path,Path('/tmp/data/backup.db'),target_version=data['schema_version'])
+settings.db_path.chmod(0o600)
+if data['schema_version'] in (4,5,6,7,9,10,13):
     from app.security import issue_session
     from app.console_auth import credentials
     console_token=issue_session('owner')
@@ -175,12 +188,12 @@ async def main():
                 assert db.execute('SELECT count(*) FROM revision_receipts').fetchone()[0]==int(registered)
                 assert db.execute('SELECT count(*) FROM revision_records').fetchone()[0]==1+int(registered)
         if data['valid']: assert [entry['path'] for entry in listing['files']]==['index.html','notes.txt']
-        if data['schema_version'] in (4,5,6,7,9,10):
+        if data['schema_version'] in (4,5,6,7,9,10,13):
             codec=credentials();source=codec.authenticate(console_token)
             assert source and source.user_id=='owner'
             codec.repository.revoke_console_session(user_id='owner',session_id=source.id)
             assert codec.authenticate(console_token) is None
-            if data['schema_version'] in (5,6,7,9,10):
+            if data['schema_version'] in (5,6,7,9,10,13):
                 with sqlite3.connect(settings.db_path) as db:
                     assert db.execute('SELECT event_kind FROM security_audit_events ORDER BY sequence').fetchall()==[('console.session.created',),('console.session.revoked',)]
         print(json.dumps({'status':observed_status,'revision':head.revision_id}))
