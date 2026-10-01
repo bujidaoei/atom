@@ -108,7 +108,9 @@ A deadline observed after durable artifact registration but before the runtime r
 
 Cancellation request lifetime MUST NOT own cancellation cleanup. Disconnecting either the initiating caller or a duplicate waiter must not send another cancellation into the run cleanup. Shutdown must await owned cleanup even after the run job has left its job map.
 
-FR-006/FR-008 refinement: enterprise acceptance must bind exact artifact, contract and trusted verifier identity. Publication/adoption require fenced immutable revisions and atomic release pointers. Timestamp/client-reported checks cannot authorize release. contracts/revision-release.md defines the unimplemented requirements.
+FR-006/FR-008 refinement: enterprise acceptance must bind exact artifact, contract and trusted verifier identity. Publication/adoption require fenced immutable revisions and atomic release pointers. Timestamp/client-reported checks cannot authorize release. contracts/revision-release.md defines the remaining integration and acceptance requirements.
+
+FR-006/FR-008 implementation boundary (2026-10-02): offline v12 adoption provenance and a two-phase fenced repository operation are accepted by SQLite, crash/concurrency and real Linux ArtifactStore tests. They do not authorize production adoption: the serving database remains v10, the legacy broker adopt route remains disabled, and trusted verifier/release/API/UI integration and live acceptance are still required.
 
 FR-006 next-version migration prerequisite: verified backups must retain the exact supported source schema (baseline or v1), include committed WAL, exclude concurrent writers during capture, and refuse overwrite/drift. Backup verification must explicitly select the expected version rather than accepting any version.
 

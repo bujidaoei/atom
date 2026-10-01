@@ -1,6 +1,6 @@
 # Revision-bound acceptance and release
 
-Status: design only, not implemented or accepted. Source baseline e7c4bd3, reviewed 2026-10-01. Scope: committed static artifacts in broker mode. Executable deployment, database recovery and external effects require separate contracts.
+Status: design with accepted offline v12 adoption-provenance migration and transaction repository components. HTTP/UI integration, trusted verification, pinned serving, production schema cutover and whole release acceptance remain open. Source baseline e7c4bd3, reviewed 2026-10-01 and updated 2026-10-02. Scope: committed static artifacts in broker mode. Executable deployment, database recovery and external effects require separate contracts.
 
 ## Verified source gaps
 
@@ -28,7 +28,7 @@ A release records exact revision, trusted successful verification, contract/poli
 2. Complete verification after checking verifier authority, identity and complete unique coverage. Exact duplicate is idempotent; conflicting replay fails. Stale evidence remains historical.
 3. Adopt a heat only with exact source revision, expected main head and no active/unknown main attempt. Verify artifact, then atomically create a main revision referencing it, advance the fenced head and record winner/provenance. No directory copy; no partial winner update on conflict.
 
-The current revision table's `producing_attempt_id` constraint cannot represent an adoption without mislabelling it as model execution. The offline adoption migration must add an explicit immutable provenance identity and a third mutually exclusive revision origin: root, execution, or adoption. It must retain legacy roots/execution receipts byte-for-byte, reject cross-project or non-current heat sources, and leave serving at the existing schema until a real adoption repository/API is integrated. SQLite table reconstruction must follow the documented create-copy-drop-rename sequence with foreign-key verification, never an unchecked rename of the old table.
+The serving v10 revision table's `producing_attempt_id` constraint cannot represent an adoption without mislabelling it as model execution. The tested offline v12 migration adds immutable adoption provenance and a third mutually exclusive revision origin: root, execution, or adoption. It retains legacy roots/execution receipts and rejects cross-project or non-current heat sources. The v12-only adoption repository verifies source snapshot bytes outside the writer lock, repeats the exact source/head/generation checks inside a second transaction and atomically writes the adopted main revision, head, outbox, winner and ready status. Production stays at v10 until the broader v12-aware application and verifier/release gates pass.
 4. Publish with expected revision, publication generation and trusted matching evidence under current policy. Recheck scope/identity in the write transaction. Idempotency binds the entire request digest. Concurrent edits conflict instead of silently changing the release candidate.
 5. Serve each page and dependent asset from a pinned release. Check current visibility on pinned URLs so unpublish cannot be bypassed. Isolate generated content from control-plane origins/cookies. Verifier access has separate scoped authority; control UI same-origin DOM access is not a trust boundary.
 6. Unpublish atomically disables the pointer and records an event; retain history according to policy.
@@ -49,7 +49,7 @@ Use additive versioned migration with the existing offline backup/verification r
 5. Exercise publish/unpublish/retry/rollback and failures between artifact verification and pointer commit; verify target retention and recovery scope.
 6. Complete production image, origin/proxy, model, backup/restore and deployed smoke gates before rollout.
 
-All implementation and acceptance gates remain open.
+The offline adoption migration and repository component gates are accepted. HTTP/UI integration, trusted verifier, pinned serving, production migration and end-to-end release acceptance remain open.
 
 ## Sources and product direction
 

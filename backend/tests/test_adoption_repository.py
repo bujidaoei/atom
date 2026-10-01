@@ -9,7 +9,6 @@ import sqlite3
 import struct
 import subprocess
 import sys
-import uuid
 
 import pytest
 
@@ -43,7 +42,7 @@ class Store:
 def prepared(legacy, tmp_path):
     path, baseline = legacy
     migrate(path, baseline, target_version=11)
-    main_payload, main_artifact = snapshot(b'<html>main</html>')
+    _, main_artifact = snapshot(b'<html>main</html>')
     heat_payload, heat_artifact = snapshot(b'<html>heat</html>')
     with sqlite3.connect(path) as db:
         db.execute('PRAGMA foreign_keys=ON')
@@ -93,6 +92,7 @@ def test_adoption_atomically_advances_head_winner_and_exact_replay(prepared):
         row = db.execute('SELECT workspace_id,parent_revision_id,producing_attempt_id,adoption_id,artifact_key,snapshot_revision FROM revision_records WHERE id=?',
                          (receipt.revision_id,)).fetchone()
         assert row == (main, 'main-root', None, 'command', artifact.key, artifact.revision)
+        assert db.execute("SELECT status FROM projects WHERE id='project'").fetchone() == ('ready',)
         assert db.execute('PRAGMA foreign_key_check').fetchall() == []
         db.execute("UPDATE revision_workspaces SET current_revision_id=NULL WHERE heat_id='heat'")
     assert adopt(repo, Store(artifact.key, b'invalid')) == receipt
