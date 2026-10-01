@@ -539,3 +539,9 @@ Actual SQLite tests cover baseline/v1/v2 upgrade, source backup/restore, empty n
 content-schema: 48 tests, 0 failures, 0 errors, 0 skipped, 6.339 seconds
 content-schema-linux: 1 tests, 0 failures, 0 errors, 0 skipped, 2.012 seconds
 Reports in .logs; existing Starlette/httpx warning remains. Spec/plan/tasks/contracts/data model/quickstart/migration and parent progress synchronized. No Pi edits, credentials, production data, DNS/TLS changes, push or deployment. Binding allocation/routing, private handoff, verifier environment/authority and enterprise rollout remain open.
+
+## Continuation — content binding allocation and resolution (2026-10-01)
+Baseline b209b19; previous turn was progress. Added v3 ContentRepository allocation and pinned resolution. Internal release/verification repositories accept exact verified v2/v3; the main runtime remains v1. Immutable binding lookup is followed by current release authorization, so an opaque ID is not access authority.
+Actual SQLite tests cover two concurrent allocations yielding one row, persisted replay, foreign owner/project denial, injected random-ID collision preserving the original mapping, unknown/invalid IDs, v3-only binding writes, and public/private/unpublish transitions on pinned history. Existing release and verification suites rerun. Fixtures contain synthetic artifact descriptors/reports; no domain resolution, HTTP request, browser or verifier authenticity is claimed.
+content-bindings-final: 52 tests, 0 failures, 0 errors, 0 skipped, 7.230 seconds
+Report in .logs; existing Starlette/httpx warning remains. Spec/plan/tasks/contracts/data model/quickstart and parent progress synchronized. No Pi edits, credentials, production state, DNS changes, push or deployment. Strict host configuration/routing, private capabilities and full enterprise rollout remain open.

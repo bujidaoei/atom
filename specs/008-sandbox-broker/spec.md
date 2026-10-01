@@ -133,3 +133,5 @@ Published view materialization must bound concurrent in-memory snapshot reads an
 T017 content isolation refinement: generated content must use a dedicated content site and durable per-version host binding. Root-relative resources must resolve within the same pinned artifact. Console credentials and direct DOM-based acceptance must not cross the content boundary. See contracts/content-origin.md; requirements remain unimplemented.
 
 Content origin binding uses an immutable opaque route identity scoped by project and release, unique per release; invalid route syntax and cross-project mapping must fail at the database boundary. Offline migration must preserve prior version definitions and journal history.
+
+Content binding allocation must be owner-scoped and idempotent by immutable release, use an opaque unpredictable identifier, and reject collisions without retargeting. Resolving a binding must reapply current publication authorization; the identifier itself grants no access.

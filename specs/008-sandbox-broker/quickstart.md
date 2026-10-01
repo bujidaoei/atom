@@ -107,3 +107,5 @@ Linux release-view integration now holds a real view while a second thread waits
 Content serving has no accepted production launch path yet. contracts/content-origin.md lists host-binding, private handoff, independent verifier, browser attack and multi-asset consistency tests. Local origins can support implementation; public DNS/TLS and private embedded-cookie behavior require separate staging acceptance.
 
 Disposable offline schema test: migrate(..., target_version=3) or --target-version 3. Migration tests cover all three source versions and source restore; real Linux test kills the migration after content DDL/journal replacement, observes v2 recovery and retries v3. No DNS, TLS or live host behavior is tested.
+
+Run test_content_repository.py with release/verification repository suites for concurrent binding allocation, reopen/replay, foreign scope denial, collision rollback, v3 requirement and visibility changes through a pinned binding. These use ledger fixture artifacts/reports, not DNS or HTTP requests.
