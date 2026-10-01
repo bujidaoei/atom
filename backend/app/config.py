@@ -64,6 +64,11 @@ class Settings(BaseSettings):
     broker_admin_token: str | None = Field(default=None, repr=False)
     broker_grant_key: str | None = Field(default=None, repr=False)
     completion_grant_key: str | None = Field(default=None, repr=False)
+    verifier_origin: str | None = None
+    verifier_control_token: str | None = Field(default=None, repr=False)
+    verifier_policy_digest: str | None = None
+    verifier_runner_version: str | None = None
+    verifier_budget_seconds: int = Field(default=90, ge=45, le=300)
 
     # --- quotas ---------------------------------------------------------
     starting_credits: int = Field(default=200, ge=0, le=1_000_000)
@@ -126,6 +131,27 @@ class Settings(BaseSettings):
                 raise ValueError('broker execution requires independent 32–128 character secrets')
             if len(set(values)) != 3 or any(value in (self.secret, self.runtime_token, self.llm_api_key) for value in values):
                 raise ValueError('execution secrets must be distinct from other service credentials')
+        verifier_values = (self.verifier_origin, self.verifier_control_token,
+                           self.verifier_policy_digest, self.verifier_runner_version)
+        if any(value is not None for value in verifier_values):
+            from .verifier_client import _origin as verifier_origin, VerifierClientError
+            import re
+            if any(value is None for value in verifier_values) or self.sandbox_mode != 'broker':
+                raise ValueError('verifier requires complete broker-mode configuration')
+            try:
+                self.verifier_origin = verifier_origin(self.verifier_origin)
+            except VerifierClientError:
+                raise ValueError('invalid verifier origin') from None
+            token = self.verifier_control_token
+            if (not 32 <= len(token) <= 256 or not token.isascii()
+                    or any(not 33 <= ord(char) <= 126 for char in token)
+                    or any(marker in token.lower() for marker in ('change-me', 'dev-secret'))
+                    or token in (self.secret, self.runtime_token, self.llm_api_key,
+                                 self.broker_admin_token, self.broker_grant_key,
+                                 self.completion_grant_key)
+                    or re.fullmatch(r'[0-9a-f]{64}', self.verifier_policy_digest) is None
+                    or re.fullmatch(r'[A-Za-z0-9_.-]{1,128}', self.verifier_runner_version) is None):
+                raise ValueError('invalid verifier identity or independent credential')
         if self.secret == self.runtime_token:
             raise ValueError("session signing and runtime authentication require different secrets")
         try:

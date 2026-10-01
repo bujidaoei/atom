@@ -61,6 +61,25 @@ def test_production_requires_distinct_complete_broker_configuration(patch):
         Settings(_env_file=None, **(BASE | BROKER | {'environment':'production'} | patch))
 
 
+def test_verifier_requires_complete_independent_loopback_configuration():
+    verifier = dict(verifier_origin='http://127.0.0.1:8788',
+                    verifier_control_token='synthetic-verifier-control-key-48-characters-long',
+                    verifier_policy_digest='c' * 64,
+                    verifier_runner_version='atom-verifier-v1')
+    base = BASE | BROKER | {'environment':'production', 'session_mode':'durable',
+                            'console_origin':'https://console.example.org'}
+    accepted = Settings(_env_file=None, **(base | verifier))
+    assert accepted.verifier_origin == verifier['verifier_origin']
+    assert verifier['verifier_control_token'] not in repr(accepted)
+    for patch in ({'verifier_origin':'http://localhost:8788'},
+                  {'verifier_origin':None}, {'verifier_control_token':None},
+                  {'verifier_control_token':base['secret']},
+                  {'verifier_policy_digest':'x' * 64},
+                  {'verifier_runner_version':'bad version'}):
+        with pytest.raises(ValidationError):
+            Settings(_env_file=None, **(base | verifier | patch))
+
+
 def test_local_execution_routes_are_unavailable(client):
     for action in ('complete','cancel'):
         response=client.post('/v1/executions/'+action)

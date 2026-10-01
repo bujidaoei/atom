@@ -17,10 +17,11 @@ from .execution_service import ExecutionGateway, execution_resources
 from .sandbox.client import BrokerClientError
 from .errors import AtomError
 from .models import Base
-from .routers import audit, content_access, auth, preview, projects, publish, settings, usage
+from .routers import audit, content_access, auth, preview, projects, publish, settings, usage, verifications
 from .schema_guard import verify as verify_schema
 from .services.orchestrator import orchestrator
 from .services.runtime_client import runtime_client
+from .verifier_client import VerifierClient
 
 
 @asynccontextmanager
@@ -32,6 +33,7 @@ async def lifespan(_app: FastAPI):
         credentials()  # Fail closed on missing/offline migration before serving.
     _app.state.audit_exports = AuditExportService(get_settings())
     _app.state.execution = None
+    _app.state.verifier_client = None
     orchestrator.execution = None
     async with execution_resources(get_settings()) as resources:
         verify_schema(engine)
@@ -40,29 +42,41 @@ async def lifespan(_app: FastAPI):
         await orchestrator.reconcile()
         orchestrator.execution = resources
         _app.state.execution = resources
+        verifier_client = None
         try:
             await _app.state.audit_exports.start()
             _app.state.content_issuer.start()
             _app.state.audit_reads.start()
+            settings = get_settings()
+            if settings.verifier_origin is not None:
+                verifier_client = VerifierClient(settings.verifier_origin,
+                                                 settings.verifier_control_token)
+                await verifier_client.require_ready()
+                _app.state.verifier_client = verifier_client
             yield
         finally:
-            _app.state.content_issuer.close_admission()
-            _app.state.audit_reads.close_admission()
-            _app.state.audit_exports.stop_admission()
-            _app.state.execution = None
+            _app.state.verifier_client = None
             try:
+                if verifier_client is not None:
+                    await verifier_client.close()
+            finally:
+                _app.state.content_issuer.close_admission()
+                _app.state.audit_reads.close_admission()
+                _app.state.audit_exports.stop_admission()
+                _app.state.execution = None
                 try:
                     try:
-                        await _app.state.content_issuer.drain()
-                    finally:
                         try:
-                            await _app.state.audit_reads.drain()
+                            await _app.state.content_issuer.drain()
                         finally:
-                            await _app.state.audit_exports.close()
+                            try:
+                                await _app.state.audit_reads.drain()
+                            finally:
+                                await _app.state.audit_exports.close()
+                    finally:
+                        await orchestrator.shutdown()
                 finally:
-                    await orchestrator.shutdown()
-            finally:
-                orchestrator.execution = None
+                    orchestrator.execution = None
 
 
 app = FastAPI(title="Atoms Demo API", version="1.0.0", lifespan=lifespan)
@@ -158,6 +172,7 @@ app.include_router(content_access.router, prefix="/api")
 app.include_router(audit.router, prefix="/api")
 app.include_router(settings.router, prefix="/api")
 app.include_router(projects.router, prefix="/api")
+app.include_router(verifications.router, prefix="/api")
 app.include_router(publish.router, prefix="/api")
 app.include_router(usage.router, prefix="/api")
 

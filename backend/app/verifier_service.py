@@ -121,6 +121,16 @@ def create_app(config: VerifierProcessConfig | None = None) -> FastAPI:
 
     app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
 
+    @app.get('/health')
+    async def health():
+        try:
+            await asyncio.to_thread(coordinator._require_lease)
+            if verify(config.database) != 13:
+                raise VerifierStartupError('verifier_schema_v13_required')
+        except (SupervisorError, MigrationError, VerifierStartupError):
+            return _error('verifier_unavailable', 503)
+        return JSONResponse({'ok':True}, headers={'cache-control':'no-store'})
+
     def run(owner: str, request_id: str):
         assignment = authority.dispatch_current(
             owner=owner, request_id=request_id, route_id=secrets.token_hex(16),

@@ -120,6 +120,26 @@ def test_single_use_dispatch_and_authentication(authorized):
     assert verify(path) == 13
 
 
+def test_owner_scoped_current_scope_and_durable_result_reconciliation(authorized):
+    path, receipt, request, authority, assignment, results = authorized
+    repository = VerificationRepository(path)
+    scope = repository.current_scope(owner='user', project_id=request.project_id)
+    assert scope.workspace_id == request.workspace_id
+    assert scope.revision_id == request.revision_id
+    assert scope.contract_digest == request.contract.digest
+    with pytest.raises(VerificationError, match='verification_not_found'):
+        repository.current_scope(owner='foreign', project_id=request.project_id)
+    with pytest.raises(VerificationError, match='verification_not_found'):
+        repository.describe(owner='user', project_id='other', request_id=request.id)
+    pending = repository.describe(owner='user', project_id=request.project_id,
+                                  request_id=request.id)
+    assert pending.request == request and pending.dispatched and pending.result is None
+    observed = _register(authority, assignment, results)
+    settled = repository.describe(owner='user', project_id=request.project_id,
+                                  request_id=request.id)
+    assert settled.result == observed and settled.dispatched
+
+
 def test_legacy_report_path_and_unverified_publish_denied(authorized):
     path, receipt, request, authority, assignment, results = authorized
     with pytest.raises(VerificationError, match='verified_registration_required'):

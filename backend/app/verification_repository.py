@@ -44,6 +44,20 @@ class VerificationResult:
     completed_at: int
 
 
+@dataclass(frozen=True)
+class VerificationScope:
+    workspace_id: str
+    revision_id: str
+    contract_digest: str
+
+
+@dataclass(frozen=True)
+class VerificationState:
+    request: VerificationRequest
+    result: VerificationResult | None
+    dispatched: bool
+
+
 class VerificationRepository:
     def __init__(self, path: Path, *, lock_timeout: float = 3):
         if isinstance(lock_timeout, bool) or not isinstance(lock_timeout, (float, int)) or not 0 < lock_timeout <= 10:
@@ -88,6 +102,57 @@ class VerificationRepository:
             raise VerificationError('verification_corrupt')
         return VerificationRequest(row['id'], row['workspace_id'], row['project_id'], row['revision_id'],
             contract, row['policy_digest'], row['runner_version'], row['initiator_id'], row['created_at'], row['deadline'])
+
+    def current_scope(self, *, owner: str, project_id: str) -> VerificationScope:
+        """Read only the owner-scoped idle main head; reserve rechecks it atomically."""
+        if any(type(value) is not str or re.fullmatch(r'[A-Za-z0-9_.-]{1,128}', value) is None
+               for value in (owner, project_id)):
+            raise VerificationError('invalid_verification_request')
+        with self._transaction() as db:
+            if db.execute('PRAGMA user_version').fetchone()[0] != 13:
+                raise VerificationError('verifier_schema_required')
+            row = db.execute('''SELECT w.id,w.current_revision_id,w.active_attempt_id,p.active_run_id
+                FROM revision_workspaces w JOIN projects p ON p.id=w.project_id
+                WHERE p.id=? AND p.user_id=? AND w.heat_id IS NULL''',
+                (project_id, owner)).fetchone()
+            if row is None:
+                raise VerificationError('verification_not_found')
+            if (row['current_revision_id'] is None or row['active_attempt_id'] is not None
+                    or row['active_run_id'] is not None):
+                raise VerificationError('verification_conflict')
+            rows = db.execute('''SELECT key,title,detail,checks_json FROM requirements
+                WHERE project_id=? ORDER BY position,id LIMIT 129''', (project_id,)).fetchall()
+            try:
+                contract = capture_contract([{'key': item['key'], 'title': item['title'],
+                    'detail': item['detail'], 'checks':json.loads(item['checks_json'])}
+                    for item in rows])
+            except (ContractError, ValueError, TypeError, RecursionError):
+                raise VerificationError('invalid_stored_contract') from None
+            return VerificationScope(row['id'], row['current_revision_id'], contract.digest)
+
+    def describe(self, *, owner: str, project_id: str, request_id: str) -> VerificationState:
+        """Durable reconciliation of a lost or cancelled verifier HTTP response."""
+        if any(type(value) is not str or re.fullmatch(r'[A-Za-z0-9_.-]{1,128}', value) is None
+               for value in (owner, project_id, request_id)):
+            raise VerificationError('invalid_verification_request')
+        with self._transaction() as db:
+            if db.execute('PRAGMA user_version').fetchone()[0] != 13:
+                raise VerificationError('verifier_schema_required')
+            row = db.execute('''SELECT v.* FROM verification_requests v
+                JOIN projects p ON p.id=v.project_id AND p.user_id=?
+                WHERE v.id=? AND v.project_id=?''', (owner, request_id, project_id)).fetchone()
+            if row is None:
+                raise VerificationError('verification_not_found')
+            request = self._decode(row)
+            report = db.execute('SELECT * FROM verification_results WHERE request_id=?',
+                                (request_id,)).fetchone()
+            result = None if report is None else VerificationResult(
+                request_id, report['revision_id'], report['contract_digest'],
+                report['outcome'], report['total'], report['passed'],
+                report['report_json'].encode('utf-8'), report['completed_at'])
+            dispatched = db.execute('SELECT 1 FROM verification_dispatches WHERE request_id=?',
+                                    (request_id,)).fetchone() is not None
+            return VerificationState(request, result, dispatched)
 
     def reserve(self, *, owner: str, workspace_id: str, request_id: str,
                 expected_revision: str, expected_contract: str, policy_digest: str,

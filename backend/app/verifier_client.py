@@ -104,6 +104,31 @@ class VerifierClient:
     async def close(self):
         await self._http.aclose()
 
+    async def require_ready(self):
+        if self._http.is_closed:
+            raise VerifierClientError('verifier_client_closed')
+        try:
+            async with asyncio.timeout(min(self._timeout, 5)):
+                async with self._http.stream('GET', '/health',
+                    headers={'accept-encoding':'identity'}) as response:
+                    if (response.status_code != 200
+                            or [value.lower() for value in response.headers.get_list('content-type')]
+                               != ['application/json']
+                            or response.headers.get_list('content-encoding')):
+                        raise VerifierClientError('verifier_unavailable')
+                    body = bytearray()
+                    async for chunk in response.aiter_raw():
+                        if len(body) + len(chunk) > 64:
+                            raise VerifierClientError('verifier_unavailable')
+                        body.extend(chunk)
+                    try:
+                        if _document(bytes(body)) != {'ok':True}:
+                            raise VerifierClientError('verifier_unavailable')
+                    except VerifierClientError:
+                        raise VerifierClientError('verifier_unavailable') from None
+        except (httpx.HTTPError, TimeoutError, OSError):
+            raise VerifierClientError('verifier_unavailable') from None
+
     async def verify(self, *, owner: str, request_id: str) -> VerifierObservation:
         if (type(owner) is not str or _ID.fullmatch(owner) is None
                 or type(request_id) is not str or _ID.fullmatch(request_id) is None):
