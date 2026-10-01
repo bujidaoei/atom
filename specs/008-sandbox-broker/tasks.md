@@ -224,3 +224,6 @@ T027 component accepted: all seven specified committed transition kinds are wire
 
 
 T029 increment: actual bounded audit read repository now enforces current source/account/project authority and stable sequence pagination. 28 related tests pass, covering foreign/expired/revoked source, project ownership transfer, malformed limits/cursors, schema drift, equal-time/new-append pagination and unchanged database after reads. HTTP/UI routing, export dispatcher/destination/retention and wider role model remain open; T029 not closed.
+
+
+T029 increment: real authenticated GET /api/audit/events is mounted with strict query/origin/intent checks, derived account scope and fixed-watermark continuation. Content issuer and audit queries share a reusable ownership/response primitive with independent capacities. Actual password/cookie/SQLite API tests and ASGI cancellation/send faults plus main two-pool shutdown tests verify the component. Audit UI, destination protections/export/retry/retention and full enterprise acceptance remain open; T029 stays unchecked.

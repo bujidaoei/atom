@@ -145,7 +145,7 @@ def test_cancelled_issuer_retains_worker_capacity_until_real_commit(issuer,monke
             finally:
                 for slot in claimed:app.state.content_issuer.release(slot)
             try:
-                with pytest.raises(RuntimeError,match='content_issuer_drain_timeout'):
+                with pytest.raises(RuntimeError,match='bounded_drain_timeout'):
                     await app.state.content_issuer.drain(.02)
                 assert app.state.content_issuer.pending_count==1
                 denied=await transport.post(PATH,json=body,headers=HEADERS|{
@@ -238,9 +238,9 @@ def test_inspection_does_not_reoffer_already_issued_bootstrap(issuer):
 def test_issuer_response_delivery_is_bounded_and_owned(issuer,monkeypatch,failure,reply):
     import asyncio
     from app.main import app
-    from app.content_issuer_lifecycle import ContentIssuerLifecycle
+    from app.bounded_operations import BoundedOperations
     client,path,_,_,body=issuer
-    owner=ContentIssuerLifecycle(capacity=1,send_timeout=.05)
+    owner=BoundedOperations(capacity=1,send_timeout=.05)
     monkeypatch.setattr(app.state,'content_issuer',owner)
     if reply=='conflict':assert client.post(PATH,json=body,headers=HEADERS).status_code==200
     payload=json.dumps({} if reply=='malformed' else body).encode()
@@ -267,7 +267,7 @@ def test_issuer_response_delivery_is_bounded_and_owned(issuer,monkeypatch,failur
         task=asyncio.create_task(app(scope,receive,send))
         await asyncio.wait_for(started.wait(),2)
         if failure=='timeout':
-            with pytest.raises(RuntimeError,match='content_issuer_drain_timeout'):
+            with pytest.raises(RuntimeError,match='bounded_drain_timeout'):
                 await owner.drain(.01)
             assert owner.pending_count==1 and owner.acquire() is None
         if failure=='cancel':task.cancel()

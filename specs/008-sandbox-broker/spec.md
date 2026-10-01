@@ -234,3 +234,6 @@ Audit crash acceptance boundary: abrupt process exit after event insertion but b
 
 
 Audit read boundary: authenticated account scope is derived from the caller, never another supplied user id. Project scope requires current ownership. Each page rechecks live source and ownership in the same read snapshot as event retrieval. A fixed upper sequence and exclusive after cursor make a bounded scan stable across equal timestamps and new appends. Only explicit event columns are returned, without export credentials/state.
+
+
+Audit HTTP boundary: GET /api/audit/events requires durable signed console authentication, canonical HTTPS console host and inspect-audit-events intent. An Origin header, when present, must match exactly. Caller account ids are not accepted; project is optional current-owner scope. Continuations with after>0 require an upper watermark. Query length256 bytes, exact unique allowlisted fields, numeric signed64-bit bounds and limit1-100 are enforced. A separate four-slot admission pool owns each request through authentication/query and bounded response delivery; cancellation does not abandon a live worker. Missing schema5 and storage/schema failures return503 without automatic migration or false empty results.

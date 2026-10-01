@@ -10,13 +10,13 @@ from starlette.routing import Route
 from .db import engine
 from .access_repository import AccessError
 from .console_auth import credentials
-from .content_issuer_lifecycle import ContentIssuerLifecycle
+from .bounded_operations import BoundedOperations
 from .config import get_settings
 from .execution_service import ExecutionGateway, execution_resources
 from .sandbox.client import BrokerClientError
 from .errors import AtomError
 from .models import Base
-from .routers import content_access, auth, preview, projects, publish, settings, usage
+from .routers import audit, content_access, auth, preview, projects, publish, settings, usage
 from .schema_guard import verify as verify_schema
 from .services.orchestrator import orchestrator
 from .services.runtime_client import runtime_client
@@ -37,13 +37,18 @@ async def lifespan(_app: FastAPI):
         _app.state.execution = resources
         try:
             _app.state.content_issuer.start()
+            _app.state.audit_reads.start()
             yield
         finally:
             _app.state.content_issuer.close_admission()
+            _app.state.audit_reads.close_admission()
             _app.state.execution = None
             try:
                 try:
-                    await _app.state.content_issuer.drain()
+                    try:
+                        await _app.state.content_issuer.drain()
+                    finally:
+                        await _app.state.audit_reads.drain()
                 finally:
                     await orchestrator.shutdown()
             finally:
@@ -51,7 +56,8 @@ async def lifespan(_app: FastAPI):
 
 
 app = FastAPI(title="Atoms Demo API", version="1.0.0", lifespan=lifespan)
-app.state.content_issuer = ContentIssuerLifecycle()
+app.state.content_issuer = BoundedOperations()
+app.state.audit_reads = BoundedOperations(capacity=4)
 for action in ('complete', 'cancel'):
     app.router.routes.append(Route('/v1/executions/' + action, ExecutionGateway(), methods=['POST']))
 
@@ -139,6 +145,7 @@ async def health() -> JSONResponse:
 
 app.include_router(auth.router, prefix="/api")
 app.include_router(content_access.router, prefix="/api")
+app.include_router(audit.router, prefix="/api")
 app.include_router(settings.router, prefix="/api")
 app.include_router(projects.router, prefix="/api")
 app.include_router(publish.router, prefix="/api")

@@ -5,7 +5,7 @@ import re
 
 from fastapi import APIRouter, HTTPException, Request
 from starlette.concurrency import run_in_threadpool
-from starlette.responses import JSONResponse
+from ..bounded_operations import OwnedJSONResponse
 from starlette.requests import ClientDisconnect
 
 from ..access_repository import AccessError
@@ -17,20 +17,6 @@ from ..content_hosts import ContentHosts
 router = APIRouter(prefix='/content-access', tags=['content-access'])
 _HEADERS = {'Cache-Control':'no-store', 'Referrer-Policy':'no-referrer'}
 _WORKERS = set()
-
-
-class _OwnedResponse(JSONResponse):
-    def __init__(self, content, lifecycle, token, status_code=200, headers=None):
-        super().__init__(content, status_code=status_code, headers={**(headers or {}), **_HEADERS})
-        self._lifecycle = lifecycle
-        self._token = token
-
-    async def __call__(self, scope, receive, send):
-        try:
-            async with asyncio.timeout(self._lifecycle.send_timeout):
-                await super().__call__(scope, receive, send)
-        finally:
-            self._lifecycle.release(self._token)
 
 
 def _deny(status):
@@ -164,7 +150,7 @@ async def _handle(request,*,read_only):
             release = False
             worker.add_done_callback(lambda done: _detached_done(done, lifecycle, admission))
             raise
-        response = _OwnedResponse(result, lifecycle, admission)
+        response = OwnedJSONResponse(result, lifecycle, admission, headers=_HEADERS)
         release = False  # Response delivery now owns the admission token.
         return response
     except (ClientDisconnect, TimeoutError, AccessError, HTTPException) as error:
@@ -183,7 +169,7 @@ async def _handle(request,*,read_only):
             headers = {**(error.headers or {}), **_HEADERS}
         if admission is None:
             raise HTTPException(status, detail, headers=headers) from error
-        response = _OwnedResponse({'detail': detail}, lifecycle, admission, status, headers)
+        response = OwnedJSONResponse({'detail': detail}, lifecycle, admission, status, headers)
         release = False
         return response
     finally:

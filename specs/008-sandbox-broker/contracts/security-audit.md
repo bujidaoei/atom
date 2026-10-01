@@ -1,4 +1,4 @@
-# Security audit contract — proposed, not implemented
+# Security audit contract — incremental implementation; export pending
 
 Reviewed 2026-10-01 against baseline f8d9857. This contract refines T022 and parent enterprise security requirements. It adds no claim that current diagnostic logging is durable auditing.
 
@@ -41,3 +41,7 @@ Connect actor and operation to immutable revision, verification report, publicat
 
 ### Implemented reader component
 AuditRepository.page is an internal trusted-caller API (session id is not a bearer). It rechecks source within a read-only snapshot, derives own-account scope or checks current project ownership, and returns fixed-column events with upper/next_after. Bounds:1-100 events, integer signed64-bit nonnegative cursors, SQLite lock3s/progress5s. Retain upper from first page for a stable scan; authorization is independent of cursor input. No HTTP endpoint, generalized enterprise roles or export added in this component.
+
+
+### Implemented HTTP reader component
+GET /api/audit/events now uses signed durable console cookies and inspect-audit-events intent, canonical HTTPS host and optional exact Origin. Query keys project/after/upper/limit only, no duplicates, at most256 encoded bytes; nonnegative signed64-bit cursors, limit1-100, upper required for after>0 and upper>=after. Response: events (fixed ledger columns), upper, nextAfter (null at end). Scope is account caller or currently owned project; no role administration is implied. Missing schema5 returns503; deployment selects migration offline. Reads have a separate four-request pool, owned thread completion and10s response delivery, no-store/no-referrer, bounded15s shutdown drain. Query errors400, host/intent403, credentials401, hidden scope404, unavailable503. UI/export remain pending.

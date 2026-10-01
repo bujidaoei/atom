@@ -242,3 +242,6 @@ T027/008-T027 component accepted: transactional audit emission for all seven com
 
 
 T027/008-T029 increment: audit read foundation implemented with actual scope/source checks and snapshot paging; 28 tests pass. No external audit API/UI, export or production acceptance yet.
+
+
+T027/008-T029 increment: mounted actual signed-cookie audit read API, strict current scope and bounded independent read/delivery ownership. HTTP/auth/storage/fault/lifespan regression evidence recorded in008. UI, enterprise role model, export/retention and production readiness remain open.
