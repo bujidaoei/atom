@@ -488,6 +488,8 @@ T039.3b partial evidence and restart defect (2026-10-01): zero active runs and a
 
 T039.3c additional no-write live check (2026-10-01): a fresh disposable project `04981fd9ffa4470498f64ece1d73f93f` reached a real `model.requested` event in planning, then the actual Stop endpoint returned HTTP200 before any write tool completed. Durable status is `cancelled`, file catalogue is empty, and `incompleteSavedRevisionId` is null; the non-null base `revisionId` was not mislabelled as saved generated content. Authenticated Chromium loaded HTTP200, showed “重新生成”, did not show the saved-version action, kept Publish disabled and had zero page exceptions. T039.3c remains open for a separate live deadline-after-write case; the real schema10 deadline test is already recorded but does not replace that provider/browser gate.
 
+T040.4 active-run guard acceptance (2026-10-01): disposable project `726955892204429482835da9fdfc5255` reached a real `model.requested` event. Invoking the installed pair restart returned exit 1 with `Refusing restart: 1 projects have active runs`; the API container `StartedAt` value was unchanged. The run was then stopped normally and persisted `cancelled` with no active run. Public IP health returned HTTP200 with runtime and broker true. This exercises the refusal path as well as the earlier successful direct/systemd restart paths.
+
 ### T040 — Reliable API/broker startup (FR-012)
 
 - [x] T040.1 Add a bounded retry of read-only broker readiness at API startup and reject authentication/malformed errors without retry.
