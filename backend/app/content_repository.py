@@ -12,12 +12,16 @@ class ContentRepository:
     def __init__(self, path, *, lock_timeout=3):
         self._releases = ReleaseRepository(path,lock_timeout=lock_timeout)
 
+    @property
+    def path(self):
+        return self._releases._ledger.path
+
     @staticmethod
     def _require_schema(db):
         db.row_factory = None
         version = _schema(db)
         db.row_factory = sqlite3.Row
-        if version != 3:
+        if version not in (3, 4):
             raise VerificationError('content_schema_required')
 
     def bind(self, *, owner: str, project_id: str, release_id: str) -> ContentBinding:

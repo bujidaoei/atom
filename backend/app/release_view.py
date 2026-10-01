@@ -39,6 +39,15 @@ def materialized_content(repository, store: ArtifactStore, *, binding_id: str, v
 
 
 @contextmanager
+def materialized_private_content(repository, access, store: ArtifactStore, *, binding_id: str, session_secret: str):
+    def resolve(captured=None):
+        principal=access.authorize(binding_id=binding_id,session_secret=session_secret)
+        return repository.resolve(binding_id=binding_id,viewer=principal.viewer_id)
+    with _admitted(resolve,store) as view:
+        yield view
+
+
+@contextmanager
 def _admitted(resolve,store):
     if not _READS.acquire(timeout=3):
         raise VerificationError('release_capacity')

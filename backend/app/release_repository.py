@@ -126,7 +126,7 @@ class ReleaseRepository:
                 (id,project_id,workspace_id,revision_id,verification_id,contract_digest,policy_digest,audience,creator_id,previous_release_id,created_at)
                 VALUES (?,?,?,?,?,?,?,?,?,?,?)''',(release_id,project_id,workspace['id'],expected_revision,verification_id,
                 contract.digest,policy_digest,audience,owner,pointer['release_id'] if pointer else None,int(time.time())))
-            if db.execute('PRAGMA user_version').fetchone()[0] == 3:
+            if db.execute('PRAGMA user_version').fetchone()[0] in (3, 4):
                 # The verified v3 schema supports serving identity. Allocate it
                 # before promotion so binding, release, pointer and receipt are
                 # committed together or all rolled back on any failure.

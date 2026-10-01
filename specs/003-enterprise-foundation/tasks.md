@@ -180,3 +180,5 @@ Feature008 private-access prerequisite: persisted console-session repository lif
 Feature008 T021 progress: hash-only browser-bound capability repository and atomic single-use exchange pass actual SQLite concurrency/failure/process-exit tests (64 combined tests). HTTP authentication/cookies, rate/retention, browser composition and v4 serving remain incomplete; enterprise T027 stays open.
 
 Feature008 T022 progress: actual signed credentials now bind to durable session scope/lifetime/revocation with 71 crypto/SQLite/access regression tests passing. Legacy login/cookies remain unchanged; controlled auth cutover, private HTTP/browser and deployment gates are still open. T027 remains unchecked.
+
+Feature008 private-serving progress: dedicated content sessions now authorize real artifact reads and are rechecked through IO; 62 tests include actual Linux revoke-during-read/extraction denial. v4 internal ledgers are supported, but main runtime/auth migration, cookie exchange and browser/private deployment gates remain open. T027 stays unchecked.

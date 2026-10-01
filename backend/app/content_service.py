@@ -1,4 +1,4 @@
-"""Standalone public content ASGI service; no console credentials or API proxy."""
+"""Standalone content ASGI service; no console credentials or API proxy."""
 import asyncio
 from dataclasses import dataclass
 import mimetypes
@@ -8,8 +8,10 @@ from starlette.concurrency import run_in_threadpool
 from starlette.responses import Response
 
 from .artifacts import ArtifactError
+from .access_repository import AccessError
+from .content_cookies import content_session_cookie
 from .content_hosts import ContentHostError
-from .release_view import materialized_content
+from .release_view import materialized_content, materialized_private_content
 from .snapshots import SnapshotError
 from .verification_repository import VerificationError
 
@@ -36,20 +38,29 @@ class ContentLimits:
 
 
 class ContentService:
-    def __init__(self, repository, store, hosts, *, limits: ContentLimits = ContentLimits()):
+    def __init__(self, repository, store, hosts, *, limits: ContentLimits = ContentLimits(), access=None):
+        if access is not None and access.path.resolve()!=repository.path.resolve():
+            raise ValueError('content_access_database_mismatch')
         self.repository, self.store, self.hosts = repository, store, hosts
+        self.access=access
         self.limits = limits
         self._responses = BoundedSemaphore(limits.active_responses)
         self._reads = set()
         self._pending = set()
         self._draining = False
 
-    def _read(self,binding,path,navigation):
+    def _read(self,binding,path,navigation,session_secret=None):
         parts = path.split('/')
         if (not path.startswith('/') or len(path)>4096 or '\\' in path or '\0' in path
             or any(part in ('.','..') for part in parts)):
             return Response(status_code=404,headers=HEADERS)
-        with materialized_content(self.repository,self.store,binding_id=binding) as view:
+        if session_secret is not None:
+            if self.access is None:raise AccessError('content_access_denied')
+            materialized=materialized_private_content(self.repository,self.access,self.store,
+                binding_id=binding,session_secret=session_secret)
+        else:
+            materialized=materialized_content(self.repository,self.store,binding_id=binding)
+        with materialized as view:
             target = view.path.joinpath(*parts[1:])
             if target.is_dir():target = target/'index.html'
             if not target.is_file() and navigation and '.' not in parts[-1]:
@@ -76,9 +87,13 @@ class ContentService:
             else:
                 # Browser navigation metadata is a fallback hint, never auth.
                 navigation = any(k.lower()==b'sec-fetch-mode' and v==b'navigate' for k,v in scope['headers'])
-                response = self._read(binding,scope.get('path','/'),navigation)
+                response = self._read(binding,scope.get('path','/'),navigation,
+                    content_session_cookie(scope.get('headers',[])))
         except ContentHostError:
             response = Response(status_code=404,headers=HEADERS)
+        except AccessError as error:
+            code=404 if str(error) in ('content_access_denied','session_not_found') else 503
+            response=Response(status_code=code,headers=HEADERS)
         except VerificationError as error:
             code = 404 if str(error) in ('content_not_found','release_not_found') else 503
             response = Response(status_code=code,headers=HEADERS)

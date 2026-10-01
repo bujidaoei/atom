@@ -436,6 +436,53 @@ async def content_test():
         assert (await client.get('/style.css')).status_code==404
         assert (await client.get(hosts.sharing_url('site'))).status_code==404
         assert not list(Path('/tmp').glob('atom-release-*'))
+        migrate(settings.db_path,Path('/tmp/data/before-private.db'),target_version=4)
+        from app.content_access import ContentAccessRepository
+        from app.content_cookies import CONTENT_COOKIE
+        releases.publish(owner='owner',project_id='p',release_id='authenticated-private',verification_id=second_check.id,
+            expected_revision='second-revision',expected_generation=8,policy_digest='c'*64,runner_version='fixture-runner',audience='owner',slug='site')
+        private_binding=content.bind(owner='owner',project_id='p',release_id='authenticated-private')
+        access=ContentAccessRepository(settings.db_path)
+        protected=ContentService(content,store,hosts,access=access)
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=protected),base_url=hosts.url(private_binding.id)) as authorized:
+            assert (await authorized.get('/')).status_code==404
+            assert (await authorized.get('/',headers={'cookie':'atom_session='+issue_session('owner')})).status_code==404
+            for stage in ('read','extraction'):
+                source=access.create_console_session(user_id='owner',lifetime_seconds=60)
+                bootstrap=access.bootstrap(binding_id=private_binding.id)
+                handoff=access.issue_handoff(viewer_id='owner',source_session_id=source.id,
+                    binding_id=private_binding.id,challenge=bootstrap.challenge)
+                credential=access.exchange(binding_id=private_binding.id,handoff=handoff.secret,browser_nonce=bootstrap.secret)
+                cookie={'cookie':CONTENT_COOKIE+'='+credential.secret}
+                result=await authorized.get('/',headers=cookie)
+                assert result.status_code==200 and result.text==(changed/'index.html').read_text()
+                assert result.headers['x-atom-revision']=='second-revision'
+                assert (await authorized.head('/',headers=cookie)).status_code==200
+                assert (await authorized.get('/style.css',headers=cookie)).text==(changed/'style.css').read_text()
+                assert (await authorized.get(hosts.url(binding.id),headers=cookie)).status_code==404
+                assert (await authorized.get('/',headers={'cookie':cookie['cookie']+'; '+cookie['cookie']})).status_code==404
+                if stage=='read':
+                    original_read=store.read
+                    def revoke_read(key):
+                        payload=original_read(key)
+                        access.revoke_console_session(user_id='owner',session_id=source.id)
+                        return payload
+                    store.read=revoke_read
+                else:
+                    original_receive=release_view.receive_snapshot
+                    def revoke_extract(stream,path):
+                        received=original_receive(stream,path)
+                        access.revoke_console_session(user_id='owner',session_id=source.id)
+                        return received
+                    release_view.receive_snapshot=revoke_extract
+                try:
+                    revoked=await authorized.get('/',headers=cookie)
+                    assert revoked.status_code==404 and revoked.content==b''
+                finally:
+                    if stage=='read':store.read=original_read
+                    else:release_view.receive_snapshot=original_receive
+                assert (await authorized.get('/style.css',headers=cookie)).status_code==404
+                assert not list(Path('/tmp').glob('atom-release-*'))
 asyncio.run(content_test())
 print(json.dumps({'routes':'verified','legacy':(legacy/'index.html').read_text()}))
 '''
