@@ -23,7 +23,7 @@ HEADERS = {
 
 @dataclass(frozen=True)
 class ContentLimits:
-    active_responses: int = 1
+    active_responses: int = 8
     send_seconds: float = 10
     drain_seconds: float = 15
 

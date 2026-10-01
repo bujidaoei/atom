@@ -225,7 +225,7 @@ async def content_test():
         assert page.headers['cache-control']=='no-store'
         assert page.headers['x-content-type-options']=='nosniff'
         assert "worker-src 'none'" in page.headers['content-security-policy']
-        limited=ContentService(content,store,hosts,limits=ContentLimits(send_seconds=0.1))
+        limited=ContentService(content,store,hosts,limits=ContentLimits(active_responses=1,send_seconds=0.1))
         scope={'type':'http','method':'GET','path':'/',
             'headers':[(b'host',hosts.hostname(binding.id).encode())]}
         async def receive_http():return {'type':'http.request','body':b'','more_body':False}

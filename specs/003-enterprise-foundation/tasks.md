@@ -166,3 +166,5 @@ Feature008 T017 progress: bounded truthful ASGI drain and actual Linux Uvicorn T
 Feature008 T017 evidence increment: Chromium local HTTPS attack fixtures validate actual production response headers with network/worker positive controls and console/sibling storage isolation. End-to-end artifact/browser/private-access/verifier/public-TLS acceptance remains open; enterprise T027 remains unchecked.
 
 Feature008 T017 progress: stable public sharing routes now follow current immutable binding with tested denial for private/offline/missing binding and no client-controlled redirect. SQLite, real Linux artifact/ASGI and TCP checks pass (53 tests). Production/private/UI/verifier gates remain open; T027 stays unchecked.
+
+Feature008 T017 progress: real stored Linux artifact page reaches Chromium with eight CSS/eight JS assets. This exposed and fixed an overly restrictive default response capacity; default is now eight with independent snapshot limits retained. Browser composition, policy regression and 21 lifecycle/capacity checks pass. Enterprise load/private/verifier/production gates remain open; T027 stays unchecked.

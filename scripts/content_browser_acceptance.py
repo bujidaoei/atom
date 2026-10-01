@@ -27,15 +27,15 @@ CONTENT = 'release-a.atom-content.test'
 SIBLING = 'release-b.atom-content.test'
 
 
-def certificate(directory):
+def certificate(directory, hosts=(CONSOLE, CONTENT, SIBLING)):
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     subject = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, CONSOLE)])
     now = datetime.now(timezone.utc)
     cert = (x509.CertificateBuilder().subject_name(subject).issuer_name(subject)
             .public_key(key.public_key()).serial_number(x509.random_serial_number())
             .not_valid_before(now - timedelta(minutes=1)).not_valid_after(now + timedelta(hours=1))
-            .add_extension(x509.SubjectAlternativeName([x509.DNSName(host) for host in
-                (CONSOLE, CONTENT, SIBLING)]), critical=False).sign(key, hashes.SHA256()))
+            .add_extension(x509.SubjectAlternativeName([x509.DNSName(host) for host in hosts]),
+                           critical=False).sign(key, hashes.SHA256()))
     key_path, cert_path = directory / 'key.pem', directory / 'cert.pem'
     key_path.write_bytes(key.private_bytes(serialization.Encoding.PEM,
         serialization.PrivateFormat.PKCS8, serialization.NoEncryption()))
