@@ -43,7 +43,7 @@ class RetentionRepository:
     def __init__(self, path):
         self.path = Path(path)
         try:
-            if verify(self.path) != 8:
+            if verify(self.path) not in (8, 9):
                 raise RetentionError('retention_schema_required')
         except MigrationError:
             raise RetentionError('retention_schema_required') from None
@@ -59,7 +59,7 @@ class RetentionRepository:
             deadline = time.monotonic()+5
             db.set_progress_handler(lambda: int(time.monotonic() >= deadline), 1000)
             db.execute('BEGIN' if read_only else 'BEGIN IMMEDIATE')
-            if _schema(db) != 8:
+            if _schema(db) not in (8, 9):
                 raise RetentionError('retention_schema_required')
             db.row_factory = sqlite3.Row
             yield db
@@ -183,6 +183,12 @@ class RetentionRepository:
 
     def plan(self, *, policy_id, expected_generation, after=0, upper=None, expected_context=None,
              limit=100, max_bytes=262144):
+        with self._transaction(read_only=True) as db:
+            return self._plan_snapshot(db, policy_id=policy_id, expected_generation=expected_generation,
+                after=after, upper=upper, expected_context=expected_context, limit=limit, max_bytes=max_bytes)
+
+    def _plan_snapshot(self, db, *, policy_id, expected_generation, after=0, upper=None, expected_context=None,
+             limit=100, max_bytes=262144):
         """Bounded snapshot candidates only; no archive validation or deletion grant."""
         _identifier(policy_id)
         if (type(expected_generation) is not int or not 1 <= expected_generation < 2**63 or
@@ -194,72 +200,71 @@ class RetentionRepository:
                 (after > 0 and (upper is None or expected_context is None))):
             raise RetentionError('invalid_retention_plan')
         canonical = lambda value: json.dumps(value, sort_keys=True, separators=(',', ':'), ensure_ascii=True).encode()
-        with self._transaction(read_only=True) as db:
-            policy_row = db.execute('SELECT * FROM security_audit_retention_policies WHERE policy_id=?', (policy_id,)).fetchone()
-            if policy_row is None:
-                raise RetentionError('retention_policy_not_found')
-            policy = dict(policy_row)
-            if policy['generation'] != expected_generation:
-                raise RetentionError('retention_generation_conflict')
-            holds = [dict(row) for row in db.execute('SELECT hold_id,kind,policy_generation FROM security_audit_retention_holds '
-                "WHERE policy_id=? AND state='active' ORDER BY hold_id LIMIT 101", (policy_id,)).fetchall()]
-            destinations = [dict(row) for row in db.execute('SELECT destination_id,scope_kind,scope_id,generation,state,required_through_sequence '
-                'FROM security_audit_destinations WHERE scope_kind=? AND scope_id=? ORDER BY destination_id LIMIT 101',
-                (policy['scope_kind'],policy['scope_id'])).fetchall()]
-            if len(holds) > 100 or len(destinations) > 100:
-                raise RetentionError('retention_plan_context_capacity')
-            context = dict(policy=policy,active_holds=holds,destinations=destinations)
-            context_sha = hashlib.sha256(canonical(context)).hexdigest()
-            if expected_context is not None and expected_context != context_sha:
-                raise RetentionError('retention_context_conflict')
-            now = int(time.time())
-            if not 0 <= now < 2**63:
-                raise RetentionError('retention_clock_unavailable')
-            current_upper = db.execute('SELECT coalesce(max(sequence),0) FROM security_audit_events '
-                'WHERE scope_kind=? AND scope_id=? AND event_kind=?',
-                (policy['scope_kind'],policy['scope_id'],policy['event_kind'])).fetchone()[0]
-            if upper is None:
-                upper = current_upper
-            if after > upper or upper > current_upper:
-                raise RetentionError('invalid_retention_plan')
-            rows = db.execute('SELECT '+','.join(_FIELDS)+' FROM security_audit_events '
-                'WHERE scope_kind=? AND scope_id=? AND event_kind=? AND sequence>? AND sequence<=? ORDER BY sequence LIMIT ?',
-                (policy['scope_kind'],policy['scope_id'],policy['event_kind'],after,upper,limit+1)).fetchall()
-            plan = dict(format_version=1,coverage='business_audit_events_v1',context=context,context_sha256=context_sha,
-                observed_at=now,after=after,upper_sequence=upper,items=[],candidate_count=0,blocked_count=0,next_after=None,
-                archive_store_validation='not_performed',deletion_authorized=False)
-            # Reserve bounded space for counters, cursor and final digest as they grow.
-            remaining = max_bytes-len(canonical(plan))-128
-            if remaining < 0:
-                raise RetentionError('retention_plan_payload_capacity')
-            for row in rows[:limit]:
-                event = dict(row)
-                required = [entry['destination_id'] for entry in destinations if entry['state'] != 'retired'
-                            or event['sequence'] <= entry['required_through_sequence']]
-                delivered = 0
-                if required:
-                    delivered = db.execute('SELECT count(*) FROM security_audit_delivery WHERE event_id=? '
-                        "AND state='delivered' AND destination_id IN ("+','.join('?' for _ in required)+')',
-                        (event['event_id'],*required)).fetchone()[0]
-                reasons = []
-                if policy['state'] != 'active': reasons.append('policy_paused')
-                if holds: reasons.append('active_hold')
-                if now-event['occurred_at'] < policy['min_age_seconds']: reasons.append('minimum_age')
-                if not required: reasons.append('no_required_destination')
-                if delivered < len(required): reasons.append('unconfirmed_delivery')
-                item = dict(event=event,status='blocked' if reasons else 'candidate',blocked_reasons=reasons,
-                            required_destinations=len(required),unconfirmed_destinations=len(required)-delivered)
-                size = len(canonical(item))+bool(plan['items'])
-                if size > remaining:
-                    if not plan['items']:
-                        raise RetentionError('retention_plan_payload_capacity')
-                    break
-                plan['items'].append(item)
-                plan['blocked_count' if reasons else 'candidate_count'] += 1
-                remaining -= size
-            if len(rows) > len(plan['items']):
-                plan['next_after'] = plan['items'][-1]['event']['sequence']
-            plan['plan_sha256'] = hashlib.sha256(canonical(plan)).hexdigest()
-            if len(canonical(plan)) > max_bytes:
-                raise RetentionError('retention_plan_payload_capacity')
-            return plan
+        policy_row = db.execute('SELECT * FROM security_audit_retention_policies WHERE policy_id=?', (policy_id,)).fetchone()
+        if policy_row is None:
+            raise RetentionError('retention_policy_not_found')
+        policy = dict(policy_row)
+        if policy['generation'] != expected_generation:
+            raise RetentionError('retention_generation_conflict')
+        holds = [dict(row) for row in db.execute('SELECT hold_id,kind,policy_generation FROM security_audit_retention_holds '
+            "WHERE policy_id=? AND state='active' ORDER BY hold_id LIMIT 101", (policy_id,)).fetchall()]
+        destinations = [dict(row) for row in db.execute('SELECT destination_id,scope_kind,scope_id,generation,state,required_through_sequence '
+            'FROM security_audit_destinations WHERE scope_kind=? AND scope_id=? ORDER BY destination_id LIMIT 101',
+            (policy['scope_kind'],policy['scope_id'])).fetchall()]
+        if len(holds) > 100 or len(destinations) > 100:
+            raise RetentionError('retention_plan_context_capacity')
+        context = dict(policy=policy,active_holds=holds,destinations=destinations)
+        context_sha = hashlib.sha256(canonical(context)).hexdigest()
+        if expected_context is not None and expected_context != context_sha:
+            raise RetentionError('retention_context_conflict')
+        now = int(time.time())
+        if not 0 <= now < 2**63:
+            raise RetentionError('retention_clock_unavailable')
+        current_upper = db.execute('SELECT coalesce(max(sequence),0) FROM security_audit_events '
+            'WHERE scope_kind=? AND scope_id=? AND event_kind=?',
+            (policy['scope_kind'],policy['scope_id'],policy['event_kind'])).fetchone()[0]
+        if upper is None:
+            upper = current_upper
+        if after > upper or upper > current_upper:
+            raise RetentionError('invalid_retention_plan')
+        rows = db.execute('SELECT '+','.join(_FIELDS)+' FROM security_audit_events '
+            'WHERE scope_kind=? AND scope_id=? AND event_kind=? AND sequence>? AND sequence<=? ORDER BY sequence LIMIT ?',
+            (policy['scope_kind'],policy['scope_id'],policy['event_kind'],after,upper,limit+1)).fetchall()
+        plan = dict(format_version=1,coverage='business_audit_events_v1',context=context,context_sha256=context_sha,
+            observed_at=now,after=after,upper_sequence=upper,items=[],candidate_count=0,blocked_count=0,next_after=None,
+            archive_store_validation='not_performed',deletion_authorized=False)
+        # Reserve bounded space for counters, cursor and final digest as they grow.
+        remaining = max_bytes-len(canonical(plan))-128
+        if remaining < 0:
+            raise RetentionError('retention_plan_payload_capacity')
+        for row in rows[:limit]:
+            event = dict(row)
+            required = [entry['destination_id'] for entry in destinations if entry['state'] != 'retired'
+                        or event['sequence'] <= entry['required_through_sequence']]
+            delivered = 0
+            if required:
+                delivered = db.execute('SELECT count(*) FROM security_audit_delivery WHERE event_id=? '
+                    "AND state='delivered' AND destination_id IN ("+','.join('?' for _ in required)+')',
+                    (event['event_id'],*required)).fetchone()[0]
+            reasons = []
+            if policy['state'] != 'active': reasons.append('policy_paused')
+            if holds: reasons.append('active_hold')
+            if now-event['occurred_at'] < policy['min_age_seconds']: reasons.append('minimum_age')
+            if not required: reasons.append('no_required_destination')
+            if delivered < len(required): reasons.append('unconfirmed_delivery')
+            item = dict(event=event,status='blocked' if reasons else 'candidate',blocked_reasons=reasons,
+                        required_destinations=len(required),unconfirmed_destinations=len(required)-delivered)
+            size = len(canonical(item))+bool(plan['items'])
+            if size > remaining:
+                if not plan['items']:
+                    raise RetentionError('retention_plan_payload_capacity')
+                break
+            plan['items'].append(item)
+            plan['blocked_count' if reasons else 'candidate_count'] += 1
+            remaining -= size
+        if len(rows) > len(plan['items']):
+            plan['next_after'] = plan['items'][-1]['event']['sequence']
+        plan['plan_sha256'] = hashlib.sha256(canonical(plan)).hexdigest()
+        if len(canonical(plan)) > max_bytes:
+            raise RetentionError('retention_plan_payload_capacity')
+        return plan

@@ -271,3 +271,6 @@ Actual Linux storage tests: run `python -B /src/tests/test_audit_archive_store.p
 
 
 Offline archive-ledger migration regression: `backend/.venv/Scripts/python.exe -m pytest backend/tests/test_audit_archive_migration.py backend/tests/test_audit_retention_migration.py backend/tests/test_revision_migrations.py -q`. Explicit migration CLI now accepts target9, default remains1. Schema9 is only a tested offline foundation: current retention administration/planner requires8 and serving consumers do not support9. Do not upgrade serving databases for this increment. Migration creates empty ledgers and cannot itself validate or register archive files.
+
+
+Owning-service integration regression: set ATOM_TEST_API_IMAGE to the explicit pinned local API test image, then run `backend/.venv/Scripts/python.exe -m pytest backend/tests/integration/test_audit_archiving.py backend/tests/test_audit_archive_migration.py backend/tests/test_retention_plan.py backend/tests/test_audit_retention.py -q`. The integration harness mounts a test-only source database read-only, copies it to container tmpfs and exercises actual Linux storage and schema9 registration/recovery. Retention administration/planning now accepts exact8 and9. Archive operations are library service methods only; no production CLI/configuration rollout is provided yet and ordinary serving consumers still reject9.

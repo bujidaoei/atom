@@ -13,10 +13,10 @@ from app.migrations import migrate
 from test_revision_migrations import legacy
 
 
-@pytest.fixture
-def retention(legacy, monkeypatch):
+@pytest.fixture(params=[8,9])
+def retention(legacy, monkeypatch, request):
     path, backup = legacy
-    migrate(path, backup, target_version=8)
+    migrate(path, backup, target_version=request.param)
     monkeypatch.setattr('app.audit_retention.time.time', lambda: 100)
     return path, RetentionRepository(path)
 

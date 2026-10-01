@@ -30,8 +30,7 @@ def test_source_backup_full_restore_empty_ledgers_and_replay(legacy, tmp_path, s
     with sqlite3.connect(path) as db:
         for table in ('security_audit_archives','security_audit_archive_recoveries'):
             assert db.execute('SELECT count(*) FROM '+table).fetchone() == (0,)
-    with pytest.raises(RetentionError, match='retention_schema_required'):
-        RetentionRepository(path)
+    assert RetentionRepository(path).policies() == ()
 
 
 def manifest(**changes):
@@ -152,4 +151,4 @@ def test_populated_eight_history_and_cli_upgrade_preserved(planned, tmp_path):
     assert verify(path) == 9 and verify_backup(saved, expected_version=8)
     with sqlite3.connect(path) as db:
         assert {table: db.execute('SELECT * FROM '+table).fetchall() for table in tables} == before
-    with pytest.raises(RetentionError): repo.plan(policy_id='policy',expected_generation=2)
+    assert repo.plan(policy_id='policy',expected_generation=2)['blocked_count'] == 3
