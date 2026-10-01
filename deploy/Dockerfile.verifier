@@ -1,0 +1,14 @@
+FROM mcr.microsoft.com/playwright/python:v1.58.0-noble-amd64@sha256:cd8493e380df200a471821e2690b710eab8d793dde3c0946fd0a39a961022914
+
+RUN python -m pip install --no-cache-dir playwright==1.58.0 \
+    && useradd --create-home --uid 10001 verifier
+
+WORKDIR /srv
+COPY backend/app/__init__.py backend/app/artifacts.py backend/app/snapshots.py \
+     backend/app/content_policy.py backend/app/verification_contract.py \
+     backend/app/verification_observer.py backend/app/verification_origin.py \
+     backend/app/verifier_worker.py /srv/app/
+
+ENV PYTHONPATH=/srv HOME=/tmp TMPDIR=/tmp PYTHONDONTWRITEBYTECODE=1
+USER 10001:10001
+ENTRYPOINT ["python", "-m", "app.verifier_worker"]
