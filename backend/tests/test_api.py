@@ -170,6 +170,27 @@ def test_broker_adoption_rejects_stale_legacy_heat(signed_in: TestClient, monkey
         assert session.get(Project, project_id).status == "ready"
 
 
+def test_local_adoption_still_copies_completed_heat(signed_in: TestClient) -> None:
+    from app import storage
+    from app.db import session_scope
+    from app.models import Project, Race, RaceHeat
+
+    project_id = signed_in.post("/api/projects", json={"prompt": "本地赛道"}).json()["project"]["id"]
+    with session_scope() as session:
+        session.add(Race(id="local-race", project_id=project_id, status="done"))
+        session.add(RaceHeat(id="local-heat", race_id="local-race", model="fixture", status="done"))
+    branch = storage.workspace_dir(project_id, "local-heat")
+    branch.mkdir(parents=True)
+    (branch / "index.html").write_text("completed local heat", encoding="utf-8")
+
+    response = signed_in.post(f"/api/projects/{project_id}/race/local-heat/adopt")
+    assert response.status_code == 200
+    assert (storage.workspace_dir(project_id) / "index.html").read_text(encoding="utf-8") == "completed local heat"
+    with session_scope() as session:
+        assert session.get(Race, "local-race").winner_heat_id == "local-heat"
+        assert session.get(Project, project_id).status == "ready"
+
+
 def test_race_validates_model_selection(signed_in: TestClient) -> None:
     project_id = signed_in.post("/api/projects", json={"prompt": "落地页"}).json()["project"]["id"]
     # Fewer than two models never reaches the handler.
