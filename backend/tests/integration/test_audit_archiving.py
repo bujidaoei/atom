@@ -12,7 +12,7 @@ IMAGE = os.environ.get('ATOM_TEST_API_IMAGE')
 pytestmark = pytest.mark.skipif(not IMAGE, reason='requires explicit pinned local API image')
 
 
-@pytest.mark.parametrize('scenario', ['happy','cli','hold','receiver','corrupt','crash-archive-before','crash-archive-after',
+@pytest.mark.parametrize('scenario', ['happy','cli','authority-probe','hold','receiver','corrupt','crash-archive-before','crash-archive-after',
     'crash-recover-before','crash-recover-after'])
 def test_actual_store_source_registration_and_recovery(planned, tmp_path, scenario):
     path, _ = planned

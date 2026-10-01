@@ -329,3 +329,6 @@ Schema7 runtime follow-through:30 actual Linux main/own Node/broker cases pass a
 
 
 008 schema9 runtime/browser evidence:6 actual main/own-runtime/broker cases and Chromium private-content login/revocation flow pass; Pi1905 locked files verified. This narrows previous compatibility gaps but does not prove live model, trusted verifier or production acceptance. T033/T034 remain open. See ../008-sandbox-broker/evidence.md.
+
+
+008 T033 acceptance audit found and reproduced a recovery authority gap: in-process restore still has source database write access. Existing byte-recovery receipts are not isolated verification. Added unchecked T035 for fixed broker-owned recovery execution and versioned evidence before T033 acceptance; official sources and actual Linux negative evidence are in ../008-sandbox-broker/contracts/audit-governance.md and evidence.md. Enterprise acceptance remains open.

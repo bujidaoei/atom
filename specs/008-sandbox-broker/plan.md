@@ -306,3 +306,6 @@ Schema9 consumer integration (2026-10-01): authentication/content/revision/verif
 
 
 Schema9 runtime/browser compatibility follow-through (2026-10-01):6 actual Linux main/own Node runtime/broker scenarios pass on9, and real Chromium private-content/login/consent/revocation flow passes with persisted9 audit counts. Desktop/mobile confirmation screenshots inspected without overflow. Pi1905 files still match locked upstream SHA. This supersedes earlier runtime/browser9-not-tested notes at the exercised scope: runtime uses synthetic model stream and disables export; browser fixture uses local test TLS and seeded verifier metadata. Production/live-model/independent verifier/retention acceptance remain separate and open. T033/T034 stay unchecked.
+
+
+T033 acceptance audit correction (2026-10-01): real Linux instrumentation proves current in-process recovery can open a source SQLite write transaction. The fresh memory target and no-source-path function signature do not meet the contract requirement of no source database write authority. Existing receipts prove byte/full-field recovery only, not execution isolation; T033 cannot close on current evidence. T035 is added as a required isolation hardening gate before T033 acceptance. Existing storage, fencing, crash, runtime and browser evidence remains valid within its stated scope. No pruning is authorized.

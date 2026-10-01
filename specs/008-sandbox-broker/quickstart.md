@@ -289,3 +289,6 @@ Current9 component compatibility now covers ordinary business repositories, gove
 
 
 Schema9 targeted runtime regression: with explicit pinned API/sandbox test image environment, run `backend/.venv/Scripts/python.exe -m pytest backend/tests/integration/test_orchestrated_execution.py -k schema-v9 -q`. Six cases must execute without skips. The runtime matrix now supports1/4/5/6/7/9 with named schema IDs. Browser harness now accepts explicit --audit-schema9 (CLI spelling: `--audit-schema 9`); run `python scripts/content_artifact_browser.py --private-exchange --audit-schema 9` with ATOM_TEST_API_IMAGE. These tests do not enable audit export in the runtime matrix or supply live-model/trusted-verifier production evidence.
+
+
+Acceptance limitation: current recover CLI verifies bytes/full fields but still executes inside the database owner's process. T035 must provide and verify a separate restricted execution boundary before calling these receipts isolated verification. The authority-probe integration test intentionally reproduces current source-write capability; its passing test result is negative acceptance evidence, not proof of isolation. T033 remains open.

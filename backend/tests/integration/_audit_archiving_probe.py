@@ -27,7 +27,24 @@ def counts():
 
 
 scenario = sys.argv[1]
-if scenario in ('cli','pages','pages-hold'):
+if scenario == 'authority-probe':
+    # Negative acceptance evidence: the current in-process recovery still has source write authority.
+    service.archive(**request)
+    from app.audit_archive import recover_archive as original_recovery
+    observed = []
+    def probe(*args, **kwargs):
+        with sqlite3.connect('/tmp/source.db') as source:
+            source.execute('BEGIN IMMEDIATE')
+            # Write the existing value and roll back: prove real write capability without changing state.
+            version = source.execute('PRAGMA user_version').fetchone()[0]
+            source.execute(f'PRAGMA user_version={version}')
+            source.rollback()
+            observed.append(True)
+        return original_recovery(*args, **kwargs)
+    with patch('app.audit_archiving.recover_archive', probe):
+        service.recover(archive_id='archive',recovery_id='recovery',verifier_id='verifier')
+    assert observed == [True] and counts() == (1,1)
+elif scenario in ('cli','pages','pages-hold'):
     def cli(operation, **values):
         command = [sys.executable,'-B','-m','app.archive_admin','--database','/tmp/source.db',
             '--store-id',sys.argv[2],'--store-root','/tmp/archive',operation]
