@@ -115,3 +115,23 @@ class AccessRepository:
                 raise AccessError('invalid_access_clock')
             db.execute('UPDATE console_sessions SET revoked_at=? WHERE id=?',(now,session_id))
             return self._decode(db.execute('SELECT * FROM console_sessions WHERE id=?',(session_id,)).fetchone())
+
+    def revoke_console_sessions(self, *, user_id: str, source_session_id: str) -> int:
+        """Revoke existing live sessions, authorized again inside the writer transaction."""
+        self._user(user_id);self._identity(source_session_id)
+        with self._transaction() as db:
+            now=int(time.time())
+            source=db.execute('SELECT * FROM console_sessions WHERE id=? AND user_id=?',
+                              (source_session_id,user_id)).fetchone()
+            if source is None or source['revoked_at'] is not None or not source['created_at']<=now<source['expires_at']:
+                raise AccessError('session_not_found')
+            rows=db.execute('SELECT id,created_at FROM console_sessions '
+                            'WHERE user_id=? AND revoked_at IS NULL AND expires_at>? LIMIT 129',
+                            (user_id,now)).fetchall()
+            if len(rows)>128:
+                raise AccessError('session_capacity')
+            if any(row['created_at']>now for row in rows):
+                raise AccessError('invalid_access_clock')
+            db.executemany('UPDATE console_sessions SET revoked_at=? WHERE id=?',
+                           [(now,row['id']) for row in rows])
+            return len(rows)

@@ -201,3 +201,7 @@ Console content inspection and issuance must stop admission when main applicatio
 
 ### Bounded issuer response delivery
 After admission, content-scope and handoff responses, including recognized request/authorization errors, retain ownership until ASGI delivery finishes or fails. Send timeout or cancellation releases delivery ownership without reversing any committed credential. A retry after a committed but lost reply must not issue a duplicate handoff. Shutdown must observe blocked delivery as unfinished work.
+
+
+### Account-wide self-service revocation
+A live durable console session may revoke all currently live console sessions of its own account. The writer transaction rechecks the authenticated source, bounds affected sessions and commits all revocations atomically. Derived content reads and unredeemed handoffs must fail through their source-session checks. Later password-authenticated login is allowed; an old revoked source must not revoke that later session. This operation is not an account lock or password reset.

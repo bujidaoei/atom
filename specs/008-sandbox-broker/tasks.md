@@ -190,3 +190,6 @@ T022 continuation: main application now owns bounded issuer admission and shutdo
 
 
 T022 continuation: ownership now extends through bounded ASGI response delivery for admitted success and recognized error paths. 79 targeted tests pass; nine actual mounted-route transport fault combinations cover timeout/disconnect/cancellation across success/conflict/malformed-body replies, retained admission during send, drain timeout, cleanup and unchanged committed ledger semantics. Pre-admission ingress bounds, process-death recovery/distributed limits/audit/retention/account-wide revoke and enterprise acceptance remain open; no whole-task closure.
+
+
+T022 continuation: atomic account-wide live-session revocation and durable-only authenticated /api/auth/logout-all implemented. 109 related tests pass, including real passwords/cookies, independent account isolation, concurrent login serialization, late-failure rollback, clock rollback, source replay denial and derived content/pending-handoff rejection. Account settings action/browser acceptance, audit/security-event integration and enterprise operations remain open; no whole-task closure.

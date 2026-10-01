@@ -213,3 +213,6 @@ T027 continuation (008/T022): issuer operations now participate in main applicat
 
 
 T027 continuation (008/T022): issuer response delivery now participates in admission and drain with validated deadlines. 79 targeted tests pass, including real route/database plus injected ASGI send faults; committed-but-undelivered handoff cannot be issued again. Production ingress/recovery and enterprise acceptance remain unfinished.
+
+
+T027 continuation (008/T022): account-wide revocation now has actual transactional/API implementation with 109 related passing tests. Existing devices and derived content access are invalidated; fresh subsequent login survives old-source replay. UI/audit and production rollout remain unaccepted.

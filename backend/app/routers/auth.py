@@ -5,6 +5,7 @@ from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import func, select
 
 from ..config import get_settings
+from ..access_repository import AccessError
 from ..console_auth import credentials, request_session_token, require_auth_origin, session_cookie_name
 from ..deps import CurrentUser, DbSession
 from ..models import User, UserSettings
@@ -107,3 +108,28 @@ def logout(request: Request, response: Response) -> dict[str, bool]:
 @router.get("/me")
 def me(user: CurrentUser) -> dict[str, object]:
     return user_json(user)
+
+
+@router.post("/logout-all")
+def logout_all(request: Request, response: Response) -> dict[str, bool]:
+    settings = get_settings()
+    if settings.session_mode != 'durable':
+        raise HTTPException(404, "该操作需要持久化会话", headers={'Cache-Control':'no-store'})
+    require_auth_origin(request)
+    if request.headers.getlist('x-atom-intent') != ['revoke-account-sessions']:
+        raise HTTPException(403, "请从账户设置发起操作", headers={'Cache-Control':'no-store'})
+    token = request_session_token(request)
+    codec = credentials()
+    source = codec.authenticate(token) if token else None
+    if source is None:
+        raise HTTPException(401, "登录态已失效，请重新登录", headers={'Cache-Control':'no-store'})
+    try:
+        codec.repository.revoke_console_sessions(user_id=source.user_id,source_session_id=source.id)
+    except AccessError as error:
+        if str(error) == 'session_not_found':
+            raise HTTPException(401, "登录态已失效，请重新登录", headers={'Cache-Control':'no-store'}) from error
+        raise
+    response.delete_cookie(session_cookie_name(), path=settings.cookie_path,
+                           secure=settings.cookie_secure,httponly=True,samesite='lax')
+    response.headers['Cache-Control'] = 'no-store'
+    return {'ok': True}

@@ -187,3 +187,7 @@ Replace the module semaphore with ContentIssuerLifecycle attached to main app.st
 
 ### Issuer response ownership extension
 Owned JSONResponse transfers the existing admission token from route processing to ASGI send. The validated default send deadline is ten seconds; finally releases ownership on success, timeout, transport error or cancellation. Recognized admitted failures map to the same response wrapper; pre-admission rejections remain framework responses. This supersedes the earlier response-construction ownership boundary. No transactional rollback is inferred from delivery failure; duplicate issuance continues to conflict. Ingress/socket limits before admission and supervisor/process-death behavior remain deployment obligations.
+
+
+### Account-wide session revocation transaction and API
+Use existing v4 source rows and index without changing schema. AccessRepository.revoke_console_sessions rechecks source/user/lifetime under BEGIN IMMEDIATE, captures at most 129 unrevoked unexpired rows, rejects more than the supported 128 session maximum or future-created rows, and updates captured identities in one transaction. Expired history stays untouched. Durable-only POST /api/auth/logout-all requires canonical Origin and revoke-account-sessions intent, derives account solely from signed persisted source, and clears Cookie only after commit. Replays from revoked source return 401 and cannot affect new login. UI confirmation, audit event and broader account-security controls remain separate work.

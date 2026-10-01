@@ -125,3 +125,66 @@ def test_existing_repository_rejects_schema_drift(access):
     {'active_sessions_per_user':129},{'lock_timeout':float('nan')},{'lock_timeout':True}])
 def test_invalid_configuration_fails_before_io(access,options):
     with pytest.raises(AccessError,match='invalid_access_configuration'):AccessRepository(access[0],**options)
+
+
+def test_account_revoke_is_scoped_and_old_source_cannot_revoke_new_login(access):
+    path,repository=access
+    sessions=[repository.create_console_session(user_id='user',lifetime_seconds=60) for _ in range(3)]
+    with pytest.raises(AccessError):
+        repository.revoke_console_sessions(user_id='foreign',source_session_id=sessions[0].id)
+    assert repository.revoke_console_sessions(user_id='user',source_session_id=sessions[0].id)==3
+    for session in sessions:
+        with pytest.raises(AccessError):repository.console_session(user_id='user',session_id=session.id)
+    fresh=repository.create_console_session(user_id='user',lifetime_seconds=60)
+    with pytest.raises(AccessError):
+        repository.revoke_console_sessions(user_id='user',source_session_id=sessions[0].id)
+    assert AccessRepository(path).console_session(user_id='user',session_id=fresh.id)==fresh
+
+
+def test_account_revoke_rolls_back_all_rows_on_late_failure(access,monkeypatch):
+    path,repository=access
+    sessions=[repository.create_console_session(user_id='user',lifetime_seconds=60) for _ in range(3)]
+    original=repository._transaction
+    @contextmanager
+    def late_failure():
+        with original() as db:
+            yield db
+            raise sqlite3.OperationalError('test_commit_failure')
+    monkeypatch.setattr(repository,'_transaction',late_failure)
+    with pytest.raises(AccessError,match='access_unavailable'):
+        repository.revoke_console_sessions(user_id='user',source_session_id=sessions[0].id)
+    reopened=AccessRepository(path)
+    for session in sessions:assert reopened.console_session(user_id='user',session_id=session.id)==session
+
+
+def test_account_revoke_and_new_login_serialize_without_partial_existing_state(access):
+    _,repository=access
+    old=[repository.create_console_session(user_id='user',lifetime_seconds=60) for _ in range(3)]
+    barrier=Barrier(2)
+    def revoke():
+        barrier.wait(timeout=3)
+        return repository.revoke_console_sessions(user_id='user',source_session_id=old[0].id)
+    def create():
+        barrier.wait(timeout=3)
+        return repository.create_console_session(user_id='user',lifetime_seconds=60)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        revocation=pool.submit(revoke);creation=pool.submit(create)
+        count=revocation.result();fresh=creation.result()
+    for session in old:
+        with pytest.raises(AccessError):repository.console_session(user_id='user',session_id=session.id)
+    if count==4:
+        with pytest.raises(AccessError):repository.console_session(user_id='user',session_id=fresh.id)
+    else:
+        assert count==3 and repository.console_session(user_id='user',session_id=fresh.id)==fresh
+
+
+def test_account_revoke_clock_rollback_is_atomic(access,monkeypatch):
+    path,repository=access
+    source=repository.create_console_session(user_id='user',lifetime_seconds=60)
+    monkeypatch.setattr('app.access_repository.time.time',lambda:110)
+    repository.create_console_session(user_id='user',lifetime_seconds=60)
+    monkeypatch.setattr('app.access_repository.time.time',lambda:105)
+    with pytest.raises(AccessError,match='invalid_access_clock'):
+        repository.revoke_console_sessions(user_id='user',source_session_id=source.id)
+    with sqlite3.connect(path) as db:
+        assert db.execute('SELECT count(*) FROM console_sessions WHERE revoked_at IS NULL').fetchone()==(2,)

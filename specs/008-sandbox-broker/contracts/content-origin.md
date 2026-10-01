@@ -86,3 +86,7 @@ Content inspection/issuance admission belongs to the main application. Shutdown 
 
 
 Issuer delivery update: admitted responses now retain ownership through ASGI send, including recognized errors; default deadline ten seconds. Timeout/cancellation/transport failure releases delivery ownership but cannot undo credential commit. This supersedes the previous response-construction boundary. Pre-admission denial delivery remains subject to ingress/server limits.
+
+
+### Account session revocation
+POST /api/auth/logout-all is durable-mode only and requires the canonical console Origin plus X-Atom-Intent: revoke-account-sessions. Account scope comes only from the live persisted signed source, rechecked inside the revocation transaction. Success {ok:true} follows commit and clears console Cookie with no-store. Missing/revoked source returns 401; wrong origin/intent 403; storage failure 503 without Cookie deletion. New logins serialized after this transaction remain valid. Content sessions/handoffs consult their revoked source and fail immediately on subsequent authorization/redemption.

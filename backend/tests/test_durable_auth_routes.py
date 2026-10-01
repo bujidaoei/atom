@@ -116,3 +116,40 @@ def test_durable_schema_failure_is_unavailable_not_anonymous(durable_client):
     with sqlite3.connect(path) as db:db.execute('PRAGMA user_version=3')
     response=client.get('/api/auth/me')
     assert response.status_code==503 and 'set-cookie' not in response.headers
+
+
+ACCOUNT_INTENT={'X-Atom-Intent':'revoke-account-sessions'}
+
+def test_logout_all_revokes_existing_devices_but_not_future_login(durable_client):
+    client,path=durable_client
+    client.post('/api/auth/register',json=LOGIN)
+    first=client.cookies.get(DURABLE_COOKIE)
+    client.post('/api/auth/login',json=LOGIN)
+    second=client.cookies.get(DURABLE_COOKIE)
+    client.post('/api/auth/register',json=LOGIN|{'email':'independent@example.org'})
+    other=client.cookies.get(DURABLE_COOKIE)
+    response=client.post('/api/auth/logout-all',headers=ACCOUNT_INTENT|{'Cookie':DURABLE_COOKIE+'='+second})
+    assert response.status_code==200 and response.headers['cache-control']=='no-store'
+    assert DURABLE_COOKIE not in client.cookies
+    assert client.get('/api/auth/me',headers={'Cookie':DURABLE_COOKIE+'='+other}).status_code==200
+    for token in (first,second):
+        assert client.get('/api/auth/me',headers={'Cookie':DURABLE_COOKIE+'='+token}).status_code==401
+    assert client.post('/api/auth/login',json=LOGIN).status_code==200
+    assert client.post('/api/auth/logout-all',headers=ACCOUNT_INTENT|{'Cookie':DURABLE_COOKIE+'='+first}).status_code==401
+    assert client.get('/api/auth/me').status_code==200
+
+
+@pytest.mark.parametrize('failure',['origin','intent','storage'])
+def test_logout_all_failure_does_not_clear_cookie_or_session(durable_client,monkeypatch,failure):
+    client,path=durable_client
+    client.post('/api/auth/register',json=LOGIN)
+    headers=ACCOUNT_INTENT.copy()
+    if failure=='origin':headers['Origin']='https://foreign.example'
+    elif failure=='intent':headers={}
+    else:
+        def denied(*args,**kwargs):raise AccessError('access_unavailable')
+        monkeypatch.setattr(AccessRepository,'revoke_console_sessions',denied)
+    response=client.post('/api/auth/logout-all',headers=headers)
+    assert response.status_code==(503 if failure=='storage' else 403)
+    assert 'set-cookie' not in response.headers
+    assert client.get('/api/auth/me').status_code==200

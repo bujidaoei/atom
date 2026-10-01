@@ -189,3 +189,15 @@ repository.exchange(**source['args'])
         assert db.execute('SELECT consumed_at FROM content_bootstraps').fetchone()==(None,)
         assert db.execute('SELECT count(*) FROM content_sessions').fetchone()==(0,)
     assert access.exchange(**args)
+
+
+def test_account_revoke_denies_live_content_and_pending_handoff(private):
+    _,access,binding,source=private
+    first_bootstrap,first_handoff=issue(private)
+    content=access.exchange(binding_id=binding,handoff=first_handoff.secret,browser_nonce=first_bootstrap.secret)
+    second=access.create_console_session(user_id='user',lifetime_seconds=1000)
+    bootstrap=access.bootstrap(binding_id=binding)
+    pending=access.issue_handoff(viewer_id='user',source_session_id=second.id,binding_id=binding,challenge=bootstrap.challenge)
+    assert access.revoke_console_sessions(user_id='user',source_session_id=source.id)==2
+    with pytest.raises(AccessError):access.authorize(binding_id=binding,session_secret=content.secret)
+    with pytest.raises(AccessError):access.exchange(binding_id=binding,handoff=pending.secret,browser_nonce=bootstrap.secret)

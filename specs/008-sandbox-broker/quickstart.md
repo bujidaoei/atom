@@ -172,3 +172,6 @@ Issuer lifecycle validation: run test_content_issuer_lifecycle.py, test_content_
 
 
 Issuer delivery tests: the issuer suite now parametrizes success/409/malformed-body responses against ASGI send timeout, OSError and cancellation. Actual mounted routes authenticate the fixture's real cookie and use real SQLite. The single test slot must remain unavailable while send is held; short drain must report failure, then send cleanup restores capacity. Committed handoffs remain exactly one and retry conflicts, malformed input creates none. These are injected ASGI transport faults, not a real slow TCP/production proxy test.
+
+
+Account revocation tests: run test_access_repository.py, test_content_access.py, test_durable_auth_routes.py, test_content_issuer.py and test_api.py. Tests use actual SQLite and real signed/password-authenticated API sessions; no new browser/UI acceptance is implied. Scope tests prove independent account survives, all existing source cookies fail, later login survives replay, content reads and pending exchange fail. Concurrent login can serialize before (revoked) or after (valid) the revocation; existing sessions must always be revoked. A deliberately raised database error before commit proves all updates roll back.
