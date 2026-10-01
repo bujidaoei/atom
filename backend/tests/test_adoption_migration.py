@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from app.migrations import MigrationError, migrate, verify, verify_backup
-from app.revisions import RevisionError, RevisionRepository
+from app.revisions import RevisionRepository
 from test_revision_migrations import legacy
 
 
@@ -74,8 +74,7 @@ def test_v12_rebuild_preserves_source_and_backup(populated, tmp_path):
     with sqlite3.connect(restored) as db:
         assert db.execute('PRAGMA foreign_key_check').fetchall() == []
         assert db.execute('SELECT revision_id FROM revision_receipts').fetchone() == ('main-result',)
-    with pytest.raises(RevisionError, match='revision_schema_required'):
-        RevisionRepository(path)
+    assert RevisionRepository(path).current_revision('user', main).revision_id == 'main-result'
 
 
 def test_adoption_scope_artifact_and_immutability(populated, tmp_path):

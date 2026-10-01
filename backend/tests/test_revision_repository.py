@@ -26,7 +26,7 @@ BASE = Artifact('a'*64, 'b'*64, 14)
 OUTPUT = Artifact('c'*64, 'd'*64, 15)
 
 
-@pytest.fixture(params=[1,4,5,6,7,9,10],ids=["schema-v1","schema-v4","schema-v5","schema-v6","schema-v7","schema-v9","schema-v10"])
+@pytest.fixture(params=[1,4,5,6,7,9,10,12],ids=["schema-v1","schema-v4","schema-v5","schema-v6","schema-v7","schema-v9","schema-v10","schema-v12"])
 def repository(tmp_path,request):
     path = tmp_path / 'api.db'
     engine = create_engine('sqlite:///' + path.as_posix())
@@ -43,7 +43,11 @@ def repository(tmp_path,request):
         s.add(Run(id='heat-run', project_id='p', heat_id='heat', role='alex', model='fixture', status='running'))
         s.commit()
     engine.dispose()
-    migrate(path, tmp_path / 'backup.db',target_version=request.param)
+    if request.param == 12:
+        migrate(path, tmp_path / 'backup.db', target_version=11)
+        migrate(path, tmp_path / 'before-v12.db', target_version=12)
+    else:
+        migrate(path, tmp_path / 'backup.db', target_version=request.param)
     with sqlite3.connect(path) as db:
         main = db.execute('SELECT id FROM revision_workspaces WHERE heat_id IS NULL').fetchone()[0]
         heat = db.execute('SELECT id FROM revision_workspaces WHERE heat_id IS NOT NULL').fetchone()[0]

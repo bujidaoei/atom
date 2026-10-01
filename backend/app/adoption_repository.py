@@ -1,7 +1,7 @@
 """Fenced adoption of a verified heat revision in offline schema v12.
 
-This repository has no HTTP wiring. The serving v10 repository deliberately
-rejects v12 until the application can read both revision provenance forms.
+This repository has no HTTP wiring. Production remains at v10 until every
+application reader and writer has passed the separate v12 cutover gates.
 """
 from contextlib import contextmanager
 from dataclasses import dataclass

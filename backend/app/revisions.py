@@ -100,7 +100,7 @@ class RevisionRepository:
             raise RevisionError('invalid_revision_configuration')
         self.path, self.timeout = Path(path), lock_timeout
         try:
-            if verify(self.path) not in (1, 4, 5, 6, 7, 9, 10):
+            if verify(self.path) not in (1, 4, 5, 6, 7, 9, 10, 12):
                 raise RevisionError('revision_schema_required')
         except MigrationError:
             raise RevisionError('revision_schema_required') from None
@@ -119,7 +119,7 @@ class RevisionRepository:
             db.row_factory = None
             version = _schema(db)
             db.row_factory = sqlite3.Row
-            if version not in (1, 4, 5, 6, 7, 9, 10):
+            if version not in (1, 4, 5, 6, 7, 9, 10, 12):
                 raise RevisionError('revision_schema_required')
             yield db
             db.execute('COMMIT')
@@ -274,7 +274,9 @@ class RevisionRepository:
                 raise RevisionError('revision_conflict')
             self._store_metadata(db, artifact)
             revision = uuid.uuid4().hex
-            db.execute('INSERT INTO revision_records VALUES (?,?,?,NULL,?,?,NULL,?)',
+            db.execute('''INSERT INTO revision_records
+                (id,workspace_id,project_id,parent_revision_id,artifact_key,snapshot_revision,
+                 producing_attempt_id,created_at) VALUES (?,?,?,NULL,?,?,NULL,?)''',
                        (revision, workspace_id, workspace['project_id'], artifact.key, artifact.revision, int(time.time())))
             db.execute('UPDATE revision_workspaces SET current_revision_id=? WHERE id=?', (revision, workspace_id))
             return revision
@@ -380,7 +382,9 @@ class RevisionRepository:
             self._active(db, attempt, workspace)
             self._store_metadata(db, artifact)
             revision, now = uuid.uuid4().hex, int(time.time())
-            db.execute('INSERT INTO revision_records VALUES (?,?,?,?,?,?,?,?)',
+            db.execute('''INSERT INTO revision_records
+                (id,workspace_id,project_id,parent_revision_id,artifact_key,snapshot_revision,
+                 producing_attempt_id,created_at) VALUES (?,?,?,?,?,?,?,?)''',
                 (revision, workspace['id'], workspace['project_id'], attempt['base_revision_id'],
                  artifact.key, artifact.revision, attempt_id, now))
             db.execute('INSERT INTO revision_receipts VALUES (?,?,?,?,?)',

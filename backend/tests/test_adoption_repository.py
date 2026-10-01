@@ -9,6 +9,7 @@ import sqlite3
 import struct
 import subprocess
 import sys
+import time
 
 import pytest
 
@@ -241,7 +242,22 @@ module.AdoptionRepository(Path(sys.argv[1])).adopt(owner='user',project_id='proj
     assert state(path) == before and verify(path) == 12
 
 
-def test_runtime_revision_repository_still_rejects_v12(prepared):
-    from app.revisions import RevisionError, RevisionRepository
-    with pytest.raises(RevisionError, match='revision_schema_required'):
-        RevisionRepository(prepared[0])
+def test_execution_continues_from_adopted_main_revision(prepared):
+    from app.revisions import RevisionRepository
+    path, main, _, payload, artifact = prepared
+    adopted = adopt(AdoptionRepository(path), Store(artifact.key, payload))
+    with sqlite3.connect(path) as db:
+        db.execute("UPDATE projects SET active_run_id='run' WHERE id='project'")
+    revisions = RevisionRepository(path)
+    assert revisions.current_revision('user', main).revision_id == adopted.revision_id
+    attempt = revisions.reserve('user', main, 'run', 'attempt-after-adopt',
+                                'grant-after-adopt', int(time.time()) + 120)
+    assert attempt.base_revision_id == adopted.revision_id
+    revisions.bind('user', 'attempt-after-adopt', 'broker-after-adopt')
+    receipt = revisions.register('user', 'attempt-after-adopt', 'broker-after-adopt',
+                                 'grant-after-adopt', artifact)
+    assert revisions.current_revision('user', main).revision_id == receipt.revision_id
+    with sqlite3.connect(path) as db:
+        assert db.execute('SELECT parent_revision_id,producing_attempt_id,adoption_id FROM revision_records WHERE id=?',
+                          (receipt.revision_id,)).fetchone() == (adopted.revision_id, 'attempt-after-adopt', None)
+        assert db.execute('PRAGMA foreign_key_check').fetchall() == []
