@@ -115,9 +115,9 @@ sys.path.insert(0,str(root));runpy.run_path(str(root/'fixture.py'),run_name='__m
                         page=context.new_page()
                         response=page.goto(f'https://{metadata["host"]}:{server.server_port}/',wait_until='networkidle',timeout=15000)
                         if options.reserved_path:
-                            assert metadata['conflict'] and response.status==503
+                            assert metadata['conflict'] and metadata['preflightChecked'] and response.status==503
                             assert page.locator('h1').count()==0
-                            print(json.dumps({'browser':browser.version,'reservedArtifactRejected':True,'status':response.status,
+                            print(json.dumps({'browser':browser.version,'reservedArtifactRejected':True,'publicationPreflightRejected':True,'status':response.status,
                                 'scope':'actual conflicting Linux snapshot denied before browser content execution'}))
                             browser.close()
                             return

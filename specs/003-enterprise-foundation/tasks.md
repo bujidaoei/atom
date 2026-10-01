@@ -184,3 +184,5 @@ Feature008 T022 progress: actual signed credentials now bind to durable session 
 Feature008 private-serving progress: dedicated content sessions now authorize real artifact reads and are rechecked through IO; 62 tests include actual Linux revoke-during-read/extraction denial. v4 internal ledgers are supported, but main runtime/auth migration, cookie exchange and browser/private deployment gates remain open. T027 stays unchecked.
 
 T027 continuation (008/T023): root authentication namespace now rejects conflicting verified content manifests and avoids SPA fallback. 14 targeted tests and real Chromium conflicting/normal artifact runs pass. Publication preflight and private exchange/browser acceptance remain unfinished; no enterprise task closure.
+
+T027 continuation (008/T016/T023): real content publication preflight now verifies stored artifacts before promotion and rejects stale state after IO. 34 tests and two actual Chromium runs pass, including corrupt/missing artifacts, publication race and offline replay preservation. Main API selection, trusted verifier and private exchange/enterprise deployment remain open.

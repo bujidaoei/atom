@@ -633,3 +633,17 @@ Validation on baseline 80ab0b5 plus this change:
 - `python scripts/content_artifact_browser.py`: normal real artifact renders all eight scripts and eight styles, all 17 content responses HTTP 200 with revision 00b8ae26de664671969ed9f94b41eac9; `/_atom/access` returns 404 without revision/body fallback. Capture .logs/content-policy-normal-browser.json.
 
 Harness uses synthetic verification reports and self-signed test TLS. It actually promotes conflicting metadata before serving denial: publication preflight has NOT been implemented. No private browser exchange, production TLS, independent verifier or enterprise acceptance is claimed. T023 and parent T027 remain open.
+
+## T016/T023 content publication preflight — 2026-10-01
+
+Baseline e9a481e. Implemented publish_verified with two ledger validation transactions around actual ArtifactStore IO, full digest/size/revision/content-policy validation, one process-wide preflight slot and unchanged atomic final publication writes. Original metadata operation remains internal; main application publication is not switched.
+
+Validation:
+- `backend/.venv/Scripts/python.exe -m pytest backend/tests/test_release_repository.py backend/tests/test_content_repository.py backend/tests/integration/test_revision_routes.py -q --tb=short --junitxml=.logs/publication-preflight-final.xml`: **34 passed**, 20.115 seconds, no skips/errors; existing Starlette/httpx warning. API image sha256:6ac559f089eca4b1a846bb3a57eec1cb24f23a0dde93b849b34e9cc7de3ce2bb.
+- Linux integration verifies no storage read for foreign ownership; real stored file corruption/removal and valid different snapshot substitution cannot change release/pointer/binding/receipt state; a real unpublish inside the storage-read callback succeeds without writer-lock blockage and causes subsequent stale promotion rejection. A fresh generation publishes; exact replay after another unpublish performs no storage read and preserves offline state.
+- `python scripts/content_artifact_browser.py`: actual verified publication/storage/HTTP/local TLS reaches Chromium 145.0.7632.6, all eight styles/scripts execute/load with correct revision, reserved URL remains 404. Capture .logs/publication-preflight-browser.json.
+- Same command with `--reserved-path`: rejects actual conflicting artifact before any release/publication/binding/command receipt. Fixture then intentionally bypasses preflight using internal metadata publication to prove independent serving 503/no application heading. Capture .logs/publication-preflight-conflict-browser.json.
+
+The first integration attempt failed to start Docker: the quoted script argument was 34,552 characters, exceeding Windows command-line capacity. Docker server itself responded (29.4.1). Harness now sends script plus code archive through bounded stdin JSON and uses a short fixed launcher; rerun passes. Failed first output retained at .logs/publication-preflight.xml.
+
+Synthetic verification reports and explicitly seeded revision history remain test setup. This does not authenticate verifier execution or implement an HTTP publication coordinator. Self-signed test TLS is not public certificate acceptance. Post-commit storage loss still yields serving denial; no durable guarantee against later hardware/filesystem failure is claimed. Main runtime migration, private exchange/browser transport and enterprise release/deployment gates remain open.

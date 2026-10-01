@@ -1,6 +1,7 @@
 """Disposable Linux browser fixture, never a production application entrypoint."""
 import json
 import os
+import sqlite3
 from pathlib import Path
 
 os.environ.update(ATOM_ENVIRONMENT='test', ATOM_SANDBOX_MODE='local',
@@ -19,6 +20,7 @@ from app.workspace_import import import_workspace
 from app.verification_contract import capture_contract
 from app.verification_repository import VerificationRepository
 from app.release_repository import ReleaseRepository
+from app.content_policy import ContentPolicyError
 from app.content_repository import ContentRepository
 from app.content_hosts import ContentHosts
 from app.content_service import ContentService
@@ -60,9 +62,22 @@ request = verification.reserve(owner='owner',workspace_id=imported.workspace_id,
 verification.record_report(owner='owner',request_id=request.id,
     results=[{'key':'page','checkIndex':0,'passed':True,'note':'fixture only'}])
 releases = ReleaseRepository(settings.db_path)
-releases.publish(owner='owner',project_id='project',release_id='fixture-release',verification_id=request.id,
+intent=dict(owner='owner',project_id='project',release_id='fixture-release',verification_id=request.id,
     expected_revision=imported.revision_id,expected_generation=0,policy_digest='c'*64,
     runner_version='fixture-report',audience='public',slug='fixture')
+if conflict:
+    try:
+        releases.publish_verified(store,**intent)
+        raise AssertionError('conflicting artifact promoted')
+    except ContentPolicyError as error:
+        assert str(error)=='reserved_content_path'
+    with sqlite3.connect(settings.db_path) as db:
+        for table in ('release_records','release_publications','content_bindings','command_receipts'):
+            assert db.execute(f'SELECT count(*) FROM {table}').fetchone()==(0,)
+    # Deliberately bypass preflight only to exercise the independent serving guard.
+    releases.publish(**intent)
+else:
+    releases.publish_verified(store,**intent)
 content = ContentRepository(settings.db_path)
 binding = content.bind(owner='owner',project_id='project',release_id='fixture-release')
 hosts = ContentHosts('atom-content.test')
@@ -73,7 +88,7 @@ async def fixture(scope,receive,send):
     # Local harness metadata is intentionally separate from content authority.
     if (scope['type']=='http' and scope.get('path')=='/_fixture'
             and (b'host',b'fixture.invalid') in scope.get('headers',[])):
-        await JSONResponse({'host':hosts.hostname(binding.id),'revision':imported.revision_id,'conflict':conflict})(scope,receive,send)
+        await JSONResponse({'host':hosts.hostname(binding.id),'revision':imported.revision_id,'conflict':conflict,'preflightChecked':True})(scope,receive,send)
     else:
         await service(scope,receive,send)
 

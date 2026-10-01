@@ -27,7 +27,6 @@ def test_committed_preview_and_file_routes_on_linux():
 import asyncio,base64,io,json,os,sys,zipfile
 from pathlib import Path
 from types import SimpleNamespace
-source=json.loads(sys.stdin.buffer.read())
 code=Path('/tmp/code');code.mkdir()
 with zipfile.ZipFile(io.BytesIO(base64.b64decode(source['code']))) as z: z.extractall(code)
 sys.path.insert(0,str(code))
@@ -484,15 +483,86 @@ async def content_test():
                 assert (await authorized.get('/style.css',headers=cookie)).status_code==404
                 assert not list(Path('/tmp').glob('atom-release-*'))
 asyncio.run(content_test())
+# Real artifact preflight, including races while no SQLite writer lock is held.
+import sqlite3
+from app.artifacts import ArtifactError
+with sqlite3.connect(settings.db_path) as db:
+    check_id,=db.execute("SELECT verification_id FROM release_records WHERE id='authenticated-private'").fetchone()
+intent=dict(owner='owner',project_id='p',release_id='preflight',verification_id=check_id,
+    expected_revision='second-revision',expected_generation=9,policy_digest='c'*64,
+    runner_version='fixture-runner',audience='public',slug='site')
+def publication_state():
+    with sqlite3.connect(settings.db_path) as db:
+        return {table:db.execute('SELECT * FROM '+table+' ORDER BY 1').fetchall()
+            for table in ('release_records','release_publications','content_bindings','command_receipts')}
+before=publication_state()
+original_read=store.read
+reads=[]
+def forbidden_read(key):
+    reads.append(key)
+    raise AssertionError('unauthorized or replay storage read')
+store.read=forbidden_read
+try:
+    try:releases.publish_verified(store,**(intent|{'owner':'other'}));raise AssertionError('foreign publish')
+    except VerificationError as error:assert str(error)=='release_not_found'
+finally:store.read=original_read
+assert not reads and publication_state()==before
+candidate=releases._publish(**intent,_preflight=True)
+artifact_file=store.root/(candidate.key+'.atomsnap')
+actual=artifact_file.read_bytes()
+try:
+    artifact_file.write_bytes(b'broken')
+    try:releases.publish_verified(store,**intent);raise AssertionError('corrupt publish')
+    except ArtifactError:pass
+finally:artifact_file.write_bytes(actual)
+assert publication_state()==before
+absent=store.root/'preflight-test-backup'
+artifact_file.rename(absent)
+try:
+    try:releases.publish_verified(store,**intent);raise AssertionError('missing publish')
+    except ArtifactError:pass
+finally:absent.rename(artifact_file)
+assert publication_state()==before
+# A substituted valid snapshot must not be mistaken for the captured descriptor.
+store.read=lambda key: original_payload
+try:
+    try:releases.publish_verified(store,**intent);raise AssertionError('substituted publish')
+    except ArtifactError as error:assert str(error)=='release_artifact_mismatch'
+finally:store.read=original_read
+assert publication_state()==before
+# Concurrent real unpublish during storage IO must win over stale preflight.
+def unpublish_during_read(key):
+    payload=original_read(key)
+    releases.unpublish(owner='owner',project_id='p',command_id='preflight-off',
+        expected_release='authenticated-private',expected_generation=9)
+    return payload
+store.read=unpublish_during_read
+try:
+    try:releases.publish_verified(store,**intent);raise AssertionError('stale promotion')
+    except VerificationError as error:assert str(error)=='release_conflict'
+finally:store.read=original_read
+with sqlite3.connect(settings.db_path) as db:
+    assert db.execute("SELECT release_id,generation,live FROM release_publications WHERE project_id='p'").fetchone()==('authenticated-private',10,0)
+    assert db.execute("SELECT count(*) FROM release_records WHERE id='preflight'").fetchone()==(0,)
+receipt=releases.publish_verified(store,**(intent|{'expected_generation':10}))
+assert receipt.generation==11
+releases.unpublish(owner='owner',project_id='p',command_id='after-preflight-off',expected_release='preflight',expected_generation=11)
+committed=publication_state()
+store.read=forbidden_read
+try:
+    assert releases.publish_verified(store,**(intent|{'expected_generation':10}))==receipt
+finally:store.read=original_read
+assert not reads and publication_state()==committed
 print(json.dumps({'routes':'verified','legacy':(legacy/'index.html').read_text()}))
 '''
+    bootstrap="import json,sys; source=json.loads(sys.stdin.buffer.read()); exec(compile(source.pop('script'),'<revision-routes>','exec'))"
     name='atom-revision-routes-'+uuid.uuid4().hex
     try:
         code,out,err=run_bounded(['docker','run','--name',name,'--network=none','--read-only',
             '--user','1000:1000','--cap-drop=ALL','--security-opt=no-new-privileges',
             '--memory=512m','--pids-limit=128','--tmpfs','/tmp:rw,nosuid,nodev,size=256m,mode=1777',
-            '--workdir','/tmp','-i',IMAGE,'/app/backend/.venv/bin/python','-I','-c',script],
-            input_data=json.dumps({'code':base64.b64encode(archive.getvalue()).decode()}).encode(),timeout=30)
+            '--workdir','/tmp','-i',IMAGE,'/app/backend/.venv/bin/python','-I','-c',bootstrap],
+            input_data=json.dumps({'script':script,'code':base64.b64encode(archive.getvalue()).decode()}).encode(),timeout=30)
         assert code==0,err.decode()
         assert json.loads(out)=={'routes':'verified','legacy':'<h1>uncommitted stale legacy</h1>'}
     finally:

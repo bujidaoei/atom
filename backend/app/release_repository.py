@@ -2,14 +2,21 @@
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import hashlib
+import io
 import json
 import re
 import time
+from threading import BoundedSemaphore
 
 from .verification_contract import capture_contract, ContractError
 from .verification_repository import VerificationRepository, VerificationError
-from .artifacts import Artifact
+from .artifacts import Artifact, ArtifactError, ArtifactStore
+from .content_policy import validate_content_manifest
+from .snapshots import verify_snapshot
 from .content_bindings import ensure_binding
+
+
+_PREFLIGHTS = BoundedSemaphore(1)
 
 
 @dataclass(frozen=True)
@@ -64,8 +71,41 @@ class ReleaseRepository:
             return PublishedArtifact(current['project_id'],row['id'],row['revision_id'],
                                      Artifact(row['key'],row['revision'],row['size']))
 
-    def publish(self, *, owner, project_id, release_id, verification_id, expected_revision,
-                expected_generation, policy_digest, runner_version, audience, slug) -> ReleaseReceipt:
+    def publish(self, **intent) -> ReleaseReceipt:
+        """Internal metadata operation; callers need trusted verifier provenance.
+
+        Application coordinators must use publish_verified for content releases.
+        This method remains available for metadata fixtures and ledger operations.
+        """
+        return self._publish(**intent)
+
+    def publish_verified(self, store: ArtifactStore, **intent) -> ReleaseReceipt:
+        """Validate stored content before promotion, without holding the DB lock.
+
+        This validates artifact integrity/policy, not independent verifier identity.
+        Exact committed replay returns its receipt without reading storage again.
+        """
+        candidate = self._publish(**intent, _preflight=True)
+        if isinstance(candidate, ReleaseReceipt):
+            return candidate
+        if not _PREFLIGHTS.acquire(timeout=3):
+            raise VerificationError('release_capacity')
+        try:
+            payload = store.read(candidate.key)
+            manifest = verify_snapshot(io.BytesIO(payload))
+            if (hashlib.sha256(payload).hexdigest() != candidate.key
+                    or len(payload) != candidate.size or manifest.revision != candidate.revision):
+                raise ArtifactError('release_artifact_mismatch')
+            validate_content_manifest(manifest)
+            # Repeat all current authorization/evidence/generation checks and
+            # compare the exact captured descriptor inside the promotion lock.
+            return self._publish(**intent, _expected_artifact=candidate)
+        finally:
+            _PREFLIGHTS.release()
+
+    def _publish(self, *, owner, project_id, release_id, verification_id, expected_revision,
+                 expected_generation, policy_digest, runner_version, audience, slug,
+                 _preflight=False, _expected_artifact=None) -> ReleaseReceipt | Artifact:
         """Requires a trusted coordinator to authenticate verifier provenance.
 
         The persisted report alone is not evidence of browser execution. This
@@ -122,6 +162,18 @@ class ReleaseRepository:
                 raise VerificationError('invalid_stored_contract') from None
             if contract.digest != evidence['contract_digest']:
                 raise VerificationError('release_stale_evidence')
+            if _preflight or _expected_artifact is not None:
+                row = db.execute('''SELECT a.key,a.revision,a.size FROM revision_records r
+                    JOIN revision_artifacts a ON a.key=r.artifact_key AND a.revision=r.snapshot_revision
+                    WHERE r.id=? AND r.workspace_id=? AND r.project_id=?''',
+                    (expected_revision,workspace['id'],project_id)).fetchone()
+                if row is None:
+                    raise VerificationError('release_artifact_required')
+                artifact = Artifact(row['key'],row['revision'],row['size'])
+                if _preflight:
+                    return artifact
+                if artifact != _expected_artifact:
+                    raise VerificationError('release_conflict')
             db.execute('''INSERT INTO release_records
                 (id,project_id,workspace_id,revision_id,verification_id,contract_digest,policy_digest,audience,creator_id,previous_release_id,created_at)
                 VALUES (?,?,?,?,?,?,?,?,?,?,?)''',(release_id,project_id,workspace['id'],expected_revision,verification_id,
