@@ -7,6 +7,7 @@ import pytest
 from app.adoption_repository import AdoptionRepository
 from app.artifacts import ArtifactStore
 from test_adoption_repository import prepared, adopt
+from test_revision_migrations import legacy
 
 
 @pytest.mark.skipif(sys.platform != 'linux', reason='ArtifactStore requires Linux filesystem semantics')
