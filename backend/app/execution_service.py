@@ -17,7 +17,7 @@ from .execution import ExecutionCoordinator, ExecutionError
 from .execution_http import ExecutionAPI
 from .revisions import RevisionRepository, RevisionError
 from .workspace_import import import_workspace
-from .sandbox.client import BrokerClient
+from .sandbox.client import BrokerClient, BrokerClientError
 from .sandbox.grants import GrantCodec, CompletionGrantCodec
 
 
@@ -108,7 +108,7 @@ async def execution_resources(settings):
         completion = CompletionGrantCodec(settings.completion_grant_key.encode(), max_lifetime=7200)
         async with BrokerClient(settings.broker_origin, settings.broker_admin_token,
                                 GrantCodec(settings.broker_grant_key.encode(), max_lifetime=7200)) as broker:
-            await broker.require_ready()
+            await _await_broker_ready(broker)
             coordinator = ExecutionCoordinator(repository, broker, completion_codec=completion)
             await coordinator.reconcile()
             try:
@@ -117,6 +117,22 @@ async def execution_resources(settings):
                 await coordinator.reconcile()
     finally:
         lease.close()
+
+
+async def _await_broker_ready(broker, *, wait_seconds=75, retry_seconds=1):
+    """Bound startup ordering; /ready is read-only and may be retried safely."""
+    try:
+        async with asyncio.timeout(wait_seconds):
+            while True:
+                try:
+                    await broker.require_ready()
+                    return
+                except BrokerClientError as error:
+                    if error.code not in ('broker_not_ready', 'broker_outcome_unknown'):
+                        raise
+                    await asyncio.sleep(retry_seconds)
+    except TimeoutError:
+        raise BrokerClientError('broker_not_ready') from None
 
 
 class ExecutionGateway:

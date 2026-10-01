@@ -402,3 +402,7 @@ Timeout, cancellation and interrupted runs MUST distinguish tool writes inside a
 ### FR-010 — Reliable IP-based production access
 
 Production administration MUST use the literal server IP, verify the pinned SSH host key, avoid credentials in source or logs, and retain a usable access path during deployment. An SSH banner timeout MUST be diagnosed with simultaneous client negotiation and server packet/service evidence before changing `sshd` limits or firewall policy. A working key-based login and repeated successful connects are necessary operational checks, but do not establish the root cause of intermittent ingress loss. Keep this requirement open until the failing path is identified, the corrective change is recorded, and 30 IP key-based connections spread across at least 30 minutes complete without a banner timeout.
+
+### FR-012 — Broker startup ordering
+
+The API MUST tolerate a broker that becomes ready after the API process starts, including a normal container boot where both services are started sequentially. It MUST retry only the read-only readiness probe within a finite startup window and fail promptly on authentication or malformed-response errors. A missing broker after the window MUST fail closed. Restart acceptance MUST verify both containers healthy and the public IP health endpoint without manual process signalling.

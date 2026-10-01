@@ -448,3 +448,11 @@ T038 deployment evidence (2026-10-01): fd01205 image sha256:edeffc8b16f31eb77725
 - [ ] T039.3 Prove revision/receipt integrity, deadline/cancel/process-death recovery, and browser-visible resume behavior using real runtime/broker/storage tests before claiming partial files are saved.
 
 T039 discovery and local verification (2026-10-01): the fd01205 real race recorded successful write tool events for Sol and Terra, yet both timed out with `fileCount=0`. `Orchestrator._turn` reported “已有文件已保留” on its local timeout, then cancelled the remote run; broker interruption revoked the uncommitted sandbox. The message was false in broker mode. The local correction now states that unfinished files were not saved, preserves local-mode wording, and shows “重新生成” when the committed catalog is empty. Backend lifecycle tests passed 22/22, including the broker deadline assertion, and frontend TypeScript/Vite build passed. Production deployment and browser observation remain necessary before T039.1 can be checked; durable partial checkpoint and resume remain open.
+
+### T040 — Reliable API/broker startup (FR-012)
+
+- [x] T040.1 Add a bounded retry of read-only broker readiness at API startup and reject authentication/malformed errors without retry.
+- [x] T040.2 Test delayed readiness, absent broker deadline and hard error; keep lifecycle regressions passing.
+- [ ] T040.3 Deploy the correction with verified backup/rollback and prove coordinated cold startup reaches both healthy containers and public IP health without manual process signalling.
+
+T040 discovery (2026-10-01): e1fba0a image built and started after zero active runs and two integrity-checked online SQLite backups. API returned 502 because its one-shot broker readiness call failed before broker launch, then supervisor marked the process FATAL. Restarting the API container changed the network namespace; broker had to be recreated in the final namespace, followed by a supervisord HUP to start the API child. The serving API and broker then became healthy; external literal-IP HTTPS eventually returned HTTP200 with trusted TLS, though some preceding requests timed out. The local code/test correction passed 60 targeted backend tests. Coordinated cold restart and public health acceptance remain open.
