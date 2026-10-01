@@ -37,6 +37,7 @@ from app.migrations import migrate
 from app.sandbox.client import BrokerClient, BrokerClientError
 from app.sandbox.config import BrokerConfig
 from app.sandbox.docker_driver import DockerDriver, run_bounded
+from app.sandbox.file_ops import FileOperations
 from app.sandbox.grants import Grant, GrantCodec, CompletionGrantCodec
 from app.sandbox.lifecycle import LifecycleError
 from app.sandbox.registry import Registry, RegistryError
@@ -204,6 +205,100 @@ def test_incomplete_checkpoint_with_real_broker_and_store(tmp_path, outcome, cha
         else:
             assert closed.receipt is None and current.revision_id == base_revision
             assert catalogue['incompleteSavedRevisionId'] is None
+        assert registry.find(worker.id).state == 'terminated'
+        assert driver.inspect(worker) is None
+    assert not driver.owned_inventory()
+
+
+def test_partial_checkpoint_waits_for_real_file_write(tmp_path, monkeypatch):
+    path = tmp_path / 'api.db'
+    create_api_database(path)
+    migrate(path, tmp_path / 'backup.db')
+    repository = RevisionRepository(path)
+    with sqlite3.connect(path) as db:
+        workspace = db.execute('SELECT id FROM revision_workspaces').fetchone()[0]
+    source = tmp_path / 'source'
+    source.mkdir(mode=0o700)
+    (source / 'initial.txt').write_text('original', encoding='utf-8')
+    archive = io.BytesIO()
+    export_snapshot(source, archive)
+    storage_root = tmp_path / 'artifacts'
+    storage_root.mkdir(mode=0o700)
+    store = ArtifactStore(storage_root)
+    base = store.put(archive.getvalue())
+    base_revision = repository.bootstrap('owner', workspace, base)
+    intent = repository.reserve('owner', workspace, 'run', 'attempt', 'grant', int(time.time()) + 120)
+    grant = Grant(intent.grant_id, 'owner', intent.project_id, intent.run_id, intent.id,
+                  intent.generation, intent.base_revision, intent.issued_at, intent.deadline)
+    registry = Registry(tmp_path / 'broker.db')
+    driver = DockerDriver(registry.broker_id, IMAGE)
+    with running_broker(registry.path) as (lifecycle, broker, runner, _):
+        observed = runner.run(broker.provision(grant))
+        worker = registry.find(observed.attempt_id)
+        repository.bind('owner', 'attempt', worker.id)
+        runner.run(broker.seed(grant, worker.id, archive.getvalue()))
+        wrote = threading.Event()
+        release_write = threading.Event()
+        export_called = threading.Event()
+        failures = []
+        original_execute = FileOperations.execute
+
+        def held_execute(self, attempt, request, **kwargs):
+            result = original_execute(self, attempt, request, **kwargs)
+            if request['op'] == 'write' and request['path'] == 'result.txt':
+                wrote.set()
+                if not release_write.wait(10):
+                    raise AssertionError('write_release_timeout')
+            return result
+
+        monkeypatch.setattr(FileOperations, 'execute', held_execute)
+        original_export = broker.export
+
+        async def observed_export(*args, **kwargs):
+            export_called.set()
+            return await original_export(*args, **kwargs)
+
+        monkeypatch.setattr(broker, 'export', observed_export)
+
+        def write():
+            try:
+                outcome = lifecycle.file_operation(grant, worker.id, 'held-write', 'tool-held',
+                                                   {'op': 'write', 'path': 'result.txt', 'content': 'complete real write'})
+                assert outcome['ok']
+            except BaseException as error:
+                failures.append(error)
+
+        writer = threading.Thread(target=write)
+        writer.start()
+        try:
+            assert wrote.wait(15)
+
+            def release_after_export():
+                try:
+                    if not export_called.wait(15):
+                        failures.append(AssertionError('export_not_called'))
+                    elif not writer.is_alive():
+                        failures.append(AssertionError('write_not_held'))
+                finally:
+                    release_write.set()
+
+            releaser = threading.Thread(target=release_after_export)
+            releaser.start()
+            coordinator = ExecutionCoordinator(repository, broker,
+                                               completion_codec=CompletionGrantCodec(b'c' * 32))
+            closed = runner.run(coordinator.checkpoint_incomplete('owner', 'attempt', store, 'timed_out'))
+            releaser.join(timeout=20)
+            assert not releaser.is_alive()
+        finally:
+            release_write.set()
+            writer.join(timeout=20)
+        assert not writer.is_alive() and not failures, failures
+        assert closed.state == 'closed' and closed.termination_state == 'confirmed'
+        assert closed.outcome == 'timed_out' and closed.receipt is not None
+        assert closed.receipt.revision_id != base_revision
+        saved = store.read(closed.receipt.artifact_key)
+        files = {entry.path for entry in verify_snapshot(io.BytesIO(saved)).files}
+        assert files == {'initial.txt', 'result.txt'}
         assert registry.find(worker.id).state == 'terminated'
         assert driver.inspect(worker) is None
     assert not driver.owned_inventory()
