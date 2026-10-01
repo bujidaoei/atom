@@ -59,9 +59,22 @@ class VerifierAuthority:
 
     def dispatch(self, *, owner: str, request_id: str, artifact: Artifact,
                  route_id: str, verifier_id: str, environment_digest: str) -> VerifierAssignment:
+        return self._dispatch(owner=owner, request_id=request_id, artifact=artifact,
+                              route_id=route_id, verifier_id=verifier_id,
+                              environment_digest=environment_digest)
+
+    def dispatch_current(self, *, owner: str, request_id: str, route_id: str,
+                         verifier_id: str, environment_digest: str) -> VerifierAssignment:
+        """Derive the exact artifact under the dispatch transaction, never from HTTP input."""
+        return self._dispatch(owner=owner, request_id=request_id, artifact=None,
+                              route_id=route_id, verifier_id=verifier_id,
+                              environment_digest=environment_digest)
+
+    def _dispatch(self, *, owner: str, request_id: str, artifact: Artifact | None,
+                  route_id: str, verifier_id: str, environment_digest: str) -> VerifierAssignment:
         if (not all(_matches(_ID, value) for value in (owner, request_id, verifier_id))
                 or not _matches(_ROUTE, route_id) or not _matches(_DIGEST, environment_digest)
-                or type(artifact) is not Artifact):
+                or (artifact is not None and type(artifact) is not Artifact)):
             raise VerificationError('invalid_verifier_dispatch')
         with self._ledger._transaction() as db:
             if db.execute('PRAGMA user_version').fetchone()[0] != 13:
@@ -91,8 +104,12 @@ class VerifierAuthority:
                   AND w.current_revision_id=r.id AND w.active_attempt_id IS NULL
                   AND p.active_run_id IS NULL''',
                 (request.revision_id, request.workspace_id, request.project_id)).fetchone()
-            if descriptor is None or artifact != Artifact(*descriptor):
+            if descriptor is None:
                 raise VerificationError('verification_stale_artifact')
+            current_artifact = Artifact(*descriptor)
+            if artifact is not None and artifact != current_artifact:
+                raise VerificationError('verification_stale_artifact')
+            artifact = current_artifact
             issued_at = int(time.time())
             if not request.created_at <= issued_at < request.deadline:
                 raise VerificationError('verification_expired')

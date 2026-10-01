@@ -65,6 +65,30 @@ def test_dispatch_denies_foreign_owner_wrong_artifact_and_changed_contract(adopt
         assert db.execute('SELECT count(*) FROM verification_dispatches').fetchone() == (0,)
 
 
+def test_dispatch_current_derives_artifact_under_owner_and_head_checks(adopted, tmp_path):
+    path, receipt, intent = adopted
+    migrate(path, tmp_path / 'before-v13.db', target_version=13)
+    request = VerificationRepository(path).reserve(**intent)
+    authority = VerifierAuthority(path)
+    args = dict(request_id=request.id, route_id='a' * 32,
+                verifier_id='worker-1', environment_digest='e' * 64)
+    with pytest.raises(VerificationError, match='verification_not_found'):
+        authority.dispatch_current(owner='foreign', **args)
+    with sqlite3.connect(path) as db:
+        db.execute("UPDATE revision_workspaces SET current_revision_id=NULL WHERE id=?",
+                   (request.workspace_id,))
+    with pytest.raises(VerificationError, match='verification_stale_artifact'):
+        authority.dispatch_current(owner='user', **args)
+    with sqlite3.connect(path) as db:
+        db.execute("UPDATE revision_workspaces SET current_revision_id=? WHERE id=?",
+                   (request.revision_id, request.workspace_id))
+    dispatched = authority.dispatch_current(owner='user', **args)
+    assert dispatched.artifact == receipt.artifact
+    assert dispatched.request == request
+    with pytest.raises(VerificationError, match='verifier_already_dispatched'):
+        authority.dispatch_current(owner='user', **args)
+
+
 def test_single_use_dispatch_and_authentication(authorized):
     path, receipt, request, authority, assignment, results = authorized
     assert len(assignment.credential) == 32

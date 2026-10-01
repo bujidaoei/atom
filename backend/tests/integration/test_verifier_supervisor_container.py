@@ -4,6 +4,7 @@ import json
 import multiprocessing
 import os
 from pathlib import Path
+import secrets
 import signal
 import socket
 import sqlite3
@@ -27,6 +28,7 @@ from app.verification_repository import VerificationError
 from app.verifier_authority import VerifierAuthority
 from app.verifier_supervisor import SupervisorError, VerifierSupervisor
 from app.verifier_coordinator import VerifierCoordinator
+from app.verifier_service import VerifierProcessConfig, VerifierStartupError
 from app.sandbox.daemon_lease import DaemonLeaseError
 from test_adoption_repository import Store, prepared, snapshot
 from test_adoption_verification_repository import adopted
@@ -60,6 +62,103 @@ def assignment(adopted, tmp_path, request):
     payload, artifact = snapshot(b'<html>heat</html>')
     assert artifact == dispatched.artifact
     return path, supervisor, authority, dispatched, Store(artifact.key, payload)
+
+
+@pytest.mark.skipif(sys.platform != 'linux' or not os.environ.get('ATOM_VERIFIER_TEST_REAL_STORE'),
+                    reason='requires target Linux Docker daemon and real ArtifactStore')
+def test_private_verifier_process_owns_browser_and_registers_real_result(adopted, tmp_path):
+    path, receipt, intent = adopted
+    with sqlite3.connect(path) as db:
+        db.execute('UPDATE requirements SET checks_json=? WHERE project_id=?',
+                   (json.dumps([{'type':'exists','selector':'body'}]), 'project'))
+    intent['expected_contract'] = capture_contract([{
+        'key':'page', 'title':'Page', 'detail':'',
+        'checks':[{'type':'exists','selector':'body'}]}]).digest
+    migrate(path, tmp_path / 'before-v13.db', target_version=13)
+    reserved = VerificationRepository(path).reserve(**intent)
+    payload, artifact = snapshot(b'<html>heat</html>')
+    assert artifact == receipt.artifact
+    root = tmp_path / 'artifacts'
+    root.mkdir(mode=0o700)
+    assert ArtifactStore(root).put(payload) == artifact
+    token = secrets.token_urlsafe(48)
+    config = VerifierProcessConfig(path, root, IMAGE, PROFILE, 'service-worker', token)
+    assert config.verifier_id == 'service-worker'
+    with pytest.raises(VerifierStartupError, match='verifier_configuration_invalid'):
+        VerifierProcessConfig(path, root, IMAGE, PROFILE, 'service-worker', 'short')
+    listener = socket.socket()
+    listener.bind(('127.0.0.1', 0))
+    port = listener.getsockname()[1]
+    listener.close()
+    environment = dict(os.environ, ATOM_VERIFIER_DB_PATH=str(path),
+        ATOM_VERIFIER_ARTIFACT_DIR=str(root), ATOM_VERIFIER_IMAGE=IMAGE,
+        ATOM_VERIFIER_SECCOMP_PATH=str(PROFILE), ATOM_VERIFIER_ID=config.verifier_id,
+        ATOM_VERIFIER_CONTROL_TOKEN=token)
+    command = [sys.executable, '-m', 'uvicorn', 'app.verifier_service:create_app',
+               '--factory', '--host', '127.0.0.1', '--port', str(port), '--log-level', 'error']
+    process = subprocess.Popen(command, env=environment, stdout=subprocess.DEVNULL,
+                               stderr=subprocess.DEVNULL)
+    challenger = None
+    try:
+        with httpx.Client(base_url=f'http://127.0.0.1:{port}', trust_env=False,
+                          timeout=40) as client:
+            deadline = time.monotonic() + 15
+            while True:
+                assert process.poll() is None, 'verifier process exited before readiness'
+                try:
+                    denied = client.post('/v1/verify', json={'owner':'user',
+                        'requestId':reserved.id})
+                    break
+                except httpx.ConnectError:
+                    assert time.monotonic() < deadline, 'verifier startup deadline'
+                    time.sleep(.05)
+            assert denied.status_code == 401
+            headers = {'authorization':f'Bearer {token}'}
+            with socket.socket() as challenger_listener:
+                challenger_listener.bind(('127.0.0.1', 0))
+                challenger_port = challenger_listener.getsockname()[1]
+            challenger = subprocess.Popen(command[:-4] + ['--port',str(challenger_port),
+                '--log-level','error'], env=environment, stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE)
+            _stdout, challenge_error = challenger.communicate(timeout=12)
+            assert challenger.returncode != 0
+            assert b'verifier_owner_unavailable' in challenge_error
+            assert client.post('/v1/verify', json={'owner':'foreign',
+                'requestId':reserved.id}, headers=headers).status_code == 404
+            invalid = client.post('/v1/verify', content=b'{"owner":"user","owner":"user",'
+                + b'"requestId":"' + reserved.id.encode() + b'"}',
+                headers=headers | {'content-type':'application/json'})
+            assert invalid.status_code == 400
+            result = client.post('/v1/verify', json={'owner':'user',
+                'requestId':reserved.id}, headers=headers)
+            assert result.status_code == 200
+            assert result.json() == {'requestId':reserved.id,
+                'revisionId':reserved.revision_id, 'outcome':'passed',
+                'total':1, 'passed':1}
+            replay = client.post('/v1/verify', json={'owner':'user',
+                'requestId':reserved.id}, headers=headers)
+            assert replay.status_code == 409
+            assert replay.json() == {'error':'verifier_already_dispatched'}
+        with sqlite3.connect(path) as db:
+            assert db.execute('SELECT outcome FROM verification_results').fetchone() == ('passed',)
+            assert db.execute('SELECT count(*) FROM verification_attestations').fetchone() == (1,)
+            assert db.execute('PRAGMA foreign_key_check').fetchall() == []
+        inventory = subprocess.run(['docker','ps','-aq','--filter',
+            'label=atom.verifier.owner=service-worker'], capture_output=True,
+            text=True, check=True)
+        assert inventory.stdout.strip() == ''
+    finally:
+        if challenger is not None and challenger.poll() is None:
+            challenger.terminate()
+            challenger.wait(timeout=10)
+        if process.poll() is None:
+            process.terminate()
+        try:
+            process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=5)
+        assert process.returncode is not None
 
 
 def test_actual_isolated_browser_registers_one_v13_result(assignment):
