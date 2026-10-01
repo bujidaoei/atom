@@ -1,11 +1,27 @@
 """Explicit local archive operations; protected filesystem authority, no tenant endpoint."""
 import argparse
+import asyncio
 import json
+import os
 from pathlib import Path
 
 from .audit_archive import ArchiveError
 from .audit_archiving import AuditArchiving
 from .audit_retention import RetentionError
+
+
+async def _recover_isolated(service, values):
+    from .sandbox.audit_recovery_client import AuditRecoveryClient
+    from .sandbox.client import BrokerClientError
+    origin = values.pop('broker_origin')
+    image = values.pop('expected_image')
+    policy = values.pop('expected_policy_digest')
+    try:
+        async with AuditRecoveryClient(origin,os.environ.get('ATOM_BROKER_ADMIN_TOKEN'),
+                expected_image=image,expected_policy_digest=policy) as client:
+            return await service.recover_isolated(**values,client=client)
+    except BrokerClientError as error:
+        raise ArchiveError(error.code) from None
 
 
 def main(argv=None):
@@ -24,6 +40,9 @@ def main(argv=None):
     recovery = commands.add_parser('recover')
     for name in ('archive-id','recovery-id','verifier-id'):
         recovery.add_argument('--'+name,required=True)
+    isolated = commands.add_parser('recover-isolated',help='Verify via broker; requires schema10 and ATOM_BROKER_ADMIN_TOKEN.')
+    for name in ('archive-id','recovery-id','verifier-id','broker-origin','expected-image','expected-policy-digest'):
+        isolated.add_argument('--'+name,required=True)
     inspect = commands.add_parser('inspect')
     inspect.add_argument('--archive-id',required=True)
     values = vars(parser.parse_args(argv))
@@ -35,6 +54,8 @@ def main(argv=None):
             result = service.inspect(archive_id=values['archive_id'])
         elif operation == 'recover':
             result = dict(receipt=service.recover(**values),deletion_authorized=False)
+        elif operation == 'recover-isolated':
+            result = dict(receipt=asyncio.run(_recover_isolated(service,values)),deletion_authorized=False)
         else:
             result = service.inspect(**values)
         print(json.dumps(dict(ok=True,**result),separators=(',',':')))
