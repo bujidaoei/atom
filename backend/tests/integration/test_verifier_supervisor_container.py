@@ -139,6 +139,53 @@ def test_changed_contract_during_real_browser_execution_cannot_register(assignme
         assert db.execute('SELECT count(*) FROM verification_attestations').fetchone() == (0,)
 
 
+def test_changed_head_during_real_browser_execution_cannot_register(assignment):
+    path, supervisor, authority, dispatched, store = assignment
+
+    def change_head():
+        with sqlite3.connect(path) as db:
+            db.execute('UPDATE revision_workspaces SET current_revision_id=? WHERE id=?',
+                       ('main-root', dispatched.request.workspace_id))
+
+    store.hook = change_head
+    with pytest.raises(VerificationError, match='verification_stale_evidence'):
+        supervisor.verify_and_register(assignment=dispatched, store=store,
+                                       authority=authority, budget_seconds=20)
+    with sqlite3.connect(path) as db:
+        assert db.execute('SELECT count(*) FROM verification_results').fetchone() == (0,)
+        assert db.execute('SELECT count(*) FROM verification_attestations').fetchone() == (0,)
+
+
+def test_wrong_credential_and_replay_cannot_register_real_browser_result(assignment, monkeypatch):
+    path, supervisor, authority, dispatched, store = assignment
+    results = [{'key': 'page', 'checkIndex': 0, 'passed': True, 'note': 'observed'}]
+    scope = dict(request_id=dispatched.request.id, route_id=dispatched.route_id,
+                 verifier_id=dispatched.verifier_id,
+                 environment_digest=dispatched.environment_digest,
+                 artifact=dispatched.artifact, results=results)
+    with pytest.raises(VerificationError, match='verifier_unauthorized'):
+        authority.register(**scope, credential=os.urandom(32))
+
+    import app.verifier_supervisor as module
+    original = module.run_verifier_bounded
+
+    def inspect_input(args, *, timeout, output_limit, input_data):
+        assert dispatched.credential not in input_data
+        assert dispatched.credential.hex() not in ' '.join(args)
+        return original(args, timeout=timeout, output_limit=output_limit,
+                        input_data=input_data)
+
+    monkeypatch.setattr(module, 'run_verifier_bounded', inspect_input)
+    result = supervisor.verify_and_register(assignment=dispatched, store=store,
+                                            authority=authority, budget_seconds=20)
+    assert result.outcome == 'passed'
+    with pytest.raises(VerificationError, match='verification_expired'):
+        authority.register(**scope, credential=dispatched.credential)
+    with sqlite3.connect(path) as db:
+        assert db.execute('SELECT count(*) FROM verification_results').fetchone() == (1,)
+        assert db.execute('SELECT count(*) FROM verification_attestations').fetchone() == (1,)
+
+
 @pytest.mark.skipif(sys.platform != 'linux' or not os.environ.get('ATOM_VERIFIER_TEST_REAL_STORE'),
                     reason='requires actual Linux ArtifactStore and local Docker daemon')
 def test_target_linux_real_store_and_browser_register_once(assignment, tmp_path):
