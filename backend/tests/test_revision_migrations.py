@@ -244,7 +244,7 @@ def test_versioned_backup_denies_busy_writer_and_drift(legacy, tmp_path):
     assert not destination.exists()
 
 
-@pytest.mark.parametrize('version', [True, None, -1, 4, '1'])
+@pytest.mark.parametrize('version', [True, None, -1, 5, '1'])
 def test_backup_expected_version_is_explicit(legacy, version):
     with pytest.raises(MigrationError, match='invalid_backup_version'):
         verify_backup(legacy[0], expected_version=version)

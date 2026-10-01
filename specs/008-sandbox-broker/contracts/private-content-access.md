@@ -1,6 +1,6 @@
 # Private content access and revocation
 
-Status: implementation contract, not implemented or accepted. Source audit on
+Status: offline v4 data structures implemented/tested; access protocol and live authentication remain unimplemented/unaccepted. Source audit on
 897054d, 2026-10-01. Extends content-origin.md; prerequisites for T015–T019.
 
 ## Evidence and current gap
@@ -149,5 +149,8 @@ and offer top-level access; this does not close the embedded-access requirement.
   contexts under supported cookie policies; no isolated fixture alone closes the
   composed path. Public TLS and deployment rollback remain separate gates.
 
-All capabilities above remain unimplemented. This contract resolves design
-dependencies and creates testable work; it is not acceptance evidence.
+Offline v4 now implements the four data structures, scoped relationships,
+lifetime/terminal constraints and source/consumption insertion checks. Real SQLite
+and Linux crash/retry evidence is recorded under T020. No issuer, exchange,
+source-session authentication or per-request private authorization is enabled;
+this schema evidence does not accept the protocol or production cutover.

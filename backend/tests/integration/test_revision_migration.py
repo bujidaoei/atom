@@ -30,6 +30,7 @@ def test_actual_linux_migration_backup_restore_and_crash(tmp_path):
         "revision_v1": (root / "backend/app/migrations/revision_v1.py").read_text(encoding="utf-8"),
         "release_v2": (root / "backend/app/migrations/release_v2.py").read_text(encoding="utf-8"),
         "content_v3": (root / "backend/app/migrations/content_v3.py").read_text(encoding="utf-8"),
+        "access_v4": (root / "backend/app/migrations/access_v4.py").read_text(encoding="utf-8"),
         "migration": (root / "backend/app/migrations/__init__.py").read_text(encoding="utf-8"),
     }).encode()
     script = '''
@@ -44,6 +45,8 @@ v2=types.ModuleType('app.migrations.release_v2');v2.__package__='app.migrations'
 exec(compile(sources['release_v2'],'release_v2.py','exec'),v2.__dict__)
 v3=types.ModuleType('app.migrations.content_v3');v3.__package__='app.migrations';sys.modules[v3.__name__]=v3
 exec(compile(sources['content_v3'],'content_v3.py','exec'),v3.__dict__)
+v4=types.ModuleType('app.migrations.access_v4');v4.__package__='app.migrations';sys.modules[v4.__name__]=v4
+exec(compile(sources['access_v4'],'access_v4.py','exec'),v4.__dict__)
 exec(compile(sources['migration'],'migration.py','exec'),m.__dict__)
 source=Path('/workspace/api.db'); backup=Path('/workspace/backup.db')
 with sqlite3.connect(source) as db:
@@ -98,6 +101,21 @@ assert os.waitpid(pid,0)[1]==44<<8
 assert m.verify(source)==2 and m.verify_backup(Path('/workspace/before-content.db'),expected_version=2)
 assert m.migrate(source,Path('/workspace/retry-content.db'),target_version=3).applied
 assert m.verify(source)==3
+pid=os.fork()
+if pid==0:
+    original=v4.apply
+    def crash_access(db):
+        original(db)
+        os._exit(45)
+    v4.apply=crash_access
+    m.migrate(source,Path('/workspace/before-access.db'),target_version=4)
+    os._exit(1)
+assert os.waitpid(pid,0)[1]==45<<8
+assert m.verify(source)==3 and m.verify_backup(Path('/workspace/before-access.db'),expected_version=3)
+assert m.migrate(source,Path('/workspace/retry-access.db'),target_version=4).applied
+assert m.verify(source)==4
+saved=m.backup_database(source,Path('/workspace/access-backup.db'))
+assert saved.version==4 and m.verify_backup(Path('/workspace/access-backup.db'),expected_version=4)==saved.sha256
 restored=Path('/workspace/restored.db')
 with sqlite3.connect(backup) as src, sqlite3.connect(restored) as dst:
     src.backup(dst)
