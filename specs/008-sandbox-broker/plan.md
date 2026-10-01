@@ -214,3 +214,6 @@ VerificationRepository now accepts exact verified2/3/4/5, enabling ReleaseReposi
 
 
 RevisionRepository accepts exact verified1/4/5; ContentRepository accepts3/4/5. Main production-mode execution matrix expands to1/4/5 with durable console session coexistence and exact create/revoke audit checks on5. Browser harness has explicit --audit-schema (private mode required), migrates to5 before verified publication, then uses real login/confirmation/issuer/exchange/logout paths and checks persisted aggregate event counts through isolated fixture-only metadata. No real credential data is exposed by that metadata. Model stream/report seeding remain explicit test limitations.
+
+
+Transaction crash harness launches independent Python processes against real disposable5 SQLite databases and wraps the owning transaction exit: os._exit immediately before original COMMIT, or immediately after successful transaction exit before operation returns. Exercise create/single-revoke/account-revoke/handoff/session/publish/unpublish without substituting business implementations. Reopen and verify full schema/integrity and exact event/business effects. Do not expose credential-bearing stdin or subprocess output in diagnostics.

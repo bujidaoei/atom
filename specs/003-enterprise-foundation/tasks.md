@@ -236,3 +236,6 @@ T027/008-T027 increment: private credential transitions now carry actual transac
 T027/008-T027 increment: publication and unpublication now carry actual v5 audit transitions atomically with release state; 54 ledger/audit regressions pass. Main serving/runtime5, observation/export/retention and full enterprise rollout remain unfinished.
 
 T027/008-T026 component acceptance: audit schema migration and runtime compatibility now pass208 ledger tests,18 actual main/Node/broker cases across1/4/5 and v5 real private browser flow with exact persisted audit counts. ChildT026 closed for its bounded schema/compatibility scope. ParentT027 and childT027-T030 remain open for remaining audit/enterprise obligations and production rollout.
+
+
+T027/008-T027 component accepted: transactional audit emission for all seven committed security transitions has rollback/replay/concurrency and real subprocess before/after-commit recovery evidence. Current34 tests pass. Parent enterpriseT027 remains open; audit denial observations, read/export/retention and production operations are not covered by this closure.

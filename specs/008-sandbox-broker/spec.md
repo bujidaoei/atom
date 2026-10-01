@@ -228,3 +228,6 @@ Release audit increment: explicit v5 publication/unpublication co-commits one au
 
 
 Audit schema runtime compatibility: explicit v5 is now an accepted exact-schema runtime/content target alongside existing supported versions. This does not weaken SQL-definition/journal verification, accept intermediate runtime schemas2/3, auto-migrate a database or imply production rollout readiness.
+
+
+Audit crash acceptance boundary: abrupt process exit after event insertion but before commit must recover unchanged business/audit state; abrupt exit after commit and before returning must preserve both. This acceptance is distinct from power-loss/filesystem durability and remote export acknowledgement.
