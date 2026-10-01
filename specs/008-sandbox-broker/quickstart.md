@@ -274,3 +274,12 @@ Offline archive-ledger migration regression: `backend/.venv/Scripts/python.exe -
 
 
 Owning-service integration regression: set ATOM_TEST_API_IMAGE to the explicit pinned local API test image, then run `backend/.venv/Scripts/python.exe -m pytest backend/tests/integration/test_audit_archiving.py backend/tests/test_audit_archive_migration.py backend/tests/test_retention_plan.py backend/tests/test_audit_retention.py -q`. The integration harness mounts a test-only source database read-only, copies it to container tmpfs and exercises actual Linux storage and schema9 registration/recovery. Retention administration/planning now accepts exact8 and9. Archive operations are library service methods only; no production CLI/configuration rollout is provided yet and ordinary serving consumers still reject9.
+
+
+Local Linux offline schema9 operator workflow (from backend; paths/IDs below are operator-supplied arguments):
+```sh
+python -m app.archive_admin --database "$DATABASE" --store-id "$STORE_ID" --store-root "$STORE_ROOT" archive --archive-id "$ARCHIVE_ID" --operator-id "$OPERATOR_ID" --policy-id "$POLICY_ID" --expected-generation "$GENERATION"
+python -m app.archive_admin --database "$DATABASE" --store-id "$STORE_ID" --store-root "$STORE_ROOT" inspect --archive-id "$ARCHIVE_ID"
+python -m app.archive_admin --database "$DATABASE" --store-id "$STORE_ID" --store-root "$STORE_ROOT" recover --archive-id "$ARCHIVE_ID" --recovery-id "$RECOVERY_ID" --verifier-id "$VERIFIER_ID"
+```
+Provision the dedicated private store directory per the storage contract first. For non-null continuation, the next archive command uses a new archive ID and exactly the returned policy_id, expected_generation, after, upper and expected_context. Repeat an uncertain command using its original archive ID. A conflict requires fresh review/planning; never discard fences automatically. CLI output contains metadata, not raw events. Recovery is an explicit operation; neither archive nor inspect creates a recovery receipt. These operations do not authorize deletion or a serving9 migration.

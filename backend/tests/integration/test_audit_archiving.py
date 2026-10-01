@@ -12,11 +12,15 @@ IMAGE = os.environ.get('ATOM_TEST_API_IMAGE')
 pytestmark = pytest.mark.skipif(not IMAGE, reason='requires explicit pinned local API image')
 
 
-@pytest.mark.parametrize('scenario', ['happy','hold','receiver','corrupt','crash-archive-before','crash-archive-after',
+@pytest.mark.parametrize('scenario', ['happy','cli','hold','receiver','corrupt','crash-archive-before','crash-archive-after',
     'crash-recover-before','crash-recover-after'])
 def test_actual_store_source_registration_and_recovery(planned, tmp_path, scenario):
     path, _ = planned
     migrate(path, tmp_path/'before-nine.db', target_version=9)
+    run_probe(path, scenario)
+
+
+def run_probe(path, scenario):
     backend = Path(__file__).resolve().parents[2]
     # Fixture policy's actual configured opaque store ID.
     import sqlite3
@@ -31,3 +35,26 @@ def test_actual_store_source_registration_and_recovery(planned, tmp_path, scenar
     status, out, err = run_bounded(command,timeout=30)
     assert status == 0, err.decode()
     assert json.loads(out)['scenario'] == scenario
+
+
+@pytest.mark.parametrize('scenario',['pages','pages-hold'])
+def test_real_business_events_two_cli_pages(reader, tmp_path, monkeypatch, scenario):
+    from app.audit_delivery import AuditDeliveryRepository
+    from app.audit_governance import AuditGovernanceRepository
+    from app.audit_retention import RetentionRepository
+    from test_audit_retention import args
+    path, _, access, _, _ = reader
+    for index in range(101):
+        monkeypatch.setattr('app.access_repository.time.time',lambda index=index: 200+index*61)
+        access.create_console_session(user_id='user',lifetime_seconds=60)
+    migrate(path,tmp_path/'before-seven.db',target_version=7)
+    AuditGovernanceRepository(path).execute(command_id='register',operator_id='operator',destination_id='sink',
+        scope_kind='account',scope_id='user',action='register',expected_generation=0)
+    delivery = AuditDeliveryRepository(path,destination_id='sink',scope_kind='account',scope_id='user')
+    for _ in range(2):
+        delivery.enroll()
+        lease = delivery.claim()
+        delivery.acknowledge(event_ids=[row['event_id'] for row in lease.events],lease_owner=lease.owner)
+    migrate(path,tmp_path/'before-nine.db',target_version=9)
+    RetentionRepository(path).execute(**args(state='active',min_age_seconds=1))
+    run_probe(path,scenario)

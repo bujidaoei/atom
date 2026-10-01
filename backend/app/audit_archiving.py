@@ -86,14 +86,7 @@ class AuditArchiving:
             if row is None or row['archive_store_id'] != self.store_id:
                 raise ArchiveError('archive_not_found')
             row = dict(row)
-        # Expected identity comes exclusively from the immutable ledger, not caller/object metadata.
-        payload = self.store.read(expected_sha256=row['archive_sha256'])
-        restored = recover_archive(payload,expected_sha256=row['archive_sha256'])
-        fields = ('format_version','coverage','scope_kind','scope_id','event_kind','context_sha256',
-                  'plan_sha256','payload_sha256','payload_bytes','event_count','upper_sequence')
-        if (len(payload) != row['archive_bytes'] or restored['manifest']['after'] != row['after_sequence'] or
-                any(restored['manifest'][key] != row[key] for key in fields)):
-            raise ArchiveError('archive_recovery_mismatch')
+        self._read_registered(row)
         with self.repository._transaction() as db:
             self._schema(db)
             previous = db.execute('SELECT * FROM security_audit_archive_recoveries WHERE recovery_id=?',(recovery_id,)).fetchone()
@@ -108,3 +101,35 @@ class AuditArchiving:
                 verified_at=max(now,row['registered_at']))
             db.execute('INSERT INTO security_audit_archive_recoveries ('+','.join(receipt)+') VALUES ('+','.join('?' for _ in receipt)+')', tuple(receipt.values()))
             return receipt
+
+    def _read_registered(self, row):
+        # Expected identity comes exclusively from the immutable ledger, not caller/object metadata.
+        payload = self.store.read(expected_sha256=row['archive_sha256'])
+        restored = recover_archive(payload,expected_sha256=row['archive_sha256'])
+        fields = ('format_version','coverage','scope_kind','scope_id','event_kind','context_sha256',
+                  'plan_sha256','payload_sha256','payload_bytes','event_count','upper_sequence')
+        if (len(payload) != row['archive_bytes'] or restored['manifest']['after'] != row['after_sequence'] or
+                any(restored['manifest'][key] != row[key] for key in fields)):
+            raise ArchiveError('archive_recovery_mismatch')
+        return restored
+
+    def inspect(self, *, archive_id):
+        """Inspect committed bytes and bounded continuation without issuing a recovery receipt."""
+        _identifier(archive_id)
+        with self.repository._transaction(read_only=True) as db:
+            self._schema(db)
+            row = db.execute('SELECT * FROM security_audit_archives WHERE archive_id=?',(archive_id,)).fetchone()
+            if row is None or row['archive_store_id'] != self.store_id:
+                raise ArchiveError('archive_not_found')
+            row = dict(row)
+        restored = self._read_registered(row)
+        last = restored['events'][-1]['sequence']
+        with self.repository._transaction(read_only=True) as db:
+            self._schema(db)
+            more = db.execute('SELECT EXISTS(SELECT 1 FROM security_audit_events WHERE scope_kind=? AND scope_id=? '
+                'AND event_kind=? AND sequence>? AND sequence<=?)',
+                (row['scope_kind'],row['scope_id'],row['event_kind'],last,row['upper_sequence'])).fetchone()[0]
+            receipts = db.execute('SELECT count(*) FROM security_audit_archive_recoveries WHERE archive_id=?',(archive_id,)).fetchone()[0]
+        continuation = dict(policy_id=row['policy_id'],expected_generation=row['policy_generation'],after=last,
+            upper=row['upper_sequence'],expected_context=row['context_sha256']) if more else None
+        return dict(archive=row,last_sequence=last,continuation=continuation,recovery_receipts=receipts,deletion_authorized=False)

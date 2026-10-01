@@ -5,6 +5,7 @@ from pathlib import Path
 import shutil
 import sqlite3
 import sys
+import subprocess
 from unittest.mock import patch
 
 from app.audit_archiving import AuditArchiving
@@ -25,7 +26,43 @@ def counts():
 
 
 scenario = sys.argv[1]
-if scenario in ('hold','receiver'):
+if scenario in ('cli','pages','pages-hold'):
+    def cli(operation, **values):
+        command = [sys.executable,'-B','-m','app.archive_admin','--database','/tmp/source.db',
+            '--store-id',sys.argv[2],'--store-root','/tmp/archive',operation]
+        for key,value in values.items():
+            if value is not None: command += ['--'+key.replace('_','-'),str(value)]
+        result = subprocess.run(command,capture_output=True,timeout=15)
+        assert not result.stderr, result.stderr.decode()
+        return result.returncode,json.loads(result.stdout)
+    status, first = cli('archive',**request)
+    assert status == 0 and first['ok'] and not first['deletion_authorized']
+    assert 'events' not in first and first['recovery_receipts'] == 0
+    assert cli('archive',**request) == (status,first)
+    status, recovered = cli('recover',archive_id='archive',recovery_id='recovery',verifier_id='verifier')
+    assert status == 0 and recovered['receipt']['event_count'] == first['archive']['event_count']
+    status, inspected = cli('inspect',archive_id='archive')
+    assert status == 0 and inspected['recovery_receipts'] == 1
+    if scenario == 'pages-hold':
+        service.repository.execute(command_id='page-hold',policy_id='policy',operator_id='operator',
+            action='place_hold',expected_generation=1,hold_id='page-hold',hold_kind='operational')
+        status, failure = cli('archive',archive_id='second',operator_id='operator',**first['continuation'])
+        assert status == 1 and failure['error'] == 'retention_generation_conflict'
+        assert counts() == (1,1)
+    elif scenario == 'pages':
+        assert first['archive']['event_count'] == 100 and first['continuation']
+        status, second = cli('archive',archive_id='second',operator_id='operator',**first['continuation'])
+        assert status == 0 and second['archive']['event_count'] == 2 and second['continuation'] is None
+        assert second['archive']['after_sequence'] == first['last_sequence']
+        assert second['last_sequence'] == first['archive']['upper_sequence']
+        assert counts() == (2,1)
+    else:
+        assert first['continuation'] is None
+        status, failure = cli('archive',**dict(request,operator_id='changed'))
+        assert status == 1 and failure == {'ok':False,'error':'archive_identity_conflict'}
+        status, failure = cli('inspect',archive_id='missing')
+        assert status == 1 and failure == {'ok':False,'error':'archive_not_found'}
+elif scenario in ('hold','receiver'):
     original = service.store.put
     def change(*args, **kwargs):
         result = original(*args, **kwargs)

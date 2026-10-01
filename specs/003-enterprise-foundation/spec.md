@@ -107,3 +107,6 @@ FR-008/FR-012 design refinement from official Atoms/GitHub/GitLab research: reco
 
 
 008 T033 service increment: actual Linux archive publication/readback, source/context revalidation and immutable9 manifest/recovery registration connected.111 tests pass including8 real Linux integration scenarios and retention8/9 authority regression. Operator workflow/configuration and ordinary runtime9 acceptance remain open; no pruning/deployment. Details: ../008-sandbox-broker/evidence.md; T033/T034 stay unchecked.
+
+
+008 T033 operator workflow: explicit archive/inspect/recover CLI and source-fenced continuation implemented;11 actual Linux integration cases pass, including102 real business events over100+2 pages and hold-after-first-page rejection. See ../008-sandbox-broker/evidence.md. Ordinary runtime9 and enterprise production acceptance remain open; T033/T034 unchecked.
