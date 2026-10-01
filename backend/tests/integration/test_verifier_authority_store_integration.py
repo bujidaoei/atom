@@ -7,8 +7,11 @@ import pytest
 
 from app.adoption_repository import AdoptionRepository
 from app.artifacts import ArtifactError, ArtifactStore
+from app.content_access import ContentAccessRepository
+from app.content_repository import ContentRepository
 from app.migrations import migrate, verify
 from app.release_repository import ReleaseRepository
+from app.release_view import materialized_private_content
 from app.verification_contract import capture_contract
 from app.verification_repository import VerificationRepository
 from app.verifier_authority import VerifierAuthority
@@ -57,7 +60,23 @@ def test_real_artifact_requires_registered_v13_attestation(prepared, tmp_path):
     stored.write_bytes(original)
     first = ReleaseRepository(path).publish_verified(store, **intent)
     assert first.revision_id == adopted.revision_id and verify(path) == 13
+    content = ContentRepository(path)
+    binding = content.bind(owner='user', project_id='project', release_id=first.release_id)
+    assert content.sharing_binding(slug=intent['slug']) == binding
+    access = ContentAccessRepository(path)
+    source = access.create_console_session(user_id='user', lifetime_seconds=900)
+    bootstrap = access.bootstrap(binding_id=binding.id)
+    handoff = access.issue_handoff(viewer_id='user', source_session_id=source.id,
+        binding_id=binding.id, challenge=bootstrap.challenge)
+    session = access.exchange(binding_id=binding.id, handoff=handoff.secret,
+        browser_nonce=bootstrap.secret)
+    with materialized_private_content(content, access, store, binding_id=binding.id,
+            session_secret=session.secret) as view:
+        assert (view.path / 'index.html').read_bytes() == b'<html>heat</html>'
+        assert view.publication.artifact == artifact
     with sqlite3.connect(path) as db:
         assert db.execute('SELECT live,generation FROM release_publications').fetchone() == (1,1)
-        assert db.execute('SELECT event_kind FROM security_audit_events').fetchone() == ('release.published',)
+        assert db.execute('SELECT event_kind FROM security_audit_events ORDER BY sequence').fetchall() == [
+            ('release.published',), ('console.session.created',),
+            ('content.handoff.issued',), ('content.session.created',)]
         assert db.execute('PRAGMA foreign_key_check').fetchall() == []
