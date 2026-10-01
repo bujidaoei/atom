@@ -40,6 +40,7 @@ source = { virtual = "." }
 dependencies = [
     { name = "email-validator" },
     { name = "fastapi" },
+    { name = "h11" },
     { name = "httpx" },
     { name = "pydantic-settings" },
     { name = "pyjwt" },
@@ -58,6 +59,7 @@ dev = [
 requires-dist = [
     { name = "email-validator", specifier = ">=2.2.0" },
     { name = "fastapi", specifier = ">=0.115.0" },
+    { name = "h11", specifier = ">=0.16,<0.17" },
     { name = "httpx", specifier = ">=0.28.0" },
     { name = "pydantic-settings", specifier = ">=2.6.0" },
     { name = "pyjwt", specifier = ">=2.10.0" },

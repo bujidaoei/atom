@@ -251,3 +251,6 @@ T027/008-T029 increment: durable audit delivery-state operations are implemented
 
 
 T027/008-T029 increment: operator destination policy and verified public-IP-pinned TLS primitive implemented after official OWASP/Python research.77 targeted checks include real TLS host/trust/cancel/stall/failover and delivery-state regression. Actual event sender, destination management, lifecycle and production egress acceptance remain open.
+
+
+T027/008-T029 increment: real HTTPS audit batch transport now validates explicit matching receiver ack, with local TLS/independent receiver SQLite dedup and lost-ack evidence.101 relevant regressions pass. Automatic lifecycle/configuration/remote operations and audit viewer/retention remain open.

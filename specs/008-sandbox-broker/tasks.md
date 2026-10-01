@@ -233,3 +233,6 @@ T029 increment: internal real SQLite delivery-state repository now implements bo
 
 
 T029 increment: researched official OWASP/Python transport requirements and implemented strict operator destination policy plus real TLS connection pinned to approved public IPs with hostname verification, finite failover/handshake and cancellation cleanup. Current77 policy/TLS/delivery regressions pass. Tests reroute only OS socket to disposable local TLS listener; no external receiver acceptance claim. Actual event HTTP sender/ack, unified configuration/authorization, scheduling/drain, egress deployment and retention remain open; T029 stays unchecked.
+
+
+T029 increment: actual bounded h11 HTTPS batch sender and explicit digest-correlated204 receiver-ack contract implemented.101 sender/TLS/delivery regressions pass; real TLS local receiver persists3 real audit events, loses first ack, accepts repeated stable ids with one stored copy each, then acknowledges. Failure matrix rejects redirect, wrong/missing/duplicate ack, ordinary200, framing/oversized/malformed/flood replies, silent/drip timeout and cancellation without local delivered state. Sender scheduling/claim integration, configuration authorization, production egress/receiver, UI and retention remain open; T029 not closed.
