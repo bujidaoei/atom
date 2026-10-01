@@ -93,6 +93,26 @@ def test_container_denies_tampered_artifact_and_cross_origin(tmp_path):
         'key': 'page', 'checkIndex': 0, 'passed': False, 'note': 'content_policy_denied'}
 
 
+@pytest.mark.parametrize('action,extra', [
+    ("fetch('https://example.com/escape').catch(()=>{})", {}),
+    ("new WebSocket('wss://example.com/socket')", {}),
+    ("{const frame=document.createElement('iframe');frame.src='https://example.com/escape';document.body.append(frame)}", {}),
+    ("window.open('https://example.com/escape','_blank')", {}),
+    ("{const worker=new Worker('/worker.js');worker.postMessage('go')}",
+     {'worker.js': b"self.onmessage=()=>fetch('https://example.com/escape').catch(()=>{})"}),
+])
+def test_container_malicious_page_cannot_escape_or_pass(action, extra):
+    page = ('''<button id="go">Go</button><span id="ready" hidden>Ready</span>
+      <script>document.querySelector('#go').onclick=()=>{ %s;
+      setTimeout(()=>document.querySelector('#ready').hidden=false,350) }</script>''' % action).encode()
+    _job, wire = _input({'index.html': page, **extra},
+                        [{'type': 'flow', 'selector': '#go', 'expect': '#ready'}])
+    observed = _run(wire)
+    assert observed.returncode == 0, observed.stderr.decode(errors='replace')[-500:]
+    assert json.loads(observed.stdout)['report']['results'][0] == {
+        'key': 'page', 'checkIndex': 0, 'passed': False, 'note': 'content_policy_denied'}
+
+
 def test_container_chromium_uses_nested_user_namespace(tmp_path):
     root = tmp_path / 'sandbox'
     root.mkdir(mode=0o755)
