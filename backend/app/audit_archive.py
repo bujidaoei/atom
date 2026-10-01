@@ -5,8 +5,7 @@ import json
 import re
 import sqlite3
 
-from .audit_repository import _FIELDS
-from .migrations.audit_v5 import SCHEMA
+from .audit_event_format import EVENT_FIELDS as _FIELDS, RECOVERY_TABLE_SQL
 
 
 MAX_ARCHIVE_BYTES = 262144
@@ -156,7 +155,7 @@ def recover_archive(payload, *, expected_sha256):
     archive = decode_archive(payload, expected_sha256=expected_sha256)
     db = sqlite3.connect(':memory:')
     try:
-        db.execute(SCHEMA['security_audit_events'])
+        db.execute(RECOVERY_TABLE_SQL)
         db.executemany('INSERT INTO security_audit_events ('+','.join(_FIELDS)+') VALUES ('+','.join('?' for _ in _FIELDS)+')',
                        [tuple(event[key] for key in _FIELDS) for event in archive['events']])
         db.commit()

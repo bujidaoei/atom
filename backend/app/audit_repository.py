@@ -19,9 +19,7 @@ class AuditPage:
     next_after: int | None
 
 
-_FIELDS = ('sequence','event_id','schema_version','event_kind','occurred_at','actor_kind','actor_id',
-           'scope_kind','scope_id','operation_id','source_session_id','binding_id','release_id',
-           'revision_id','publication_generation','affected_count')
+from .audit_event_format import EVENT_FIELDS as _FIELDS
 
 
 class AuditRepository:

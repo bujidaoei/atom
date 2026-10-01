@@ -169,3 +169,6 @@ Child 008 now implements verified immutable local Linux artifact storage with sy
 
 
 008 T033 acceptance audit found and reproduced a recovery authority gap: in-process restore still has source database write access. Existing byte-recovery receipts are not isolated verification. Added unchecked T035 for fixed broker-owned recovery execution and versioned evidence before T033 acceptance; official sources and actual Linux negative evidence are in ../008-sandbox-broker/contracts/audit-governance.md and evidence.md. Enterprise acceptance remains open.
+
+
+008 T035 worker foundation: fresh fixed broker-owned recovery execution and confirmed cleanup implemented;98 tests pass including4 actual isolated-container success/failure cases. Administrative transport and versioned receipt integration remain open; current CLI still has the documented in-process authority gap. T035/T033/T034 remain unchecked. Details: ../008-sandbox-broker/evidence.md.

@@ -292,3 +292,6 @@ Schema9 targeted runtime regression: with explicit pinned API/sandbox test image
 
 
 Acceptance limitation: current recover CLI verifies bytes/full fields but still executes inside the database owner's process. T035 must provide and verify a separate restricted execution boundary before calling these receipts isolated verification. The authority-probe integration test intentionally reproduces current source-write capability; its passing test result is negative acceptance evidence, not proof of isolation. T033 remains open.
+
+
+Isolated-worker component regression: with explicit pinned sandbox image, run `backend/.venv/Scripts/python.exe -m pytest backend/tests/integration/test_isolated_audit_recovery.py backend/tests/test_audit_archive.py backend/tests/test_audit_repository.py -q`. The four real Linux cases include a20s timeout. This internal broker method is not yet exposed through an authenticated recovery endpoint or used by archive_admin; do not interpret existing schema9 receipts as protocol-v2 isolated evidence.

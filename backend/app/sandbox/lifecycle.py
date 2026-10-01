@@ -9,6 +9,8 @@ import json
 from pathlib import Path
 import re
 import threading
+import time
+import uuid
 
 from .docker_driver import DockerDriver, DriverError, OwnedContainer
 from .grants import Grant
@@ -349,6 +351,25 @@ class Lifecycle:
                 self._ready = False
                 self._closed = True
                 self._lease.close()
+
+    def verify_audit_archive(self, payload: bytes, *, expected_sha256: str) -> dict:
+        """Trusted administrative entry; never accepts runtime grants or caller-selected code/mounts."""
+        from ..audit_archive import decode_archive
+        from .audit_recovery import AuditRecoveryOperations
+        decode_archive(payload, expected_sha256=expected_sha256)
+        identity = uuid.uuid4().hex
+        now = int(time.time())
+        grant = Grant(identity, 'audit-recovery', 'audit-recovery', identity, identity, 1, expected_sha256, now, now+60)
+        attempt = self.provision(grant)
+        with self._exclusive():
+            try:
+                current = self.registry.admit(grant)
+                result = AuditRecoveryOperations(self.driver).execute(current,payload,expected_sha256=expected_sha256)
+            finally:
+                # No verification response is released until worker termination is confirmed/durable.
+                self._stop(attempt.id)
+            return dict(protocol='audit-recovery-v2',image=self.driver.image,policy_digest=self.driver.policy_digest,
+                attempt_id=attempt.id,result=result)
 
     def __enter__(self):
         return self
