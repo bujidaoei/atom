@@ -1,6 +1,6 @@
 # Content origin and pinned resource delivery
 
-Status: partially implemented; public ASGI component has artifact-backed integration coverage, but production ingress, private sessions and browser isolation remain unaccepted. Original architecture audit on d523194, 2026-10-01. Complements revision-release.md and T017/T018.
+Status: partially implemented; public ASGI component has artifact-backed integration coverage and production response policy has local Chromium attack-fixture coverage. Production ingress, private sessions and end-to-end browser isolation remain unaccepted. Original architecture audit on d523194, 2026-10-01. Complements revision-release.md and T017/T018.
 
 ## Source evidence
 
@@ -63,3 +63,5 @@ Serving consistency evidence: the Linux ASGI fixture now stores two distinct rea
 Transport admission design: a ContentService instance has a validated finite active-response limit and ASGI send deadline. Admission precedes worker scheduling and rejects immediately at capacity. The slot covers actual materialization through response delivery. Caller cancellation during threaded IO must retain the slot until the owned read task finishes; Python task cancellation is not thread termination proof. Sending cancellation/error/timeout releases capacity without attempting a second HTTP response after headers. Socket/connection admission, distributed limits and a stuck filesystem remain deployment concerns.
 
 Shutdown contract: ASGI lifespan shutdown permanently closes admission for the service instance, waits for every admitted read/delivery ownership token, and sends shutdown.complete only after all are released. A validated drain deadline produces shutdown.failed if resources remain; it must not cancel ownership futures or pretend synchronous IO stopped. The process supervisor must treat this as an unsuccessful drain. A new service instance is required to resume serving. Real loopback HTTP testing is required separately from injected ASGI sends; neither proves TLS/browser isolation.
+
+Browser policy evidence: scripts/content_browser_acceptance.py serves local HTTPS attack fixtures on separate console/content sites using the actual HEADERS constant. Chromium enforces connection/script/image/worker/form/popup/framing restrictions; console host-only Cookie and storage do not leak, and sibling release storage differs. No-policy control proves network POST and worker operation actually work. Self-signed TLS is explicitly ignored only in the disposable test context. This validates response policy enforcement, not ContentService/artifact/private-auth integration, production certificate validity, Firefox/WebKit or independent verifier authority.

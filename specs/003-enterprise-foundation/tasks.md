@@ -162,3 +162,5 @@ Feature008 T017 evidence extended: two distinct real snapshot versions remain co
 Feature008 T017 progress: bounded content response admission/send lifetime and cancelled-read ownership now pass Linux real-artifact ASGI fault injection plus configuration/host/repository regressions (57 tests). Real network limits, process shutdown, browser/private access and trusted verification remain unaccepted; T027 stays open.
 
 Feature008 T017 progress: bounded truthful ASGI drain and actual Linux Uvicorn TCP serving/startup/shutdown verified (21 targeted tests). Cancelled callers do not erase active IO ownership, and failed drain does not reopen admission. Public TLS/browser/private access/verifier/supervisor deployment gates remain unaccepted; T027 stays open.
+
+Feature008 T017 evidence increment: Chromium local HTTPS attack fixtures validate actual production response headers with network/worker positive controls and console/sibling storage isolation. End-to-end artifact/browser/private-access/verifier/public-TLS acceptance remains open; enterprise T027 remains unchecked.
