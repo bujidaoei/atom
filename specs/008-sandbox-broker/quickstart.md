@@ -190,3 +190,6 @@ Content audit checks: run test_content_audit.py, test_content_access.py and test
 
 
 Release audit checks: run test_release_audit.py with release/verification repository and content audit suites. Tests seed a passing report/descriptor then migrate disposable DB to5, publish/unpublish and replay. Compare all release/pointer/binding/receipt/audit rows around forced audit insert/late failures; run competing publishers and verify only winning transition is recorded. This proves real SQLite transaction behavior, not a trusted verifier or physical artifact build.
+
+
+V5 full-path checks: test_revision_repository.py now runs complete matrix on1/4/5. Supply pinned ATOM_TEST_API_IMAGE and ATOM_TEST_DOCKER_IMAGE to integration/test_orchestrated_execution.py for all18 cases (six outcomes x three schemas), actual production-mode main lifespan/Node runtime/broker. On5 check source survives execution, then revoke and verify two actual audit events. Run python scripts/content_artifact_browser.py --private-exchange --audit-schema after frontend build. Fixture uses5 before real artifact publication, checks normal/fault/revocation browser flows, then exact counts of publication, console creation/single/account revoke and handoff/session events. Without flag retains prior schema fixture mode. No live model or production TLS claim follows.

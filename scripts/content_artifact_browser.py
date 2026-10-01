@@ -35,8 +35,10 @@ def docker(*args):
 def main():
     parser=argparse.ArgumentParser()
     parser.add_argument('--reserved-path',action='store_true',help='Verify rejection of an actual conflicting artifact')
-    parser.add_argument('--private-exchange',action='store_true',help='Exercise real HTTP exchange using fixture bootstrap/issuer')
+    parser.add_argument('--private-exchange',action='store_true',help='Exercise real login, confirmation and private HTTP exchange')
+    parser.add_argument('--audit-schema',action='store_true',help='Use schema5 for audited private browser flow')
     options=parser.parse_args()
+    if options.audit_schema and not options.private_exchange:parser.error('audit schema requires private exchange')
     if options.private_exchange and options.reserved_path:parser.error('select one fixture mode')
     image = os.environ.get('ATOM_TEST_API_IMAGE','')
     if re.fullmatch(r'sha256:[0-9a-f]{64}',image) is None:
@@ -52,6 +54,7 @@ root=Path('/tmp/code');root.mkdir()
 payload=json.loads(sys.stdin.buffer.read())
 os.environ['ATOM_FIXTURE_RESERVED_PATH']='1' if payload['conflict'] else '0'
 os.environ['ATOM_FIXTURE_PRIVATE_EXCHANGE']='1' if payload['private'] else '0'
+os.environ['ATOM_FIXTURE_AUDIT_SCHEMA']='1' if payload['audit'] else '0'
 with zipfile.ZipFile(io.BytesIO(base64.b64decode(payload['code']))) as source:source.extractall(root)
 sys.path.insert(0,str(root));runpy.run_path(str(root/'fixture.py'),run_name='__main__')
 """
@@ -66,7 +69,7 @@ sys.path.insert(0,str(root));runpy.run_path(str(root/'fixture.py'),run_name='__m
                 '/app/backend/.venv/bin/python','-I','-c',bootstrap],stdin=subprocess.PIPE,stdout=log,stderr=log)
             try:
                 process.stdin.write(json.dumps({'code':base64.b64encode(archive.getvalue()).decode(),
-                    'conflict':options.reserved_path,'private':options.private_exchange}).encode())
+                    'conflict':options.reserved_path,'private':options.private_exchange,'audit':options.audit_schema}).encode())
                 process.stdin.close()
                 deadline = time.monotonic()+20
                 metadata = None
@@ -284,8 +287,18 @@ sys.path.insert(0,str(root));runpy.run_path(str(root/'fixture.py'),run_name='__m
                             assert page.goto(base+'/',timeout=5000).status==404
                             other_device.close()
 
+                        audit_counts={}
+                        if options.audit_schema:
+                            connection=HTTPConnection('127.0.0.1',port,timeout=3)
+                            try:
+                                connection.request('GET','/_fixture',headers={'Host':'fixture.invalid'})
+                                audit_counts=json.loads(connection.getresponse().read())['auditCounts']
+                            finally:connection.close()
+                            assert audit_counts=={'release.published':1,'console.session.created':3,
+                                'console.session.revoked':1,'console.account_sessions.revoked':1,
+                                'content.handoff.issued':2,'content.session.created':2},audit_counts
                         print(json.dumps({'browser':browser.version,'artifactRevision':metadata['revision'],
-                            'scripts':len(loaded),'styles':len(styles),'privateExchange':options.private_exchange,'httpBootstrap':options.private_exchange,'realLoginAndConsent':options.private_exchange,'logoutFailureAndRevocation':options.private_exchange,'sessionCheckRecovery':options.private_exchange,'accountRevocationUI':options.private_exchange,'responses':observed,
+                            'auditSchema':options.audit_schema,'auditCounts':audit_counts,'scripts':len(loaded),'styles':len(styles),'privateExchange':options.private_exchange,'httpBootstrap':options.private_exchange,'realLoginAndConsent':options.private_exchange,'logoutFailureAndRevocation':options.private_exchange,'sessionCheckRecovery':options.private_exchange,'accountRevocationUI':options.private_exchange,'responses':observed,
                             'scope':'actual Linux artifact HTTP to Chromium through local test TLS ingress'}))
                         browser.close()
                 finally:

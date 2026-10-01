@@ -42,3 +42,6 @@ V5 content-audit update: ContentAccessRepository now emits handoff/session event
 
 
 V5 release compatibility update: VerificationRepository/ReleaseRepository now support exact verified5 and co-commit release audit events; new5 publication also allocates content binding. RevisionRepository/main broker and ContentRepository serving compatibility still require completion and genuine integrated tests before5 deployment.
+
+
+V5 compatibility implementation: RevisionRepository now supports1/4/5 and ContentRepository3/4/5 under unchanged exact definition/journal checks. This resolves the earlier runtime/serving version refusal when verified by the associated matrices in evidence.md. Current deployment selection still requires stopped-service backup, real-data migration rehearsal, restore/rollback, capacity/retention and ingress gates. No live data migration or audit exporter is automatically enabled.

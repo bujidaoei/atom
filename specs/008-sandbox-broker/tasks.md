@@ -199,7 +199,7 @@ T022/T025 continuation: settings account-wide logout action now uses actual capa
 
 
 ## Audit decomposition — all open, refines T022
-- [ ] T026 [T022] Add explicit offline audit/outbox schema migration with append-only constraints, indexes, unchanged v1-v4 hashes, rollback/source-backup/process-exit evidence; update exact-schema consumer compatibility before live selection. Contract: contracts/security-audit.md.
+- [x] T026 [T022] Add explicit offline audit/outbox schema migration with append-only constraints, indexes, unchanged v1-v4 hashes, rollback/source-backup/process-exit evidence; update exact-schema consumer compatibility before live selection. Contract: contracts/security-audit.md.
 - [ ] T027 [T022] Co-commit allowlisted credential/revocation/publication events in owning transactions; prove late-failure rollback, replay counts and concurrent mutation consistency. Depends on T026.
 - [ ] T028 [T022] Implement bounded redacted denial observations and separate operational failure/gap signals; scan real outputs using sentinel credentials and hostile input. No audit-success claim when sink is unavailable.
 - [ ] T029 [T022] Implement authorized bounded audit reads and at-least-once outbox export with stable pagination/id, destination protections, leases, deadlines, retry/restart/ack/retention acceptance. Depends on T026/T027.
@@ -217,3 +217,5 @@ T027 increment: content handoff issuance and session redemption now co-commit ty
 
 
 T026/T027 increment: verification/release ledger5 compatibility and transactional publish/unpublish events implemented. 54 targeted regressions pass, including receipt replay without duplicate events, competing publishers with one event, and before/after-audit failure preserving records/binding/pointer/receipt/event state. Physical artifact verification, independent verifier and full main-runtime5/serving acceptance remain separate open gates; neither task closed.
+
+T026 component accepted: prior63 migration/constraint/source-backup/Windows process-exit tests plus current208 ledger and18 real main-runtime/broker matrix cases and actual v5 artifact/browser audit flow complete the schema and exact-consumer compatibility obligation. No v1-v4 DDL/hash changed. T027-T030 remain open; audit business crash matrix, denial observations/export/retention, production data migration/restore and whole-enterprise acceptance are not closed by this component.

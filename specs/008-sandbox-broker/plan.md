@@ -211,3 +211,6 @@ Extend the typed audit writer with content transitions. Resolve project/release/
 
 
 VerificationRepository now accepts exact verified2/3/4/5, enabling ReleaseRepository-owned transactions on5. V5 publication allocates immutable binding before promotion and appends a fixed release audit event after receipt insertion; unpublish similarly records its command id and next generation. Writer resolves release/revision/binding from stored scope. Existing receipt replay returns before event creation. Full main-runtime/content-serving5 compatibility remains separate.
+
+
+RevisionRepository accepts exact verified1/4/5; ContentRepository accepts3/4/5. Main production-mode execution matrix expands to1/4/5 with durable console session coexistence and exact create/revoke audit checks on5. Browser harness has explicit --audit-schema (private mode required), migrates to5 before verified publication, then uses real login/confirmation/issuer/exchange/logout paths and checks persisted aggregate event counts through isolated fixture-only metadata. No real credential data is exposed by that metadata. Model stream/report seeding remain explicit test limitations.

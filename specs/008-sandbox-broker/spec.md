@@ -225,3 +225,6 @@ Content audit increment: on v5, successful handoff issuance and content-session 
 
 
 Release audit increment: explicit v5 publication/unpublication co-commits one authoritative release transition event with pointer/binding/receipt mutations. Receipt replay must not repromote or duplicate audit history. Any failure writing the event preserves the previously published state.
+
+
+Audit schema runtime compatibility: explicit v5 is now an accepted exact-schema runtime/content target alongside existing supported versions. This does not weaken SQL-definition/journal verification, accept intermediate runtime schemas2/3, auto-migrate a database or imply production rollout readiness.

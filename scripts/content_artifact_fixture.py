@@ -60,7 +60,7 @@ for index in range(8):
     (workspace/f'style-{index}.css').write_text(f'h1 {{ --asset-{index}: {index}; }}')
     (workspace/f'script-{index}.js').write_text(f'(window.loaded ||= []).push({index});')
 imported = import_workspace(repository,store,owner='owner',project_id='project',source=workspace)
-migrate(settings.db_path,Path('/tmp/data/before-v3.db'),target_version=3)
+migrate(settings.db_path,Path('/tmp/data/before-v3.db'),target_version=5 if os.environ.get('ATOM_FIXTURE_AUDIT_SCHEMA')=='1' else 3)
 verification = VerificationRepository(settings.db_path)
 request = verification.reserve(owner='owner',workspace_id=imported.workspace_id,request_id='fixture-check',
     expected_revision=imported.revision_id,expected_contract=capture_contract([requirement]).digest,
@@ -92,7 +92,7 @@ access=None
 navigation=None
 if private_exchange:
     from app.content_access import ContentAccessRepository
-    migrate(settings.db_path,Path('/tmp/data/before-v4.db'),target_version=4)
+    migrate(settings.db_path,Path('/tmp/data/before-v4.db'),target_version=5 if os.environ.get('ATOM_FIXTURE_AUDIT_SCHEMA')=='1' else 4)
     access=ContentAccessRepository(settings.db_path)
     navigation=ContentNavigation('https://console.atom-console.test')
 service = ContentService(content,store,hosts,access=access,navigation=navigation)
@@ -104,7 +104,11 @@ async def fixture(scope,receive,send):
     # Local harness metadata is intentionally separate from content authority.
     if (scope['type']=='http' and scope.get('path')=='/_fixture'
             and (b'host',b'fixture.invalid') in scope.get('headers',[])):
-        await JSONResponse({'host':hosts.hostname(binding.id),'revision':imported.revision_id,'conflict':conflict,'preflightChecked':True})(scope,receive,send)
+        audit_counts={}
+        if os.environ.get('ATOM_FIXTURE_AUDIT_SCHEMA')=='1':
+            with sqlite3.connect(settings.db_path) as db:
+                audit_counts=dict(db.execute('SELECT event_kind,count(*) FROM security_audit_events GROUP BY event_kind').fetchall())
+        await JSONResponse({'host':hosts.hostname(binding.id),'revision':imported.revision_id,'conflict':conflict,'preflightChecked':True,'auditCounts':audit_counts})(scope,receive,send)
     elif private_exchange and scope['type']=='http' and (b'host',b'console.atom-console.test') in scope.get('headers',[]):
         await console_app(dict(scope,scheme='https'),receive,send)
     else:
