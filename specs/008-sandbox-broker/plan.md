@@ -195,3 +195,7 @@ Use existing v4 source rows and index without changing schema. AccessRepository.
 
 ### Account settings integration
 Add canRevokeSessions to serialized User and frontend type, derived from configured durable mode. AccountSessions reuses current settings Panel/Button/ErrorState, with local confirmation/pending/failure state and immediate submission guard. AuthProvider signOut selects one-device or account endpoint, preserving the existing bounded request and success-only identity reset. Account-wide request supplies fixed intent and silent401 so uncertain revocation cannot appear successful. Backend continues independent source/Origin authorization.
+
+
+### Audit architecture refinement from official research
+Implement contracts/security-audit.md through a new explicit offline version while preserving v1-v4 hashes. Co-commit committed event rows with existing credential/release transactions; separate bounded external-delivery state and security-denial observations. No remote call within a writer transaction. Update all exact-version consumers and main/runtime/content compatibility as one rollout obligation. Own-runtime/Pi and existing session behavior stay authoritative until the new schema is genuinely tested. The contract is design evidence only, not an audit implementation.

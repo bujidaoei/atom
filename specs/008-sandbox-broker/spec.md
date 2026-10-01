@@ -209,3 +209,7 @@ A live durable console session may revoke all currently live console sessions of
 
 ### Account settings revocation action
 Offer account-wide logout only when server user metadata advertises durable-session support. Explain current/other-device and private-access effects, require explicit confirmation, and allow cancellation before mutation. Pending action cannot be submitted twice. Failure stays visible without clearing identity; only acknowledged success navigates away. Capability display is not authorization.
+
+
+### Durable security audit requirement
+Follow contracts/security-audit.md: committed security transitions need atomic, redacted, immutable event records; denial observations remain distinct. Stable identity permits export deduplication and correlation to immutable release evidence without credentials/code. No plain logger call may satisfy durable audit acceptance. All migration/runtime/retention/privacy/export gates are explicit and presently unimplemented.

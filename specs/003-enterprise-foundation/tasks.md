@@ -219,3 +219,6 @@ T027 continuation (008/T022): account-wide revocation now has actual transaction
 
 
 T027 continuation (008/T022/T025): account settings action and two-browser real revocation acceptance now implemented locally. Build and 30 API tests pass; cancel/failure/retry and derived content denial verified. Audit and enterprise production acceptance remain unfinished.
+
+
+T027 audit refinement: primary-source comparison and local code inspection now define 008/contracts/security-audit.md and open child T026-T030. Proposed distinction is durable security transitions versus telemetry/denial observations, correlated to immutable release evidence without storing code/credentials. No existing logging or contract document is counted as completed audit capability.

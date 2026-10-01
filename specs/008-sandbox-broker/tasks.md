@@ -196,3 +196,12 @@ T022 continuation: atomic account-wide live-session revocation and durable-only 
 
 
 T022/T025 continuation: settings account-wide logout action now uses actual capability metadata and explicit confirmation/cancel/error/retry. Frontend build, 30 auth/API tests and full private Chromium composition pass. Two independently logged-in browser contexts lose /me access after actual UI action; newly authorized private artifact is denied. Injected transport failure and cancel leave sessions live. Broader multi-browser/audit/security-event/operations gates remain open; no whole-task closure.
+
+
+## Audit decomposition — all open, refines T022
+- [ ] T026 [T022] Add explicit offline audit/outbox schema migration with append-only constraints, indexes, unchanged v1-v4 hashes, rollback/source-backup/process-exit evidence; update exact-schema consumer compatibility before live selection. Contract: contracts/security-audit.md.
+- [ ] T027 [T022] Co-commit allowlisted credential/revocation/publication events in owning transactions; prove late-failure rollback, replay counts and concurrent mutation consistency. Depends on T026.
+- [ ] T028 [T022] Implement bounded redacted denial observations and separate operational failure/gap signals; scan real outputs using sentinel credentials and hostile input. No audit-success claim when sink is unavailable.
+- [ ] T029 [T022] Implement authorized bounded audit reads and at-least-once outbox export with stable pagination/id, destination protections, leases, deadlines, retry/restart/ack/retention acceptance. Depends on T026/T027.
+- [ ] T030 [T022/T025] Run full new-schema main/runtime/content/browser compatibility, privacy and failure matrix plus deployment backup/restore and audit readiness review. Depends on T026-T029.
+Research increment: official Cursor/GitHub/GitLab sources and local code audit establish missing durable ledger/export. Design is recorded; no implementation or task completion claimed.
