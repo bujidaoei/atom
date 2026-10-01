@@ -151,3 +151,6 @@ Child 008 now implements verified immutable local Linux artifact storage with sy
 
 
 008 T033 local storage increment:9 actual Linux filesystem/process cases and1 independent-volume writer-removal/read-container test pass for private no-overwrite audit archives. Protected manifest authority, persisted recovery receipts and service integration remain open; local durability is not legal/cloud immutability or production acceptance. Details: ../008-sandbox-broker/evidence.md. T033/T034 remain unchecked.
+
+
+008 T033 offline schema9 increment: immutable archive manifests and separate recovery receipts added with74 migration/constraint/recovery tests passing. Protected ledger service integration and runtime9 compatibility remain open; metadata constraints do not prove archive IO or recovery. No serving upgrade or deletion authority. Details in ../008-sandbox-broker/evidence.md; T033/T034 remain unchecked.
