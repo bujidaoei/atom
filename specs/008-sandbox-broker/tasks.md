@@ -91,6 +91,7 @@ T008/T011 continuation: reproduced premature cleanup termination when either can
 ## Release/adoption breakdown, 2026-10-01
 - [x] T014 Audit actual acceptance/adoption/publication paths and record contracts/revision-release.md. Source/design audit only.
 - [ ] T015 Add offline versioned verification/release/adoption schema; test upgrade, drift, constraints, backup/restore and crash. Depends on T014.
+- [ ] T015.1 Add an offline adoption-provenance migration after the existing v11 audit schema. Preserve every historical revision/receipt/reference, distinguish a real execution revision from a real adoption revision, enforce source heat/target main scope, and prove backup, FK integrity, rollback and unsupported serving behavior before any production migration.
 - [ ] T016 Implement fenced adoption and transactional evidence/release repository; test SQLite races/replay/crash. Depends on T015.
 - [ ] T017 Implement pinned serving, isolated verifier and trusted evidence registration; test origin, identity, forgery and stale results. Depends on T016.
 - [ ] T018 Wire API/UI acceptance, adoption, publication and rollback to exact identities; preserve labelled legacy history. Depends on T017.
