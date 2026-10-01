@@ -50,7 +50,7 @@ def _read(token, query):
         raise HTTPException(401, _DETAIL)
     page = AuditRepository(codec.repository.path).page(
         user_id=source.user_id, source_session_id=source.id, **query)
-    return {'events': page.events, 'upper': page.upper, 'nextAfter': page.next_after}
+    return {'events': page.events, 'archived': page.archived, 'upper': page.upper, 'nextAfter': page.next_after}
 
 
 def _finished(worker, owner, admission):

@@ -163,6 +163,12 @@ def run_prune(recovered):
     from app.audit_pruning import AuditPruning, PruneError
     from app.migrations import migrate
     scenario=config['scenario']
+    if scenario=='prune-reader':
+        from app.access_repository import AccessRepository
+        with sqlite3.connect('/tmp/source.db') as db:
+            sessions=db.execute("SELECT id FROM console_sessions WHERE user_id='user' ORDER BY rowid").fetchall()
+        with patch('app.access_repository.time.time',lambda:100):
+            AccessRepository(Path('/tmp/source.db')).revoke_console_session(user_id='user',session_id=sessions[-1][0])
     if scenario=='prune-hold':
         owner.repository.execute(command_id='hold',policy_id='policy',operator_id='operator',action='place_hold',
             expected_generation=1,hold_id='legal-hold',hold_kind='legal')
@@ -180,8 +186,14 @@ def run_prune(recovered):
         original=db.execute('SELECT sequence,event_id,scope_kind,scope_id,event_kind FROM security_audit_events '
             "WHERE scope_kind='account' AND scope_id='user' AND event_kind='console.session.created' ORDER BY sequence").fetchall()
         unrelated=db.execute("SELECT * FROM security_audit_events WHERE NOT (scope_kind='account' AND scope_id='user' AND event_kind='console.session.created')").fetchall()
-    if scenario in ('prune-happy','prune-cli','prune-commit-before','prune-commit-after'):
-        if scenario=='prune-happy':
+    if scenario=='prune-reader':
+        from app.audit_repository import AuditRepository
+        reader=AuditRepository(Path('/tmp/source.db'))
+        with patch('app.audit_repository.time.time',lambda:100):
+            first=reader.page(user_id='user',source_session_id=sessions[0][0],limit=1)
+        assert len(first.events)==1 and not first.archived and first.next_after is not None
+    if scenario in ('prune-happy','prune-reader','prune-cli','prune-commit-before','prune-commit-after'):
+        if scenario in ('prune-happy','prune-reader'):
             result=service.prune(**request)
         else:
             command=[sys.executable,'-B','-m','app.prune_admin','--database','/tmp/source.db',
@@ -255,6 +267,15 @@ runpy.run_module('app.prune_admin',run_name='__main__')
             with patch('sqlite3.connect',lambda *args,**kwargs:connect(*args,**dict(kwargs,factory=Connection))):attempt()
         else:attempt()
         with sqlite3.connect('/tmp/source.db') as db:assert list(db.iterdump())==before
+    if scenario=='prune-happy':
+        from app.audit_repository import AuditRepository
+        with sqlite3.connect('/tmp/source.db') as db:
+            source_id=db.execute("SELECT id FROM console_sessions WHERE user_id='user' ORDER BY rowid").fetchone()[0]
+        with patch('app.audit_repository.time.time',lambda:100):
+            page=AuditRepository(Path('/tmp/source.db')).page(user_id='user',source_session_id=source_id)
+        assert not page.events and len(page.archived)==3 and page.upper==original[-1][0] and page.next_after is None
+    if scenario=='prune-reader':
+        check_pruned_reader(reader,sessions[0][0],first,original)
     # Ordinary connections never inherit maintenance authority, including after rollback.
     with sqlite3.connect('/tmp/source.db') as db:
         assert db.execute('SELECT count(*) FROM security_audit_isolated_recoveries').fetchone()==(1,)
@@ -262,6 +283,56 @@ runpy.run_module('app.prune_admin',run_name='__main__')
         except sqlite3.DatabaseError:pass
         else:raise AssertionError('maintenance authority leaked')
     return 1
+
+
+def check_pruned_reader(reader,source_id,first,original):
+    from app.audit_repository import AuditReadError
+    with sqlite3.connect('/tmp/source.db') as db:
+        before=list(db.iterdump())
+        other=db.execute("SELECT id FROM console_sessions WHERE user_id='other'").fetchone()[0]
+    args=dict(user_id='user',source_session_id=source_id)
+    with patch('app.audit_repository.time.time',lambda:100):
+        # A cursor obtained before deletion still visits every remaining identity exactly once.
+        seen=[first.events[0]['event_id']]
+        cursor=first.next_after
+        while cursor is not None:
+            page=reader.page(**args,after=cursor,upper=first.upper,limit=1)
+            assert len(page.events)+len(page.archived)==1 and page.upper==first.upper
+            seen.extend(item['event_id'] for item in (*page.events,*page.archived))
+            cursor=page.next_after
+        mixed=reader.page(**args)
+        assert len(mixed.events)==1 and len(mixed.archived)==3
+        expected=sorted((*mixed.events,*mixed.archived),key=lambda item:item['sequence'])
+        assert seen==[item['event_id'] for item in expected] and len(set(seen))==4
+        assert [(m['sequence'],m['event_id'],m['scope_kind'],m['scope_id'],m['event_kind']) for m in mixed.archived]==original
+        assert all(m['archive_id']=='archive' and m['recovery_id']=='receipt' and m['command_id']=='prune' for m in mixed.archived)
+        assert all(set(m)=={'sequence','event_id','scope_kind','scope_id','event_kind','command_id','archive_id','recovery_id','archived_at'} for m in mixed.archived)
+        archived_only=reader.page(**args,upper=original[-1][0],limit=2)
+        assert not archived_only.events and len(archived_only.archived)==2 and archived_only.next_after==original[1][0]
+        last=reader.page(**args,after=archived_only.next_after,upper=archived_only.upper,limit=2)
+        assert not last.events and len(last.archived)==1 and last.next_after is None
+        ended=reader.page(**args,after=first.upper,upper=first.upper)
+        assert not ended.events and not ended.archived and ended.next_after is None
+        foreign=reader.page(user_id='other',source_session_id=other)
+        assert len(foreign.events)==1 and not foreign.archived
+        project=reader.page(**args,project_id='project')
+        assert len(project.events)==1 and not project.archived
+        for query in (dict(user_id='other',source_session_id=source_id),
+                      dict(user_id='other',source_session_id=other,project_id='project')):
+            try:reader.page(**query)
+            except AuditReadError as error:assert str(error)=='audit_access_denied'
+            else:raise AssertionError('foreign read accepted')
+    with sqlite3.connect('/tmp/source.db') as db:assert list(db.iterdump())==before
+    with patch('app.audit_repository.time.time',lambda:160):
+        try:reader.page(**args,upper=first.upper)
+        except AuditReadError as error:assert str(error)=='audit_access_denied'
+        else:raise AssertionError('expired read accepted')
+    with sqlite3.connect('/tmp/source.db') as db:
+        db.execute('UPDATE console_sessions SET revoked_at=101 WHERE id=?',(source_id,))
+    with patch('app.audit_repository.time.time',lambda:102):
+        try:reader.page(**args,upper=first.upper)
+        except AuditReadError as error:assert str(error)=='audit_access_denied'
+        else:raise AssertionError('revoked read accepted')
 
 
 def run_cli():

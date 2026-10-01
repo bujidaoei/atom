@@ -19,7 +19,7 @@ pytestmark = pytest.mark.skipif(not IMAGE or not API_IMAGE,reason='requires pinn
 
 
 @pytest.mark.parametrize('scenario',['happy','auth','policy','lost-result','worker','cancelled','cli','commit-before','commit-after',
-    'pages','pages-hold','missing','corrupt','cold-read','prune-happy','prune-cli','prune-commit-before','prune-commit-after','prune-hold','prune-corrupt','prune-verifier','prune-missing-receipt','prune-rollback'])
+    'pages','pages-hold','missing','corrupt','cold-read','prune-happy','prune-reader','prune-cli','prune-commit-before','prune-commit-after','prune-hold','prune-corrupt','prune-verifier','prune-missing-receipt','prune-rollback'])
 def test_real_linux_owner_wire_worker_and_receipt(planned,recovery,tmp_path,monkeypatch,scenario):
     path,_ = planned
     migrate(path,tmp_path/'before-ten.db',target_version=10)

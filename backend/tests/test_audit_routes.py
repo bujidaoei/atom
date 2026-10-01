@@ -34,6 +34,7 @@ def test_real_signed_login_and_stable_page(reader):
     assert first.headers['cache-control'] == 'no-store'
     assert first.headers['referrer-policy'] == 'no-referrer'
     page = first.json()
+    assert page['archived'] == []
     assert len(page['events']) == 1 and page['nextAfter'] is not None
     assert client.post('/api/auth/login', json=LOGIN).status_code == 200
     last = client.get(PATH, params={'after': page['nextAfter'], 'upper': page['upper']}, headers=HEADERS).json()
