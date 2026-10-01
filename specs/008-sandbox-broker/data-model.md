@@ -116,3 +116,6 @@ Unified Settings now owns audit_export_config (secret-bearing raw JSON, repr-hid
 
 
 Audit delivery status adds unenrolled count, oldest_unenrolled_at, backlog and observed_at; oldest_unacked_at now includes all unacknowledged scoped events, including those never assigned to the destination. Snapshot is read-only; no new table or migration. Exporter diagnostic_failures is an in-memory saturated64-bit count of raised log-handler failures, not a persisted audit event or restart-stable health registry. Operational state-change record keys: event,destination_id,code only.
+
+
+Proposed next-schema entities (not present): durable destination registry with scope/generation/lifecycle/fixed terminal reason; idempotent administrative receipts; policy-generation/hold bindings; immutable archive manifests and retention plan/receipt/watermark. Existing destination identities absent from current config must migrate visibly rather than disappear. Tokens, their digests and arbitrary errors remain excluded. Detailed transition/acceptance contract is audit-governance.md; DDL and consumer compatibility remain pending.

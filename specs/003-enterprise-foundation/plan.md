@@ -60,3 +60,6 @@ Every implementation task includes negative cases, failure injection where relev
 
 ## Complexity Tracking
 No constitution exception requested. Research-dependent architecture choices remain open instead of disguising guesses as final design. Single-server first delivery is a recovery milestone, not proof of high availability.
+
+
+Governance sequencing refinement: persistent destination obligations and administrative generation/receipts precede audit retention. Plan archive verification and isolated restore before authorizing any pruning. Extend release recovery evidence with separately assessed code/schema/data/external-effect/audit coverage. Official research refresh and current-schema configuration-change probes are recorded under008; new-schema rollout and recovery UI remain pending.

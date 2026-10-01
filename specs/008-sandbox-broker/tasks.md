@@ -251,3 +251,11 @@ Audit main integration regression:18 actual Linux main/own Node/broker execution
 
 
 T029/T030 increment: operator JSON backlog command and redacted exporter failure/recovery logging implemented.44 status/delivery/exporter/real-main-TLS regressions pass. Includes real CLI subprocess exit/redaction cases, unenrolled backlog visibility, read-only unchanged dump and writer-lock coexistence, duplicate-log suppression/recovery and failed diagnostic sink preserving actual acknowledgement. Retention, durable operational status/terminal registry, security-denial observationT028, production operations and broader enterprise gates remain open; no task closure.
+
+
+## Governance prerequisites for T029/T030 — not implemented
+- [ ] T031 [T029] Add explicit next offline audit-governance migration and durable destination registry; preserve v1-v5 hashes, discover historical removed-config identities, reject mixed scope, extend exact-schema consumers and prove rollback/crash/restore compatibility. See contracts/audit-governance.md.
+- [ ] T032 [T029] Implement generation-fenced operator register/suspend/resume/block/retire with durable command receipts and redacted administrative evidence; preserve blocked state across restart and expose all historical obligations. Depends on T031.
+- [ ] T033 [T029/T030] Implement read-only policy-bound retention planning and bounded immutable archive/manifest creation with independent full-payload restore verification, holds and complete destination obligation coverage. Depends on T031/T032.
+- [ ] T034 [T029/T030] Implement explicitly authorized bounded pruning/receipt/watermark under new-schema maintenance authority; prove policy/hold/destination races, missing/corrupt archive, process crashes and reader gap semantics plus deployment backup/restore. Depends on T033; current delete guards remain active until then.
+Research/diagnostic increment:35 actual configuration-lifecycle/status/delivery tests pass, showing config omission retains old backlog and another receiver ack does not settle it. This justifies T031 before deletion work; none of T029-T034 is closed.

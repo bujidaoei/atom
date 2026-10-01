@@ -269,3 +269,6 @@ Audit main integration regression:18 actual Linux main/own Node/broker execution
 
 
 T027/008-T029/T030 increment: actual operator backlog inspection now counts unenrolled work and exporter operational logs redact/deduplicate state changes.44 related regressions pass, including CLI subprocess failures and real TLS/main recovery. Durable observability/denial sink/retention/production gates remain open.
+
+
+T027/008-T029/T030 refinement: refreshed official Atoms/GitHub/GitLab governance evidence and verified removed/new receiver behavior in real SQLite (35 related checks pass). Add008-T031-T034 for persistent obligations/administration/archive/retention in dependency order. Recovery-manifest design refines FR-008; no implementation checkbox or production readiness claim is advanced.

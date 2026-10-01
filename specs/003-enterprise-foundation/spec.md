@@ -89,3 +89,6 @@
 - 竞品文档能力与实测严格分开；生成积分额度等待明确授权。
 - 首期不含广告投放、营销增长、模型训练、替换 runtime 和 UI 复刻。
 - 数值是拟定验收目标，不是测量结果或对外 SLA。
+
+
+FR-008/FR-012 design refinement from official Atoms/GitHub/GitLab research: recovery evidence should state source/current revision, schema/data recovery point, publication generation, unresolved external effects and audit coverage independently. Audit retention must preserve historical receiver obligations absent from current config. Proposed governance/recovery-manifest contract is in008/contracts/audit-governance.md; no new acceptance/SLA claim.
