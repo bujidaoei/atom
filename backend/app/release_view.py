@@ -23,26 +23,43 @@ class ReleaseView:
 @contextmanager
 def materialized_release(repository: ReleaseRepository, store: ArtifactStore, *,
                          slug: str, viewer: str | None = None, release_id: str | None = None):
+    def resolve(captured=None):
+        return repository.resolve(slug=slug,viewer=viewer,
+                                  release_id=captured.release_id if captured else release_id)
+    with _admitted(resolve,store) as view:
+        yield view
+
+
+@contextmanager
+def materialized_content(repository, store: ArtifactStore, *, binding_id: str, viewer: str | None = None):
+    def resolve(captured=None):
+        return repository.resolve(binding_id=binding_id,viewer=viewer)
+    with _admitted(resolve,store) as view:
+        yield view
+
+
+@contextmanager
+def _admitted(resolve,store):
     if not _READS.acquire(timeout=3):
         raise VerificationError('release_capacity')
     try:
-        with _materialize(repository,store,slug=slug,viewer=viewer,release_id=release_id) as view:
+        with _materialize(resolve,store) as view:
             yield view
     finally:
         _READS.release()
 
 
 @contextmanager
-def _materialize(repository,store,*,slug,viewer,release_id):
-    publication = repository.resolve(slug=slug, viewer=viewer, release_id=release_id)
+def _materialize(resolve,store):
+    publication = resolve()
     payload = store.read(publication.artifact.key)
     manifest = verify_snapshot(io.BytesIO(payload))
     if len(payload) != publication.artifact.size or manifest.revision != publication.artifact.revision:
         raise ArtifactError('release_artifact_mismatch')
     # Authorization may have changed during IO; do not switch a captured version
     # to a newly published version while completing the read.
-    repository.resolve(slug=slug, viewer=viewer, release_id=publication.release_id)
+    resolve(publication)
     with TemporaryDirectory(prefix='atom-release-') as temporary:
         received = receive_snapshot(io.BytesIO(payload), Path(temporary))
-        repository.resolve(slug=slug, viewer=viewer, release_id=publication.release_id)
+        resolve(publication)
         yield ReleaseView(publication, received.path)

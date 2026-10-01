@@ -137,3 +137,5 @@ Content origin binding uses an immutable opaque route identity scoped by project
 Content binding allocation must be owner-scoped and idempotent by immutable release, use an opaque unpredictable identifier, and reject collisions without retargeting. Resolving a binding must reapply current publication authorization; the identifier itself grants no access.
 
 Content host routing requires exactly one Host authority matching r-<32 lowercase hex binding>.<configured suffix>, with only the optional standard HTTPS port. Forwarded-host metadata cannot supply route authority. Syntax validation does not establish DNS/TLS/site isolation.
+
+Public content implementation increment: requests resolve an immutable content binding, recheck live/current and pinned visibility around artifact IO, and read verified snapshot bytes. Anonymous access only; console cookies and bearer headers confer no authority. Missing resource paths remain 404; navigation fallback applies only to extensionless final path segments. Production ingress, private access, browser behavior and verifier acceptance remain unimplemented gates.

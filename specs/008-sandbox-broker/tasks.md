@@ -126,3 +126,5 @@ T015/T017 continuation: offline v3 content-binding schema/migration implemented 
 T017 continuation: owner-scoped idempotent content binding allocation and current-visibility resolution now pass real SQLite tests. Internal verification/release repositories accept verified v3; application startup remains unchanged. Host configuration/parsing, private access, HTTP/browser and verifier provenance remain open.
 
 T017 continuation: strict configured content-host syntax and binding extraction now pass tests, including duplicate/malformed/forged authority cases. DNS/TLS/site separation, trusted proxy, actual HTTP serving and private access remain open.
+
+T017 continuation: standalone public content ASGI component now serves verified bytes through immutable Host bindings with current visibility checks, GET/HEAD, explicit navigation fallback and no-store/security headers. Real Linux artifact/SQLite/ASGI integration and 86 repository/host regressions pass. Private credentials, network ingress/TLS, browser isolation, transport bounds and trusted verifier remain open; no task closure or production cutover.

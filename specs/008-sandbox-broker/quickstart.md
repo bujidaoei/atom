@@ -111,3 +111,5 @@ Disposable offline schema test: migrate(..., target_version=3) or --target-versi
 Run test_content_repository.py with release/verification repository suites for concurrent binding allocation, reopen/replay, foreign scope denial, collision rollback, v3 requirement and visibility changes through a pinned binding. These use ledger fixture artifacts/reports, not DNS or HTTP requests.
 
 Run test_content_hosts.py and test_content_repository.py for canonical host roundtrip, forwarded-header denial, malformed configuration/authority and binding lookup regressions. No actual DNS, certificate or reverse-proxy behavior is exercised.
+
+The restricted Linux test_revision_routes.py fixture now migrates its disposable DB through v3 and exercises ContentService using httpx ASGITransport with actual snapshot bytes. Covers root/CSS, HEAD length, extensionless navigation, missing assets/traversal, forged authority, methods, corruption, privacy and unpublish. This is in-process ASGI, not a network listener/TLS/browser test. Fixture verification reports are not trusted browser evidence.

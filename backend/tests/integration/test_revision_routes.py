@@ -198,6 +198,53 @@ except VerificationError as error:assert str(error)=='release_not_found'
 assert not list(Path('/tmp').glob('atom-release-*'))
 assert release_view._READS.acquire(blocking=False)
 release_view._READS.release()
+release_view.receive_snapshot=receive
+migrate(settings.db_path,Path('/tmp/data/before-content.db'),target_version=3)
+from app.content_repository import ContentRepository
+from app.content_hosts import ContentHosts
+from app.content_service import ContentService
+releases.publish(owner='owner',project_id='p',release_id='http-release',verification_id=request.id,
+    expected_revision=main.revision_id,expected_generation=4,policy_digest='c'*64,runner_version='fixture-runner',audience='public',slug='site')
+content=ContentRepository(settings.db_path)
+binding=content.bind(owner='owner',project_id='p',release_id='http-release')
+hosts=ContentHosts('content.example.test')
+service=ContentService(content,store,hosts)
+async def content_test():
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=service),base_url=hosts.url(binding.id)) as client:
+        page=await client.get('/')
+        assert page.status_code==200 and page.text=='<h1>committed</h1>'
+        assert page.headers['x-atom-release']=='http-release'
+        assert page.headers['x-atom-revision']==main.revision_id
+        assert page.headers['cache-control']=='no-store'
+        assert page.headers['x-content-type-options']=='nosniff'
+        assert "worker-src 'none'" in page.headers['content-security-policy']
+        head=await client.head('/')
+        assert head.status_code==200 and head.content==b''
+        assert head.headers['content-length']==page.headers['content-length']
+        css=await client.get('/style.css')
+        assert css.status_code==200 and 'blue' in css.text
+        assert css.headers['content-type'].startswith('text/css')
+        assert (await client.get('/route',headers={'sec-fetch-mode':'navigate'})).text==page.text
+        for path in ('/route','/missing.css','/legacy-only.txt','/%2e%2e/secret','/bad%5cpath'):
+            assert (await client.get(path)).status_code==404,path
+        assert (await client.get('/missing.css',headers={'sec-fetch-mode':'navigate'})).status_code==404
+        assert (await client.post('/')).status_code==405
+        assert (await client.get('/',headers={'host':'console.example.test'})).status_code==404
+        assert (await client.get('/',headers={'host':'console.example.test','x-forwarded-host':hosts.hostname(binding.id)})).status_code==404
+        target.write_bytes(b'corrupt')
+        failed=await client.get('/')
+        assert failed.status_code==503 and not failed.content
+        target.write_bytes(original_payload)
+        releases.publish(owner='owner',project_id='p',release_id='private-http',verification_id=request.id,
+            expected_revision=main.revision_id,expected_generation=5,policy_digest='c'*64,runner_version='fixture-runner',audience='owner',slug='site')
+        # Current privacy applies even to a previously public, pinned hostname.
+        assert (await client.get('/')).status_code==404
+        private=content.bind(owner='owner',project_id='p',release_id='private-http')
+        assert (await client.get(hosts.url(private.id),headers={'cookie':'session=owner','authorization':'Bearer owner'})).status_code==404
+        releases.unpublish(owner='owner',project_id='p',command_id='http-off',expected_release='private-http',expected_generation=6)
+        assert (await client.get('/style.css')).status_code==404
+        assert not list(Path('/tmp').glob('atom-release-*'))
+asyncio.run(content_test())
 print(json.dumps({'routes':'verified','legacy':(legacy/'index.html').read_text()}))
 '''
     name='atom-revision-routes-'+uuid.uuid4().hex
