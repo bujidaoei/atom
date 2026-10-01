@@ -178,3 +178,5 @@ Feature008 T020 offline access schema/migration completed with real SQLite const
 Feature008 private-access prerequisite: persisted console-session repository lifecycle and concurrency/failure behavior now pass 45 actual SQLite/schema tests. Authentication/signature/HTTP integration and private credential paths remain unfinished under T021/T022; T027 remains open.
 
 Feature008 T021 progress: hash-only browser-bound capability repository and atomic single-use exchange pass actual SQLite concurrency/failure/process-exit tests (64 combined tests). HTTP authentication/cookies, rate/retention, browser composition and v4 serving remain incomplete; enterprise T027 stays open.
+
+Feature008 T022 progress: actual signed credentials now bind to durable session scope/lifetime/revocation with 71 crypto/SQLite/access regression tests passing. Legacy login/cookies remain unchanged; controlled auth cutover, private HTTP/browser and deployment gates are still open. T027 remains unchecked.
