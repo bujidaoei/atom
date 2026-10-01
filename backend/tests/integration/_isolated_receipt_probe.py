@@ -63,7 +63,7 @@ request = dict(archive_id='archive',recovery_id='receipt',verifier_id='verifier'
 
 class Relay(socketserver.BaseRequestHandler):
     def handle(self):
-        with socket.create_connection(('host.docker.internal',config['port']),timeout=10) as remote:
+        with socket.create_connection((config['broker_host'],config['port']),timeout=10) as remote:
             sockets = [self.request,remote]
             while True:
                 readable,_,_ = select.select(sockets,[],[],50)

@@ -70,7 +70,8 @@ def test_real_linux_owner_wire_worker_and_receipt(planned,recovery,tmp_path,monk
             '--workdir','/src','--env','PYTHONPATH=/src','--entrypoint','/app/backend/.venv/bin/python',API_IMAGE,
             '-B','/src/tests/integration/_isolated_receipt_probe.py']
         data = dict(port=port,token=config.admin_token,image=IMAGE,policy=app.state.lifecycle.driver.policy_digest,
-                    scenario=scenario,schema_version=schema_version)
+                    scenario=scenario,schema_version=schema_version,
+                    broker_host=os.environ.get('ATOM_TEST_DOCKER_HOST','host.docker.internal'))
         if scenario=='cold-read':
             volume='atom-audit-cold-'+uuid.uuid4().hex
             status,_,err=run_bounded(['docker','volume','create','--label','atom.test=audit-cold',volume])
