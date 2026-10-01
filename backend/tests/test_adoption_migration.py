@@ -67,6 +67,13 @@ def test_v12_rebuild_preserves_source_and_backup(populated, tmp_path):
     with sqlite3.connect(before) as saved:
         assert saved.execute('SELECT id,parent_revision_id,producing_attempt_id FROM revision_records ORDER BY id').fetchall() == [
             ('heat-root', None, None), ('main-result', 'main-root', 'attempt'), ('main-root', None, None)]
+    restored = tmp_path / 'restored-v11.db'
+    with sqlite3.connect(before) as source, sqlite3.connect(restored) as target:
+        source.backup(target)
+    assert verify(restored) == 11
+    with sqlite3.connect(restored) as db:
+        assert db.execute('PRAGMA foreign_key_check').fetchall() == []
+        assert db.execute('SELECT revision_id FROM revision_receipts').fetchone() == ('main-result',)
     with pytest.raises(RevisionError, match='revision_schema_required'):
         RevisionRepository(path)
 
