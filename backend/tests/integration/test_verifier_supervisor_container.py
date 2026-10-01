@@ -176,8 +176,11 @@ def test_private_verifier_process_owns_browser_and_registers_real_result(adopted
                 assert settled.status_code == 503 and time.monotonic() < deadline
                 time.sleep(.1)
         with sqlite3.connect(path) as db:
-            assert db.execute('SELECT outcome FROM verification_results').fetchone() == ('passed',)
-            assert db.execute('SELECT count(*) FROM verification_attestations').fetchone() == (1,)
+            assert db.execute('SELECT outcome FROM verification_results WHERE request_id=?',
+                              (reserved.id,)).fetchone() == ('passed',)
+            assert db.execute('SELECT outcome FROM verification_results WHERE request_id=?',
+                              (slow.id,)).fetchone() == ('failed',)
+            assert db.execute('SELECT count(*) FROM verification_attestations').fetchone() == (2,)
             assert db.execute('PRAGMA foreign_key_check').fetchall() == []
         inventory = subprocess.run(['docker','ps','-aq','--filter',
             'label=atom.verifier.owner=service-worker'], capture_output=True,
