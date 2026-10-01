@@ -9,6 +9,7 @@ from starlette.responses import Response
 
 from .artifacts import ArtifactError
 from .access_repository import AccessError
+from .content_bootstrap import BOOTSTRAP_PATH, ContentNavigation, bootstrap_response
 from .content_cookies import content_session_cookie
 from .content_exchange import (EXCHANGE_PATH, EXCHANGE_HEADERS, ExchangeRequestError,
                                validate_exchange, receive_handoff, exchange_response)
@@ -42,9 +43,13 @@ class ContentLimits:
 
 
 class ContentService:
-    def __init__(self, repository, store, hosts, *, limits: ContentLimits = ContentLimits(), access=None):
+    def __init__(self, repository, store, hosts, *, limits: ContentLimits = ContentLimits(), access=None, navigation: ContentNavigation | None = None):
         if access is not None and access.path.resolve()!=repository.path.resolve():
             raise ValueError('content_access_database_mismatch')
+        if navigation is not None:
+            if access is None:raise ValueError('content_navigation_requires_access')
+            navigation.validate_content_hosts(hosts)
+        self.navigation=navigation
         self.repository, self.store, self.hosts = repository, store, hosts
         self.access=access
         self.limits = limits
@@ -78,7 +83,9 @@ class ContentService:
         method = scope.get('method')
         try:
             binding = self.hosts.route(scope.get('headers',[]))
-            if self.access is not None and scope.get('path')==EXCHANGE_PATH:
+            if self.navigation is not None and scope.get('path')==BOOTSTRAP_PATH:
+                response=bootstrap_response(scope,self.hosts,self.access,self.navigation)
+            elif self.access is not None and scope.get('path')==EXCHANGE_PATH:
                 response=exchange_response(scope,self.hosts,self.access,handoff)
             elif method not in ('GET','HEAD'):
                 response = Response(status_code=405,headers={**HEADERS,'Allow':'GET, HEAD'})
@@ -96,7 +103,7 @@ class ContentService:
                 response = self._read(binding,scope.get('path','/'),navigation,
                     content_session_cookie(scope.get('headers',[])))
         except ExchangeRequestError as error:
-            response=Response(status_code=error.status,headers={**EXCHANGE_HEADERS,**({'Allow':'GET, HEAD, POST'} if error.status==405 else {})})
+            response=Response(status_code=error.status,headers={**EXCHANGE_HEADERS,**({'Allow':error.allow} if error.allow else {})})
         except ContentHostError:
             response = Response(status_code=404,headers=HEADERS)
         except AccessError as error:

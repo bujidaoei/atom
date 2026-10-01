@@ -188,3 +188,5 @@ T027 continuation (008/T023): root authentication namespace now rejects conflict
 T027 continuation (008/T016/T023): real content publication preflight now verifies stored artifacts before promotion and rejects stale state after IO. 34 tests and two actual Chromium runs pass, including corrupt/missing artifacts, publication race and offline replay preservation. Main API selection, trusted verifier and private exchange/enterprise deployment remain open.
 
 T027 continuation (008/T023/T025): service-owned HTTP exchange now has strict metadata/body controls and actual Chromium cookie/private-artifact evidence. 56 tests and private/public browser scenarios pass. Bootstrap and console issuance are still fixture prerequisites; complete authentication, embedded access and enterprise deployment remain unfinished.
+
+T027 continuation (008/T023/T025): real HTTP bootstrap now supplies browser nonce and fixed console redirect; 76 tests and actual private/public Chromium paths pass. Console authorization/issuer is still a fixture, so complete authentication, embedded access and deployment remain unfinished.

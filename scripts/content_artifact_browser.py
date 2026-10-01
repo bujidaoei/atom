@@ -18,6 +18,7 @@ from tempfile import TemporaryDirectory
 from threading import Thread
 import time
 import uuid
+from urllib.parse import urlsplit, parse_qs
 import zipfile
 
 from playwright.sync_api import sync_playwright
@@ -90,12 +91,17 @@ sys.path.insert(0,str(root));runpy.run_path(str(root/'fixture.py'),run_name='__m
                         # Test ingress strips its ephemeral port while preserving
                         # the configured hostname; no forwarded authority is used.
                         host=self.headers.get('Host','').split(':')[0]
+                        if host=='console.atom-console.test' and self.path.startswith('/content-access?'):
+                            payload=b'<h1>Console fixture</h1>'
+                            self.send_response(200);self.send_header('Content-Type','text/html')
+                            self.send_header('Content-Length',str(len(payload)));self.end_headers()
+                            self.wfile.write(payload);return
                         if host!=metadata['host']:
                             self.send_error(404);return
                         upstream=HTTPConnection('127.0.0.1',port,timeout=10)
                         try:
                             headers={'Host':host,'Sec-Fetch-Mode':self.headers.get('Sec-Fetch-Mode','')}
-                            for field in ('Cookie','Content-Type','Content-Length','Origin'):
+                            for field in ('Cookie','Content-Type','Content-Length','Origin','Sec-Fetch-Dest','Sec-Purpose','Purpose'):
                                 if field in self.headers:headers[field]=self.headers[field]
                             # Exact local test origin maps to the configured 443 origin.
                             if headers.get('Origin')==f'https://{host}:{server.server_port}':
@@ -109,12 +115,14 @@ sys.path.insert(0,str(root));runpy.run_path(str(root/'fixture.py'),run_name='__m
                             self.send_response(response.status)
                             for key,value in response.getheaders():
                                 if key.lower() not in ('connection','transfer-encoding','server','date'):
+                                    if key.lower()=='location' and value.startswith('https://console.atom-console.test/'):
+                                        value=value.replace('https://console.atom-console.test/',f'https://console.atom-console.test:{server.server_port}/',1)
                                     self.send_header(key,value)
                             self.end_headers();self.wfile.write(body)
                         finally:upstream.close()
                     do_POST=do_GET
 
-                cert,key=certificate(root,(metadata['host'],))
+                cert,key=certificate(root,(metadata['host'],'console.atom-console.test'))
                 server=ThreadingHTTPServer(('127.0.0.1',0),Ingress)
                 tls=ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER);tls.load_cert_chain(cert,key)
                 server.socket=tls.wrap_socket(server.socket,server_side=True)
@@ -122,22 +130,34 @@ sys.path.insert(0,str(root));runpy.run_path(str(root/'fixture.py'),run_name='__m
                 try:
                     with sync_playwright() as playwright:
                         browser=playwright.chromium.launch(args=['--no-proxy-server',
-                            '--host-resolver-rules=MAP '+metadata['host']+' 127.0.0.1'])
+                            '--host-resolver-rules=MAP '+metadata['host']+' 127.0.0.1, MAP console.atom-console.test 127.0.0.1'])
                         context=browser.new_context(ignore_https_errors=True)
                         page=context.new_page()
                         base=f'https://{metadata["host"]}:{server.server_port}'
                         if options.private_exchange:
                             assert page.goto(base+'/',timeout=5000).status==404
+                            # The console page is a display fixture; issuance is explicit below.
+                            page.goto(base+'/_atom/bootstrap',wait_until='domcontentloaded',timeout=5000)
+                            target=urlsplit(page.url)
+                            assert target.hostname=='console.atom-console.test' and target.path=='/content-access'
+                            query=parse_qs(target.query)
+                            initial={c['name']:c for c in context.cookies()}
+                            nonce=initial['__Host-atom_bootstrap']
+                            assert nonce['httpOnly'] and nonce['secure'] and nonce['sameSite']=='Lax'
+                            assert nonce['value'] not in page.url
+                            connection=HTTPConnection('127.0.0.1',port,timeout=5)
+                            connection.request('POST','/_fixture/issue',body=query['challenge'][0].encode(),
+                                headers={'Host':'fixture.invalid','Content-Type':'application/octet-stream'})
+                            issued=connection.getresponse()
+                            assert issued.status==200
+                            metadata['handoff']=json.loads(issued.read())['handoff'];connection.close()
                             copied=browser.new_context(ignore_https_errors=True)
                             copied_page=copied.new_page()
                             copied_page.goto(base+'/_atom/exchange#'+metadata['handoff'],timeout=5000)
-                            copied_page.wait_for_function("document.getElementById('status').textContent.includes('could not')")
+                            copied_page.get_by_text('Access could not be opened. Return to Atom and try again.',exact=True).wait_for(timeout=5000)
                             assert '#' not in copied_page.url
                             assert not any(c['name']=='__Host-atom_content' for c in copied.cookies())
                             copied.close()
-                            await_cookie={'name':'__Host-atom_bootstrap','value':metadata['nonce'],
-                                'domain':metadata['host'],'path':'/','secure':True,'httpOnly':True,'sameSite':'Lax'}
-                            context.add_cookies([await_cookie])
                             page.goto(base+'/_atom/exchange#'+metadata['handoff'],timeout=5000)
                             page.wait_for_url(base+'/',wait_until='networkidle',timeout=15000)
                             jar={c['name']:c for c in context.cookies()}
@@ -164,9 +184,9 @@ sys.path.insert(0,str(root));runpy.run_path(str(root/'fixture.py'),run_name='__m
                         denied=page.goto(f'https://{metadata["host"]}:{server.server_port}/_atom/access',timeout=5000)
                         assert denied.status==404
                         assert all(status==200 and revision==metadata['revision'] for path,status,revision in observed
-                                   if path not in ('/favicon.ico','/_atom/access','/_atom/exchange') and not (options.private_exchange and status==404))
+                                   if path not in ('/favicon.ico','/_atom/access','/_atom/exchange','/_atom/bootstrap') and not (options.private_exchange and status==404))
                         print(json.dumps({'browser':browser.version,'artifactRevision':metadata['revision'],
-                            'scripts':len(loaded),'styles':len(styles),'privateExchange':options.private_exchange,'responses':observed,
+                            'scripts':len(loaded),'styles':len(styles),'privateExchange':options.private_exchange,'httpBootstrap':options.private_exchange,'responses':observed,
                             'scope':'actual Linux artifact HTTP to Chromium through local test TLS ingress'}))
                         browser.close()
                 finally:

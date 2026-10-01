@@ -24,6 +24,7 @@ from app.content_policy import ContentPolicyError
 from app.content_repository import ContentRepository
 from app.content_hosts import ContentHosts
 from app.content_service import ContentService
+from app.content_bootstrap import ContentNavigation
 from starlette.responses import JSONResponse
 import uvicorn
 
@@ -83,24 +84,30 @@ content = ContentRepository(settings.db_path)
 binding = content.bind(owner='owner',project_id='project',release_id='fixture-release')
 hosts = ContentHosts('atom-content.test')
 access=None
-credentials={}
+navigation=None
 if private_exchange:
     from app.content_access import ContentAccessRepository
     migrate(settings.db_path,Path('/tmp/data/before-v4.db'),target_version=4)
     access=ContentAccessRepository(settings.db_path)
     source=access.create_console_session(user_id='owner',lifetime_seconds=120)
-    nonce=access.bootstrap(binding_id=binding.id)
-    handoff=access.issue_handoff(viewer_id='owner',source_session_id=source.id,binding_id=binding.id,challenge=nonce.challenge)
-    # Synthetic fixture bootstrap/issuer only; never enabled in the real service.
-    credentials={'nonce':nonce.secret,'handoff':handoff.secret}
-service = ContentService(content,store,hosts,access=access)
+    navigation=ContentNavigation('https://console.atom-console.test')
+service = ContentService(content,store,hosts,access=access,navigation=navigation)
 
 
 async def fixture(scope,receive,send):
     # Local harness metadata is intentionally separate from content authority.
     if (scope['type']=='http' and scope.get('path')=='/_fixture'
             and (b'host',b'fixture.invalid') in scope.get('headers',[])):
-        await JSONResponse({'host':hosts.hostname(binding.id),'revision':imported.revision_id,'conflict':conflict,'preflightChecked':True,**credentials})(scope,receive,send)
+        await JSONResponse({'host':hosts.hostname(binding.id),'revision':imported.revision_id,'conflict':conflict,'preflightChecked':True})(scope,receive,send)
+    elif (private_exchange and scope['type']=='http' and scope.get('path')=='/_fixture/issue'
+          and scope.get('method')=='POST' and (b'host',b'fixture.invalid') in scope.get('headers',[])):
+        # Dedicated loopback harness issuer. This is NOT a console auth endpoint.
+        event=await receive()
+        challenge=event.get('body',b'')
+        assert event['type']=='http.request' and not event.get('more_body') and len(challenge)==64
+        handoff=access.issue_handoff(viewer_id='owner',source_session_id=source.id,
+            binding_id=binding.id,challenge=challenge.decode('ascii'))
+        await JSONResponse({'handoff':handoff.secret})(scope,receive,send)
     else:
         # This disposable wrapper models the local TLS ingress termination.
         await service(dict(scope,scheme='https') if scope['type']=='http' else scope,receive,send)

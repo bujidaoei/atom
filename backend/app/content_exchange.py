@@ -47,8 +47,9 @@ _PAGE = ('<!doctype html><html lang="en"><meta charset="utf-8">'
 
 
 class ExchangeRequestError(ValueError):
-    def __init__(self, status):
+    def __init__(self, status, *, allow=None):
         self.status = status
+        self.allow = allow
         super().__init__('invalid_content_exchange')
 
 
@@ -78,7 +79,7 @@ def validate_exchange(scope, hosts):
         if bootstrap_cookie(headers) is None:
             raise AccessError('content_access_denied')
     elif scope['method'] not in ('GET', 'HEAD'):
-        raise ExchangeRequestError(405)
+        raise ExchangeRequestError(405, allow="GET, HEAD, POST")
     return binding
 
 
