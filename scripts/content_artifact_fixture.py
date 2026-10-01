@@ -43,6 +43,10 @@ html = '<h1>Actual immutable artifact</h1>' + ''.join(
     f'<link rel="stylesheet" href="/style-{index}.css"><script defer src="/script-{index}.js"></script>'
     for index in range(8))
 (workspace/'index.html').write_text(html)
+conflict=os.environ.get('ATOM_FIXTURE_RESERVED_PATH')=='1'
+if conflict:
+    (workspace/'_atom').mkdir()
+    (workspace/'_atom'/'access').write_text('fixture-owned conflicting route')
 for index in range(8):
     (workspace/f'style-{index}.css').write_text(f'h1 {{ --asset-{index}: {index}; }}')
     (workspace/f'script-{index}.js').write_text(f'(window.loaded ||= []).push({index});')
@@ -69,7 +73,7 @@ async def fixture(scope,receive,send):
     # Local harness metadata is intentionally separate from content authority.
     if (scope['type']=='http' and scope.get('path')=='/_fixture'
             and (b'host',b'fixture.invalid') in scope.get('headers',[])):
-        await JSONResponse({'host':hosts.hostname(binding.id),'revision':imported.revision_id})(scope,receive,send)
+        await JSONResponse({'host':hosts.hostname(binding.id),'revision':imported.revision_id,'conflict':conflict})(scope,receive,send)
     else:
         await service(scope,receive,send)
 

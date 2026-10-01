@@ -7,6 +7,7 @@ from tempfile import TemporaryDirectory
 from threading import BoundedSemaphore
 
 from .artifacts import ArtifactError, ArtifactStore
+from .content_policy import validate_content_manifest
 from .release_repository import PublishedArtifact, ReleaseRepository
 from .snapshots import receive_snapshot, verify_snapshot
 from .verification_repository import VerificationError
@@ -65,6 +66,7 @@ def _materialize(resolve,store):
     manifest = verify_snapshot(io.BytesIO(payload))
     if len(payload) != publication.artifact.size or manifest.revision != publication.artifact.revision:
         raise ArtifactError('release_artifact_mismatch')
+    validate_content_manifest(manifest)
     # Authorization may have changed during IO; do not switch a captured version
     # to a newly published version while completing the read.
     resolve(publication)

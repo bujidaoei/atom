@@ -10,6 +10,7 @@ from starlette.responses import Response
 from .artifacts import ArtifactError
 from .access_repository import AccessError
 from .content_cookies import content_session_cookie
+from .content_policy import ContentPolicyError, is_control_path
 from .content_hosts import ContentHostError
 from .release_view import materialized_content, materialized_private_content
 from .snapshots import SnapshotError
@@ -52,7 +53,7 @@ class ContentService:
     def _read(self,binding,path,navigation,session_secret=None):
         parts = path.split('/')
         if (not path.startswith('/') or len(path)>4096 or '\\' in path or '\0' in path
-            or any(part in ('.','..') for part in parts)):
+            or any(part in ('.','..') for part in parts) or is_control_path(path)):
             return Response(status_code=404,headers=HEADERS)
         if session_secret is not None:
             if self.access is None:raise AccessError('content_access_denied')
@@ -97,7 +98,7 @@ class ContentService:
         except VerificationError as error:
             code = 404 if str(error) in ('content_not_found','release_not_found') else 503
             response = Response(status_code=code,headers=HEADERS)
-        except (ArtifactError,SnapshotError,OSError):
+        except (ArtifactError,SnapshotError,ContentPolicyError,OSError):
             response = Response(status_code=503,headers=HEADERS)
         if method=='HEAD':
             response.body=b''

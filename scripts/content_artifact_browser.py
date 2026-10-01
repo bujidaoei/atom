@@ -4,6 +4,7 @@ Requires ATOM_TEST_API_IMAGE (explicit installed sha256 image) and local Docker.
 Fixture report seeds the release; this does not implement trusted verification.
 """
 import base64
+import argparse
 from http.client import HTTPConnection
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import io
@@ -30,6 +31,9 @@ def docker(*args):
 
 
 def main():
+    parser=argparse.ArgumentParser()
+    parser.add_argument('--reserved-path',action='store_true',help='Verify rejection of an actual conflicting artifact')
+    options=parser.parse_args()
     image = os.environ.get('ATOM_TEST_API_IMAGE','')
     if re.fullmatch(r'sha256:[0-9a-f]{64}',image) is None:
         raise ValueError('explicit_API_image_digest_required')
@@ -38,10 +42,12 @@ def main():
         for path in (ROOT/'backend/app').rglob('*.py'):
             bundle.write(path,'app/'+path.relative_to(ROOT/'backend/app').as_posix())
         bundle.write(ROOT/'scripts/content_artifact_fixture.py','fixture.py')
-    bootstrap = """import base64,io,json,runpy,sys,zipfile
+    bootstrap = """import base64,io,json,os,runpy,sys,zipfile
 from pathlib import Path
 root=Path('/tmp/code');root.mkdir()
-with zipfile.ZipFile(io.BytesIO(base64.b64decode(json.loads(sys.stdin.buffer.read())))) as source:source.extractall(root)
+payload=json.loads(sys.stdin.buffer.read())
+os.environ['ATOM_FIXTURE_RESERVED_PATH']='1' if payload['conflict'] else '0'
+with zipfile.ZipFile(io.BytesIO(base64.b64decode(payload['code']))) as source:source.extractall(root)
 sys.path.insert(0,str(root));runpy.run_path(str(root/'fixture.py'),run_name='__main__')
 """
     name = 'atom-content-browser-'+uuid.uuid4().hex
@@ -54,7 +60,8 @@ sys.path.insert(0,str(root));runpy.run_path(str(root/'fixture.py'),run_name='__m
                 '--publish','127.0.0.1::8000','--workdir','/tmp',image,
                 '/app/backend/.venv/bin/python','-I','-c',bootstrap],stdin=subprocess.PIPE,stdout=log,stderr=log)
             try:
-                process.stdin.write(json.dumps(base64.b64encode(archive.getvalue()).decode()).encode())
+                process.stdin.write(json.dumps({'code':base64.b64encode(archive.getvalue()).decode(),
+                    'conflict':options.reserved_path}).encode())
                 process.stdin.close()
                 deadline = time.monotonic()+20
                 metadata = None
@@ -106,13 +113,23 @@ sys.path.insert(0,str(root));runpy.run_path(str(root/'fixture.py'),run_name='__m
                             '--host-resolver-rules=MAP '+metadata['host']+' 127.0.0.1'])
                         context=browser.new_context(ignore_https_errors=True)
                         page=context.new_page()
-                        page.goto(f'https://{metadata["host"]}:{server.server_port}/',wait_until='networkidle',timeout=15000)
+                        response=page.goto(f'https://{metadata["host"]}:{server.server_port}/',wait_until='networkidle',timeout=15000)
+                        if options.reserved_path:
+                            assert metadata['conflict'] and response.status==503
+                            assert page.locator('h1').count()==0
+                            print(json.dumps({'browser':browser.version,'reservedArtifactRejected':True,'status':response.status,
+                                'scope':'actual conflicting Linux snapshot denied before browser content execution'}))
+                            browser.close()
+                            return
                         assert page.locator('h1').inner_text()=='Actual immutable artifact'
                         loaded=page.evaluate('window.loaded || []')
                         assert sorted(loaded)==list(range(8)),{'loaded':loaded,'responses':observed}
                         styles=page.locator('h1').evaluate('el=>Array.from({length:8},(_,i)=>getComputedStyle(el).getPropertyValue("--asset-"+i).trim())')
                         assert styles==list(map(str,range(8))),styles
-                        assert all(status==200 and revision==metadata['revision'] for path,status,revision in observed if path!='/favicon.ico')
+                        denied=page.goto(f'https://{metadata["host"]}:{server.server_port}/_atom/access',timeout=5000)
+                        assert denied.status==404
+                        assert all(status==200 and revision==metadata['revision'] for path,status,revision in observed
+                                   if path not in ('/favicon.ico','/_atom/access'))
                         print(json.dumps({'browser':browser.version,'artifactRevision':metadata['revision'],
                             'scripts':len(loaded),'styles':len(styles),'responses':observed,
                             'scope':'actual Linux artifact HTTP to Chromium through local test TLS ingress'}))

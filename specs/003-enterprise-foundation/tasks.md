@@ -182,3 +182,5 @@ Feature008 T021 progress: hash-only browser-bound capability repository and atom
 Feature008 T022 progress: actual signed credentials now bind to durable session scope/lifetime/revocation with 71 crypto/SQLite/access regression tests passing. Legacy login/cookies remain unchanged; controlled auth cutover, private HTTP/browser and deployment gates are still open. T027 remains unchecked.
 
 Feature008 private-serving progress: dedicated content sessions now authorize real artifact reads and are rechecked through IO; 62 tests include actual Linux revoke-during-read/extraction denial. v4 internal ledgers are supported, but main runtime/auth migration, cookie exchange and browser/private deployment gates remain open. T027 stays unchecked.
+
+T027 continuation (008/T023): root authentication namespace now rejects conflicting verified content manifests and avoids SPA fallback. 14 targeted tests and real Chromium conflicting/normal artifact runs pass. Publication preflight and private exchange/browser acceptance remain unfinished; no enterprise task closure.
