@@ -124,3 +124,5 @@ T017/T018 architecture refinement: source audit and browser primary documentatio
 T015/T017 continuation: offline v3 content-binding schema/migration implemented with source-version preservation, immutable scope constraints and Linux abrupt-process recovery. Binding repository, private access/environment identities and HTTP/browser integration remain open; neither task is closed.
 
 T017 continuation: owner-scoped idempotent content binding allocation and current-visibility resolution now pass real SQLite tests. Internal verification/release repositories accept verified v3; application startup remains unchanged. Host configuration/parsing, private access, HTTP/browser and verifier provenance remain open.
+
+T017 continuation: strict configured content-host syntax and binding extraction now pass tests, including duplicate/malformed/forged authority cases. DNS/TLS/site separation, trusted proxy, actual HTTP serving and private access remain open.

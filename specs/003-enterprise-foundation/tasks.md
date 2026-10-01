@@ -152,3 +152,5 @@ T027 / feature008 T017/T018: audited browser origin assumptions and documented p
 T027 / feature008 T015/T017: immutable content binding v3 migration and crash/restore component tests pass. Host routing, private capabilities and real browser isolation remain open.
 
 T027 / feature008 T017: immutable content binding allocation/resolution and v3 internal ledger compatibility now pass SQLite tests. Main runtime startup and live routing are unchanged; browser/deployment gates remain open.
+
+T027 / feature008 T017: strict content Host codec now tested; real DNS/TLS/ingress, serving and browser isolation remain open.

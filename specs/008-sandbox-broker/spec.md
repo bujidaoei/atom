@@ -135,3 +135,5 @@ T017 content isolation refinement: generated content must use a dedicated conten
 Content origin binding uses an immutable opaque route identity scoped by project and release, unique per release; invalid route syntax and cross-project mapping must fail at the database boundary. Offline migration must preserve prior version definitions and journal history.
 
 Content binding allocation must be owner-scoped and idempotent by immutable release, use an opaque unpredictable identifier, and reject collisions without retargeting. Resolving a binding must reapply current publication authorization; the identifier itself grants no access.
+
+Content host routing requires exactly one Host authority matching r-<32 lowercase hex binding>.<configured suffix>, with only the optional standard HTTPS port. Forwarded-host metadata cannot supply route authority. Syntax validation does not establish DNS/TLS/site isolation.
