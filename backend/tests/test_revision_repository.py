@@ -662,17 +662,34 @@ def test_terminal_decision_is_durable_fences_dispatch_and_survives_unknown(repos
     assert repo.recovery('owner','attempt').state=='closed'
 
 
-def test_cancel_overrides_pending_success_without_erasing_receipt(repository):
+def test_cancel_preserves_pending_success_and_receipt(repository):
     repo,path,main,heat=repository
     repo.bootstrap('owner',main,BASE)
     allocate(repo,main)
     receipt=register(repo)
-    repo.decide_termination('owner','attempt','succeeded')
+    decided=repo.decide_termination('owner','attempt','succeeded')
     intent=repo.cancel('owner','attempt')
-    assert intent.outcome=='cancelled' and intent.receipt==receipt
+    assert intent==decided and intent.outcome=='succeeded' and intent.receipt==receipt
+    assert repo.decide_termination('owner','attempt','cancelled')==decided
     with pytest.raises(RevisionError,match='revision_conflict'):
-        repo.observe_termination('owner','attempt',confirmed=True,outcome='succeeded')
-    repo.observe_termination('owner','attempt',confirmed=True,outcome='cancelled')
+        repo.observe_termination('owner','attempt',confirmed=True,outcome='cancelled')
+    repo.observe_termination('owner','attempt',confirmed=True,outcome='succeeded')
+    assert repo.recovery('owner','attempt').state=='closed'
+
+
+@pytest.mark.parametrize('outcome', ['cancelled', 'timed_out'])
+def test_registered_receipt_survives_non_success_outcome(repository, outcome):
+    repo,path,main,heat=repository
+    repo.bootstrap('owner',main,BASE)
+    allocate(repo,main)
+    receipt=register(repo)
+    decision=repo.decide_termination('owner','attempt',outcome)
+    assert decision.receipt==receipt and decision.outcome==outcome
+    repo.observe_termination('owner','attempt',confirmed=True,outcome=outcome)
+    closed=RevisionRepository(path).recovery('owner','attempt')
+    assert closed.state=='closed' and closed.termination_state=='confirmed'
+    assert closed.outcome==outcome and closed.receipt==receipt
+    assert repo.current_revision('owner',main).revision_id==receipt.revision_id
 
 
 @pytest.mark.parametrize('field,value',[('grant_id','other'),('project_id','other'),('run_id','other'),

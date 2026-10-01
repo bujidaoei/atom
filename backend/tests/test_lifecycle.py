@@ -115,6 +115,24 @@ def test_broker_project_cancel_records_truthful_heat_error(signed_in, monkeypatc
         assert '已有文件已保留' not in heat.error
 
 
+def test_broker_restart_reconciliation_does_not_claim_partial_files(signed_in, monkeypatch):
+    monkeypatch.setattr(get_settings(), 'sandbox_mode', 'broker')
+    project_id, _ = seed()
+    with session_scope() as session:
+        session.get(Project, project_id).status = 'building'
+        race = Race(project_id=project_id, status='running')
+        race.heats.append(RaceHeat(model='test-model', status='queued', position=0))
+        session.add(race)
+
+    asyncio.run(Orchestrator(ScriptedRuntime('silent')).reconcile())
+    with session_scope() as session:
+        project = session.get(Project, project_id)
+        heat = session.scalar(select(RaceHeat).join(Race).where(Race.project_id == project_id))
+        assert project.status == heat.status == 'interrupted'
+        assert '未完成的文件未保存' in heat.error
+        assert '已有文件已保留' not in heat.error
+
+
 @pytest.mark.parametrize('reported,expected', [('cancelled','cancelled'),('timed_out','timed_out'),
                                               ('done','failed'),(None,'failed'),({},'failed')])
 @pytest.mark.parametrize('phase', ['plan','build'])

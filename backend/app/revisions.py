@@ -422,11 +422,11 @@ class RevisionRepository:
             return self._recovery(db, attempt)
 
     def cancel(self, owner: str, attempt_id: str) -> Recovery:
-        """Commit cancellation and return its cleanup identity in one transaction."""
+        """Commit cancellation unless an earlier terminal decision already won."""
         _identifiers(owner, attempt_id)
         with self._transaction() as db:
             attempt, _ = self._attempt(db, owner, attempt_id)
-            if attempt['state'] != 'closed':
+            if attempt['state'] != 'closed' and attempt['outcome'] is None:
                 db.execute("UPDATE revision_attempts SET state='cancel_requested',outcome='cancelled' WHERE id=?", (attempt_id,))
                 attempt = db.execute('SELECT * FROM revision_attempts WHERE id=?', (attempt_id,)).fetchone()
             return self._recovery(db, attempt)
@@ -442,7 +442,7 @@ class RevisionRepository:
                 return self._recovery(db, attempt)
             if workspace['active_attempt_id'] != attempt_id or workspace['generation'] != attempt['generation']:
                 raise RevisionError('revision_conflict')
-            if attempt['outcome'] is not None and outcome != 'cancelled':
+            if attempt['outcome'] is not None:
                 return self._recovery(db, attempt)
             if outcome == 'succeeded':
                 receipt = self._receipt(db, attempt_id, workspace['id'])

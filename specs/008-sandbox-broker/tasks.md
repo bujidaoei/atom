@@ -445,13 +445,30 @@ T038 deployment evidence (2026-10-01): fd01205 image sha256:edeffc8b16f31eb77725
 
 ### T039 — Incomplete run truth and partial checkpoint (FR-011)
 
-- [ ] T039.1 Align every broker-mode timeout, explicit Stop, project job cancellation, restart interruption and premature-EOF error with committed file state; verify persisted run/heat errors plus browser retry labels after real cancellation, then deploy.
+- [x] T039.1 Align every broker-mode timeout, explicit Stop, project job cancellation, restart interruption and premature-EOF error with committed file state; verify persisted run/heat errors plus browser retry labels after real cancellation, then deploy.
 - [ ] T039.2 Specify and implement an explicitly authorized partial checkpoint that can survive deadline/cancel without treating unverified sandbox writes as committed output.
 - [ ] T039.3 Prove revision/receipt integrity, deadline/cancel/process-death recovery, and browser-visible resume behavior using real runtime/broker/storage tests before claiming partial files are saved.
+
+T039.2 implementation sequence (all open):
+
+- [ ] T039.2a Prove the existing ledger's receipt-plus-non-success state and correct the cancellation-vs-unclosed-success decision race; require one immutable attempt outcome.
+- [ ] T039.2b Add an exact scoped partial-checkpoint API/coordinator path that quiesces, verifies, stores, registers, confirms and revokes, returning null receipt for an unchanged base.
+- [ ] T039.2c Extend the own runtime abort path and API orchestration with finite post-budget cleanup grace, no automatic replay of unknown effects and a hard-stop fallback.
+- [ ] T039.2d Surface only verified partial receipts/catalogue files as incomplete saved revisions, with an explicit continue action and independent publication/acceptance gates.
+
+T039.3 verification sequence (all open):
+
+- [ ] T039.3a Run real broker/Docker/store changed/unchanged checkpoint tests and fault injection at every boundary in `contracts/partial-checkpoint.md`.
+- [ ] T039.3b Restart API around a registered receipt and before a receipt; verify preserved head or honest unsaved state, termination and no duplicate revision.
+- [ ] T039.3c Run live provider writes followed by Stop/deadline and authenticated browser checks for file tree, preview, continue wording and publication gating.
 
 T039 discovery and local verification (2026-10-01): the fd01205 real race recorded successful write tool events for Sol and Terra, yet both timed out with `fileCount=0`. `Orchestrator._turn` reported “已有文件已保留” on its local timeout, then cancelled the remote run; broker interruption revoked the uncommitted sandbox. The message was false in broker mode. The correction now states that unfinished files were not saved, preserves local-mode wording, and shows “重新生成” when the committed catalog is empty. Backend lifecycle tests passed 22/22, including the broker deadline assertion, and frontend TypeScript/Vite build passed. The correction was deployed in e1fba0a and retained in 37669d4. Browser observation remains necessary before T039.1 can be checked; durable partial checkpoint and resume remain open.
 
 T039 live browser finding (2026-10-01): project `25cd462f8e2b42aabe2b85be93d926dd` of a disposable acceptance account reached `awaiting_approval` on the live provider. Race `550b138c7564409892f97c116536e542` started Terra and Luna; the real Stop endpoint cancelled both. Each heat had `fileCount=0`, and Chromium showed two “重新生成此赛道” buttons with no page errors. Both persisted heat errors nonetheless said “任务已取消，已有文件已保留”; browser text contained that false statement. The run base revision IDs do not represent generated files. Local corrections now cover `_stop_job`, `_guard`, restart reconciliation and runtime premature EOF in broker mode. The focused lifecycle/protocol/startup suite passed 32/32; production deployment and the repeated browser acceptance are still required.
+
+T039.1 acceptance (2026-10-01): image `sha256:a03fd06344c968cff296a79b2aa76e9bc215436cf9c1b2fceabc561f3be88fe3` from commit 380edf501e227cb0651f514830b67cba05472981 serves both production API and broker after zero-active-run check and application/registry online backups (14,258,176/331,776 bytes, integrity_check=ok, mode 0600). Both containers and local health became healthy. A fresh disposable account created project `ca259a2462294b8082d8826c551d05a0`; real planning reached `awaiting_approval`, race `621d9fe2fa9740568a3b4744e3ef74ef` started Terra/Luna, and the real Stop endpoint cancelled both. Both persisted heat errors say unfinished files were not saved, neither says files were retained, and both have `fileCount=0`. Authenticated Chromium loaded HTTP200, found two “重新生成此赛道” buttons, no old wording and no page exception. Local lifecycle/protocol/startup regressions passed 33/33, including explicit Stop, restart reconciliation, timeout and premature EOF. This accepts truthful incomplete-output wording only. T039.2/3 remain open for actual durable partial checkpoints and resume.
+
+T039.2a local evidence: the 380edf5 ledger allowed a late cancel to overwrite a pending success decision. Both direct cancellation and `decide_termination` now preserve the first terminal outcome. Twenty-one targeted tests passed across schema versions 1/4/5/6/7/9/10: seven success-versus-cancel cases and fourteen receipt-plus-cancelled/timed_out cases. The full pre-addition ledger/lifecycle/protocol regression passed 480/480; Linux Docker integration was explicitly skipped on Windows. T039.2a remains unchecked until real Linux coordinator/broker testing and release verification; T039.2b–d/3a–c remain unimplemented.
 
 ### T040 — Reliable API/broker startup (FR-012)
 

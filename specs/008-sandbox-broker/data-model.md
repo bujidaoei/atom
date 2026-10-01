@@ -65,6 +65,10 @@ Interruption status distinction: runtime error lines now carry failed/cancelled/
 
 Post-registration deadline: execution may remain closed/confirmed/succeeded with its receipt and advanced head while Run/project become timed_out. These records describe different facts and must not be collapsed into a fabricated successful acceptance or rolled-back registration.
 
+Partial-checkpoint design (not implemented): a terminal `cancelled` or `timed_out` execution may carry an optional verified registered Receipt if and only if the broker quiesced/exported a changed workspace, the trusted API stored the immutable archive and registered the new head before worker termination. This is an incomplete saved revision, not a successful run, accepted app or publishable release. An unchanged export has no new receipt. Existing revision_attempts/revision_receipts may be sufficient, but cancellation-versus-success decision monotonicity, runtime/API deadline grace and crash recovery must be proved before reusing them. See `contracts/partial-checkpoint.md`; T039.2/3 remain open.
+
+Local ledger refinement: `revision_attempts.outcome` is now intended to be a first-writer terminal decision. A later cancellation returns the existing decision, including a pending success with registered receipt, rather than replacing it. The ledger can also close `cancelled` or `timed_out` with a receipt and preserve the committed head. This has repository tests across all seven supported schema versions, but Linux broker integration and deployment are pending; no user-facing partial-save claim follows from the ledger change alone.
+
 Cancellation ownership is process-local in the orchestrator cancellation-task map; it is not a durable distributed lease. Persisted Run/project terminal states and broker execution reconciliation retain their separate roles after process death.
 
 Planned extension: immutable verification executions/evidence, releases, publication generation/pointer and adoption provenance. Schema remains unimplemented; legacy records must not receive inferred trusted identities. See contracts/revision-release.md.
