@@ -122,7 +122,7 @@ export const api = {
       body: name ? { email, password, name } : { email, password },
     }),
   logout: (signal: AbortSignal) => request<{ ok: true }>("/api/auth/logout", { method: "POST", signal, silent401: true }),
-  me: (silent401 = false) => request<User>("/api/auth/me", { silent401 }),
+  me: (silent401 = false, signal?: AbortSignal) => request<User>("/api/auth/me", { silent401, signal }),
 
   // ---- settings
   getSettings: () => request<Settings>("/api/settings"),

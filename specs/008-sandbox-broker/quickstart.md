@@ -163,3 +163,6 @@ Confirmation UI (supersedes earlier fixture-issuer/browser limitations above): r
 
 
 Logout composition: the private-exchange browser command additionally opens actual /app, injects one transport-level 503 for logout (no server mutation), verifies visible failure and live /me/private content, then activates the alert retry action. Real logout must clear console Cookie and return 401 for /me while an existing content Cookie yields 404 for the stored private artifact. This differs from test_durable_auth_routes.py, which injects actual revocation-store failure. Both checks are required; transport failure alone does not prove database failure handling.
+
+
+Session-check browser extension: private-exchange mode now injects a first /me 503 before login and an aborted request after real login/reload. It must retain the original confirmation URL, show retryable uncertainty, avoid rendering login/issuance controls, retain the real session Cookie and recover through actual /me. A held response additionally exercises the production ten-second check deadline before another explicit retry. The rest of real confirmation/exchange/logout composition still executes. Fault responses are explicitly test-injected; successful auth/content operations are actual mounted APIs/storage.

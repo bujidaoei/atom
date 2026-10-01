@@ -151,13 +151,39 @@ sys.path.insert(0,str(root));runpy.run_path(str(root/'fixture.py'),run_name='__m
                         base=f'https://{metadata["host"]}:{server.server_port}'
                         if options.private_exchange:
                             assert page.goto(base+'/',timeout=5000).status==404
+                            context.route('**/api/auth/me',lambda route:route.fulfill(status=503,
+                                content_type='application/json',body='{"detail":"Injected session check failure"}'),times=1)
                             page.goto(base+'/_atom/bootstrap',wait_until='domcontentloaded',timeout=5000)
+                            page.get_by_role('alert').filter(has_text='暂时无法核对会话').wait_for(timeout=5000)
+                            assert '/content-access?' in page.url
+                            assert page.get_by_label('邮箱',exact=True).count()==0
+                            original_confirmation=page.url
+                            page.get_by_role('button',name='重试',exact=True).click()
+
                             page.get_by_label('邮箱',exact=True).fill('owner@example.org')
                             page.get_by_role('button',name='继续',exact=True).click()
                             page.get_by_label('密码',exact=True).fill('Fixture-login-pass-713!')
                             page.get_by_role('button',name='登录',exact=True).click()
                             page.get_by_role('heading',name='确认要打开的版本').wait_for(timeout=10000)
                             page.get_by_role('heading',name='Fixture',exact=True).wait_for(timeout=5000)
+                            assert page.url==original_confirmation
+                            context.route('**/api/auth/me',lambda route:route.abort(),times=1)
+                            page.reload(wait_until='domcontentloaded')
+                            page.get_by_role('alert').filter(has_text='暂时无法核对会话').wait_for(timeout=5000)
+                            assert page.url==original_confirmation
+                            assert page.get_by_role('button',name='确认并打开',exact=True).count()==0
+                            assert any(c['name']=='__Host-atom_console' for c in context.cookies())
+                            # A response that never arrives must leave the spinner through the production deadline.
+                            held_checks=[]
+                            context.route('**/api/auth/me',lambda route:held_checks.append(route),times=1)
+                            page.get_by_role('button',name='重试',exact=True).click()
+                            page.get_by_role('alert').filter(has_text='暂时无法核对会话').wait_for(timeout=15000)
+                            assert len(held_checks)==1
+                            held_checks.pop().abort()
+                            assert page.url==original_confirmation
+                            page.get_by_role('button',name='重试',exact=True).click()
+                            page.get_by_role('heading',name='Fixture',exact=True).wait_for(timeout=5000)
+                            assert page.url==original_confirmation
                             assert not any(path=='/api/content-access/handoff' for path,_,_ in observed)
                             initial={c['name']:c for c in context.cookies()}
                             assert initial['__Host-atom_bootstrap']['httpOnly'] and initial['__Host-atom_console']['httpOnly']
@@ -224,7 +250,7 @@ sys.path.insert(0,str(root));runpy.run_path(str(root/'fixture.py'),run_name='__m
                             assert any(c['name']=='__Host-atom_content' for c in context.cookies())
                             assert page.goto(base+'/',timeout=5000).status==404
                         print(json.dumps({'browser':browser.version,'artifactRevision':metadata['revision'],
-                            'scripts':len(loaded),'styles':len(styles),'privateExchange':options.private_exchange,'httpBootstrap':options.private_exchange,'realLoginAndConsent':options.private_exchange,'logoutFailureAndRevocation':options.private_exchange,'responses':observed,
+                            'scripts':len(loaded),'styles':len(styles),'privateExchange':options.private_exchange,'httpBootstrap':options.private_exchange,'realLoginAndConsent':options.private_exchange,'logoutFailureAndRevocation':options.private_exchange,'sessionCheckRecovery':options.private_exchange,'responses':observed,
                             'scope':'actual Linux artifact HTTP to Chromium through local test TLS ingress'}))
                         browser.close()
                 finally:

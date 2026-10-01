@@ -175,3 +175,7 @@ Design classification: Extension. Preserve existing IBM Plex typography, beige s
 
 ### Logout UI correction
 AuthProvider now waits for the expected logout acknowledgement before clearing identity/navigating. Use a ten-second AbortController and silent401 on this mutation so global unauthorized navigation cannot misrepresent revocation. Sidebar owns pending guard and visible accessible alert with explicit retry/close actions; only AuthProvider navigates on success. Browser composition extends real login/consent/artifact flow with a test transport 503, verifies identity and content still accessible, then real API logout and private-cookie denial. Boot/refresh uncertainty handling remains a separate unresolved obligation.
+
+
+### Session-check ownership and recovery
+Unify boot and refresh through abortable ten-second /me checks with silent401, a generation owner and cleanup. Sign-in, successful logout and global unauthorized handling invalidate pending checks. Preserve known user on non-401 failure, retain ready=false when no outcome was established, and expose retryable sessionError. SessionGate wraps login/register and protected initial states. Landing keeps informational content visible but hides anonymous assertions/actions until known. Existing workspace refresh uses the same implementation and retains its mounted state on failure. Full concurrent refresh/race acceptance remains separate from boot browser tests.

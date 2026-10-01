@@ -6,6 +6,7 @@ import { Logo } from "../components/Logo";
 import { NoticeBar } from "../components/NoticeBar";
 import { ThemeToggle } from "../components/ThemeToggle";
 import { Button, LinkButton } from "../components/ui/Button";
+import { ErrorState } from "../components/ui/States";
 import { Icon } from "../components/ui/Icon";
 import { AGENTS } from "../lib/agents";
 import { stashPendingPrompt, useAuth } from "../lib/auth";
@@ -13,14 +14,14 @@ import { EXAMPLE_PROMPTS } from "../lib/examples";
 import { useCreateProject } from "../lib/useCreateProject";
 
 export function LandingPage() {
-  const { user, ready } = useAuth();
+  const { user, ready, sessionError, refresh } = useAuth();
   const navigate = useNavigate();
   const [prompt, setPrompt] = useState("");
   const { create, submitting, error } = useCreateProject();
 
   function handleSubmit() {
     const trimmed = prompt.trim();
-    if (!trimmed) return;
+    if (!trimmed || !ready) return;
     if (!user) {
       stashPendingPrompt(trimmed);
       navigate("/login", { state: { from: "/app" } });
@@ -44,7 +45,7 @@ export function LandingPage() {
               能构建什么
             </a>
             <ThemeToggle />
-            {ready && user ? (
+            {!ready ? <span className="text-sm text-neutral-60">{sessionError ? "会话状态待确认" : "正在核对会话"}</span> : user ? (
               <LinkButton to="/app" size="sm">
                 进入工作台
               </LinkButton>
@@ -66,6 +67,7 @@ export function LandingPage() {
       </header>
 
       <NoticeBar />
+      {!ready && sessionError ? <div className="mx-auto max-w-xl p-l"><ErrorState title="暂时无法核对会话" message="尚未确认登录状态，请重试。" onRetry={() => void refresh()} /></div> : null}
 
       <section className="mx-auto flex max-w-[1120px] flex-col items-center px-l pb-xxxl pt-xxl">
         <AgentRow size="lg" className="mb-xl" />
@@ -84,11 +86,13 @@ export function LandingPage() {
             onChange={setPrompt}
             onSubmit={handleSubmit}
             submitting={submitting}
+            disabled={!ready}
+            disabledReason="请先完成会话检查"
             error={error}
             submitLabel={user ? "开始构建" : "开始"}
             placeholder="例如：做一个记账小工具，可以按分类筛选并显示本月结余。"
             meta={
-              user ? undefined : (
+              !ready || user ? undefined : (
                 <span className="hidden sm:inline">未登录也可以先写，提交时再登录</span>
               )
             }

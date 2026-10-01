@@ -204,3 +204,6 @@ T027 continuation (008/T022/T023/T025): actual frontend confirmation and real br
 
 
 T027 continuation (008/T022/T025): truthful logout UI now retains identity on failure and supports explicit retry. Composed browser test proves transport failure leaves actual session active and subsequent real logout invalidates existing content cookie. 40 backend regressions/build pass. Boot/refresh uncertainty, wider revocation/operations and production acceptance remain open.
+
+
+T027 continuation (008/T022/T025): session inspection now distinguishes unavailable from signed-out, preserving the original confirmation link through failed checks and explicit recovery. Actual browser flow and build pass; background/race matrix and enterprise rollout remain unfinished.

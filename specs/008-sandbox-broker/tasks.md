@@ -181,3 +181,6 @@ T022/T023/T025 continuation: real confirmation page now renders authoritative sc
 
 
 T022/T025 continuation: logout no longer swallows failures; bounded request, explicit success validation, disabled pending action and retry alert implemented. Actual browser transport-503 failure preserves signed-in page and real /me/private-content access; explicit retry reaches real logout, removes console cookie and invalidates retained private cookie. Build and 40 backend regressions pass. Initial browser test exposed alert covering original action; added direct retry action and reran successfully. Boot/refresh non-401 handling, lost successful response/timeout race, account-wide revoke/audit/cleanup and broad enterprise gates remain open. No whole-task closure.
+
+
+T022/T025 continuation: initial authentication failure now stays unknown with explicit retry instead of redirecting to login; background refresh preserves prior identity on non-401 error. Checks have ten-second abort bound and generation ownership. Frontend build and actual browser bootstrap/login/consent/exchange/logout composition pass with injected initial 503 and authenticated reload network failure. Full refresh-versus-login/logout race matrix and remaining enterprise/operational gates stay open; no task closure.

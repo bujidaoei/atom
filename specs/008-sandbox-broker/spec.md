@@ -189,3 +189,7 @@ The authenticated /content-access page must inspect authoritative stored scope w
 
 ### Truthful logout outcome
 Logout must preserve local identity and show an explicit uncertain/failure outcome unless the server returns the expected success acknowledgement. A network failure, timeout, non-success status (including 401) or malformed success must not be presented as completed revocation. Bound waiting and prevent duplicate clicks; allow explicit retry. A successful durable logout must make an already-installed private-content credential unusable on the next read.
+
+
+### Unknown authentication state
+Initial network/server failure while checking the session must remain an unknown state, not an anonymous-session assertion. Protected and authentication routes show a bounded check or retryable error without losing the requested route. Public content remains readable; session-dependent actions wait for resolution. Later refresh failures preserve the prior identity and work surface while displaying uncertainty. Only authoritative 401 establishes an absent session. Obsolete checks must not overwrite newer sign-in/logout outcomes.
