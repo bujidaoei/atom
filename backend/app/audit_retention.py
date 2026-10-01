@@ -40,10 +40,12 @@ def _identifier(value, maximum=100):
 
 
 class RetentionRepository:
+    _versions = (8, 9, 10)
+
     def __init__(self, path):
         self.path = Path(path)
         try:
-            if verify(self.path) not in (8, 9, 10):
+            if verify(self.path) not in self._versions:
                 raise RetentionError('retention_schema_required')
         except MigrationError:
             raise RetentionError('retention_schema_required') from None
@@ -59,7 +61,7 @@ class RetentionRepository:
             deadline = time.monotonic()+5
             db.set_progress_handler(lambda: int(time.monotonic() >= deadline), 1000)
             db.execute('BEGIN' if read_only else 'BEGIN IMMEDIATE')
-            if _schema(db) not in (8, 9, 10):
+            if _schema(db) not in self._versions:
                 raise RetentionError('retention_schema_required')
             db.row_factory = sqlite3.Row
             yield db

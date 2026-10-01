@@ -9,6 +9,16 @@ from .audit_archive_store import AuditArchiveStore
 from .audit_retention import RetentionRepository, _identifier
 
 
+def validate_registered_payload(payload, row):
+    restored = decode_archive(payload,expected_sha256=row['archive_sha256'])
+    fields = ('format_version','coverage','scope_kind','scope_id','event_kind','context_sha256',
+              'plan_sha256','payload_sha256','payload_bytes','event_count','upper_sequence')
+    if (len(payload) != row['archive_bytes'] or restored['manifest']['after'] != row['after_sequence'] or
+            any(restored['manifest'][key] != row[key] for key in fields)):
+        raise ArchiveError('archive_recovery_mismatch')
+    return restored
+
+
 class AuditArchiving:
     def __init__(self, database, *, store_id, root):
         _identifier(store_id, 64)
@@ -164,12 +174,7 @@ class AuditArchiving:
     def _registered_payload(self, row):
         # Expected identity comes exclusively from the immutable ledger, not caller/object metadata.
         payload = self.store.read(expected_sha256=row['archive_sha256'])
-        restored = decode_archive(payload,expected_sha256=row['archive_sha256'])
-        fields = ('format_version','coverage','scope_kind','scope_id','event_kind','context_sha256',
-                  'plan_sha256','payload_sha256','payload_bytes','event_count','upper_sequence')
-        if (len(payload) != row['archive_bytes'] or restored['manifest']['after'] != row['after_sequence'] or
-                any(restored['manifest'][key] != row[key] for key in fields)):
-            raise ArchiveError('archive_recovery_mismatch')
+        validate_registered_payload(payload,row)
         return payload
 
     def _read_registered(self, row):

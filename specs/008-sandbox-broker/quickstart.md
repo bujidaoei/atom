@@ -334,3 +334,6 @@ Real storage exhaustion regression: set the pinned ATOM_TEST_API_IMAGE and run `
 
 
 Offline schema11 foundation regression: `backend/.venv/Scripts/python.exe -m pytest backend/tests/test_audit_pruning_migration.py backend/tests/test_audit_isolated_migration.py -q --junitxml=.logs/audit-pruning-schema.xml`.55 pass. Do not migrate serving databases to11: no prune owner/CLI or gap-aware readers exist yet and existing consumers reject it.
+
+
+Prune owner regression on disposable copies only: with pinned API/sandbox images run `backend/.venv/Scripts/python.exe -m pytest backend/tests/integration/test_isolated_receipt.py -k "prune or happy" -q --junitxml=.logs/audit-pruning-owner.xml`. Seven cases pass. Owner requires explicit configured verifier identity/image/policy plus command/archive/recovery IDs and expected generation/context. No supported CLI or serving11 rollout exists yet.

@@ -12,6 +12,7 @@ import sqlite3
 import subprocess
 import sys
 import threading
+from unittest.mock import patch
 
 from app.audit_archiving import AuditArchiving
 from app.audit_archive import ArchiveError
@@ -118,6 +119,8 @@ async def run():
             except ArchiveError as error: assert str(error) == 'recovery_identity_conflict'
             else: raise AssertionError('identity conflict accepted')
             expected = 1
+            if scenario.startswith('prune-'):
+                return run_prune(receipt)
             if scenario in ('pages','pages-hold'):
                 first = owner.inspect(archive_id='archive')
                 assert first['archive']['event_count']==100 and first['continuation']
@@ -154,6 +157,66 @@ async def run():
             assert inspection['isolated_recovery_receipts'] == min(expected,1)
             assert inspection['recovery_receipts'] == 0 and not inspection['deletion_authorized']
     return expected
+
+
+def run_prune(recovered):
+    from app.audit_pruning import AuditPruning, PruneError
+    from app.migrations import migrate
+    scenario=config['scenario']
+    if scenario=='prune-hold':
+        owner.repository.execute(command_id='hold',policy_id='policy',operator_id='operator',action='place_hold',
+            expected_generation=1,hold_id='legal-hold',hold_kind='legal')
+    if scenario=='prune-corrupt':
+        file=Path('/tmp/archive')/(registered['archive_sha256']+'.atomaudit')
+        file.chmod(0o600);file.write_bytes(b'corrupt')
+    migrate(Path('/tmp/source.db'),Path('/tmp/before-prune.db'),target_version=11)
+    service=AuditPruning(Path('/tmp/source.db'),store_id=store,root=Path('/tmp/archive'),verifier_id='verifier',
+        expected_image=config['image'],expected_policy_digest='0'*64 if scenario=='prune-verifier' else config['policy'])
+    request=dict(command_id='prune',operator_id='operator',archive_id='archive',
+        recovery_id='absent' if scenario=='prune-missing-receipt' else recovered['recovery_id'],
+        expected_generation=1,expected_context=registered['context_sha256'])
+    with sqlite3.connect('/tmp/source.db') as db:
+        before=list(db.iterdump())
+        original=db.execute('SELECT sequence,event_id,scope_kind,scope_id,event_kind FROM security_audit_events '
+            "WHERE scope_kind='account' AND scope_id='user' AND event_kind='console.session.created' ORDER BY sequence").fetchall()
+        unrelated=db.execute("SELECT * FROM security_audit_events WHERE NOT (scope_kind='account' AND scope_id='user' AND event_kind='console.session.created')").fetchall()
+    if scenario=='prune-happy':
+        result=service.prune(**request)
+        assert result['event_count']==len(original)==3
+        assert service.prune(**request)==result
+        try:service.prune(**dict(request,operator_id='different'))
+        except PruneError as error:assert str(error)=='prune_identity_conflict'
+        else:raise AssertionError('changed replay accepted')
+        with sqlite3.connect('/tmp/source.db') as db:
+            assert db.execute('SELECT sequence,event_id,scope_kind,scope_id,event_kind FROM security_audit_archived_events ORDER BY sequence').fetchall()==original
+            assert db.execute("SELECT * FROM security_audit_events WHERE NOT (scope_kind='account' AND scope_id='user' AND event_kind='console.session.created')").fetchall()==unrelated
+            assert db.execute("SELECT count(*) FROM security_audit_events WHERE scope_kind='account' AND scope_id='user' AND event_kind='console.session.created'").fetchone()==(0,)
+            assert db.execute('SELECT count(*) FROM security_audit_delivery').fetchone()==(0,)
+            assert db.execute('SELECT count(*) FROM security_audit_prune_receipts').fetchone()==(1,)
+            assert db.execute('PRAGMA foreign_key_check').fetchall()==[]
+    else:
+        def attempt():
+            try:service.prune(**request)
+            except (PruneError,RetentionError,ArchiveError):return
+            raise AssertionError('invalid prune succeeded')
+        if scenario=='prune-rollback':
+            connect=sqlite3.connect
+            class Connection(sqlite3.Connection):
+                def execute(self,sql,*args,**kwargs):
+                    result=super().execute(sql,*args,**kwargs)
+                    if sql.startswith('DELETE FROM security_audit_events'):
+                        raise sqlite3.OperationalError('injected failure after actual delete')
+                    return result
+            with patch('sqlite3.connect',lambda *args,**kwargs:connect(*args,**dict(kwargs,factory=Connection))):attempt()
+        else:attempt()
+        with sqlite3.connect('/tmp/source.db') as db:assert list(db.iterdump())==before
+    # Ordinary connections never inherit maintenance authority, including after rollback.
+    with sqlite3.connect('/tmp/source.db') as db:
+        assert db.execute('SELECT count(*) FROM security_audit_isolated_recoveries').fetchone()==(1,)
+        try:db.execute('DELETE FROM security_audit_events')
+        except sqlite3.DatabaseError:pass
+        else:raise AssertionError('maintenance authority leaked')
+    return 1
 
 
 def run_cli():

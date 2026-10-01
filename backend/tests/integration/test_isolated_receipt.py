@@ -19,7 +19,7 @@ pytestmark = pytest.mark.skipif(not IMAGE or not API_IMAGE,reason='requires pinn
 
 
 @pytest.mark.parametrize('scenario',['happy','auth','policy','lost-result','worker','cancelled','cli','commit-before','commit-after',
-    'pages','pages-hold','missing','corrupt','cold-read'])
+    'pages','pages-hold','missing','corrupt','cold-read','prune-happy','prune-hold','prune-corrupt','prune-verifier','prune-missing-receipt','prune-rollback'])
 def test_real_linux_owner_wire_worker_and_receipt(planned,recovery,tmp_path,monkeypatch,scenario):
     path,_ = planned
     migrate(path,tmp_path/'before-ten.db',target_version=10)
@@ -83,7 +83,7 @@ def test_real_linux_owner_wire_worker_and_receipt(planned,recovery,tmp_path,monk
             del command[seed-1:seed+1]
         status,out,err = run_bounded(command,timeout=30,input_data=json.dumps(data).encode())
         assert status == 0,err.decode()
-        expected = 2 if scenario=='pages' else int(scenario in ('happy','cli','commit-before','commit-after','pages-hold','cold-read'))
+        expected = 2 if scenario=='pages' else int(scenario.startswith('prune-') or scenario in ('happy','cli','commit-before','commit-after','pages-hold','cold-read'))
         assert json.loads(out) == {'scenario':scenario,'receipts':expected}
         assert not app.state.lifecycle.driver.owned_inventory()
         if scenario in ('cli','commit-before','commit-after'):
