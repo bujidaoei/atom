@@ -5,6 +5,7 @@ import multiprocessing
 import os
 from pathlib import Path
 import signal
+import socket
 import sqlite3
 import subprocess
 import sys
@@ -122,9 +123,49 @@ def test_actual_browser_attestation_publishes_exact_pinned_store_bytes(assignmen
             assert page.headers['cache-control'] == 'no-store'
 
     asyncio.run(serve(True))
-    ReleaseRepository(path).unpublish(owner='user', project_id='project',
-        command_id='browser-release-off', expected_release=release.release_id,
-        expected_generation=release.generation)
+    listener = socket.socket()
+    listener.bind(('127.0.0.1', 0))
+    port = listener.getsockname()[1]
+    listener.close()
+    environment = dict(os.environ, ATOM_CONTENT_DB_PATH=str(path),
+        ATOM_CONTENT_ARTIFACT_DIR=str(root), ATOM_CONTENT_HOST_SUFFIX='content.example.test',
+        ATOM_CONTENT_CONSOLE_ORIGIN='https://console.example.org')
+    process = subprocess.Popen([sys.executable, '-m', 'uvicorn',
+        'app.content_entry:create_app', '--factory', '--host', '127.0.0.1', '--port', str(port),
+        '--log-level', 'error'], env=environment, stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE)
+    try:
+        with httpx.Client(base_url=f'http://127.0.0.1:{port}', trust_env=False,
+                          timeout=2) as client:
+            deadline = time.monotonic() + 10
+            while True:
+                assert process.poll() is None, 'content process exited before readiness'
+                try:
+                    page = client.get('/', headers={'host':service.hosts.hostname(binding.id)})
+                    break
+                except httpx.ConnectError:
+                    assert time.monotonic() < deadline, 'content process startup deadline'
+                    time.sleep(.05)
+            assert page.status_code == 200 and page.content == b'<html>heat</html>'
+            shared = client.get('/s/' + release.slug,
+                                headers={'host':'share.content.example.test'})
+            assert shared.status_code == 307
+            assert shared.headers['location'] == service.hosts.url(binding.id)
+            ReleaseRepository(path).unpublish(owner='user', project_id='project',
+                command_id='browser-release-off', expected_release=release.release_id,
+                expected_generation=release.generation)
+            assert client.get('/', headers={'host':service.hosts.hostname(binding.id)}).status_code == 404
+            assert client.get('/s/' + release.slug,
+                              headers={'host':'share.content.example.test'}).status_code == 404
+    finally:
+        if process.poll() is None:
+            process.terminate()
+        try:
+            process.communicate(timeout=10)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.communicate(timeout=5)
+        assert process.returncode is not None
     asyncio.run(serve(False))
     with pytest.raises(VerificationError, match='content_not_found'):
         content.sharing_binding(slug=release.slug)
