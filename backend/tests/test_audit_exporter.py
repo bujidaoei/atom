@@ -118,11 +118,19 @@ def test_cancelled_waiter_does_not_lose_success_ack(reader, monkeypatch):
     asyncio.run(scenario())
 
 
-def test_real_receiver_lost_ack_then_automatic_ledger_retry(reader, certificate, monkeypatch, tmp_path):
+@pytest.mark.parametrize('delivery_schema,receiver_mode', [(5,'retry'),(7,'retry'),(7,'block')])
+def test_real_receiver_lost_ack_then_automatic_ledger_retry(reader, certificate, monkeypatch, tmp_path, delivery_schema, receiver_mode):
     path, _, access, _, _ = reader
     for _ in range(2): access.create_console_session(user_id='user', lifetime_seconds=60)
     target = destination()
     cert, key = certificate
+    if delivery_schema == 7:
+        from app.migrations import migrate
+        from app.audit_governance import AuditGovernanceRepository
+        migrate(path, tmp_path/'before-governed.db', target_version=7)
+        AuditGovernanceRepository(path).execute(command_id='register', operator_id='operator',
+            destination_id=target.destination_id, scope_kind=target.scope_kind, scope_id=target.scope_id,
+            action='register', expected_generation=0)
     sink = tmp_path/'sink.db'
     with sqlite3.connect(sink) as db: db.execute('CREATE TABLE received(id TEXT PRIMARY KEY)')
     async def scenario():
@@ -139,6 +147,10 @@ def test_real_receiver_lost_ack_then_automatic_ledger_retry(reader, certificate,
                 assert headers[b'Authorization'] == ('Bearer '+target.token).encode()
                 body = await reader.readexactly(int(headers[b'Content-Length']))
                 calls.append(body)
+                if receiver_mode == 'block' and len(calls) == 1:
+                    writer.write(b'HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n')
+                    await writer.drain()
+                    return
                 with sqlite3.connect(sink) as db:
                     db.executemany('INSERT OR IGNORE INTO received VALUES (?)',
                                    [(event['event_id'],) for event in json.loads(body)])
@@ -159,9 +171,17 @@ def test_real_receiver_lost_ack_then_automatic_ledger_retry(reader, certificate,
         exporter = AuditExporter(path, target, ca_file=cert)
         try:
             first = await exporter.run_once()
-            assert first.outcome == 'retry' and first.event_count == 3
+            assert first.outcome == ('blocked' if receiver_mode == 'block' else 'retry') and first.event_count == 3
             assert repository(path, target).status()['delivered'] == 0
-            monkeypatch.setattr('app.audit_delivery.time.time', lambda: 102)
+            if receiver_mode == 'block':
+                await exporter.close()
+                exporter = AuditExporter(path, target, ca_file=cert)
+                assert (await exporter.run_once()).outcome == 'suspended'
+                assert len(calls) == 1
+                AuditGovernanceRepository(path).execute(command_id='resume', operator_id='operator',
+                    destination_id=target.destination_id, scope_kind=target.scope_kind, scope_id=target.scope_id,
+                    action='resume', expected_generation=2)
+            monkeypatch.setattr('app.audit_delivery.time.time', lambda: 161 if receiver_mode == 'block' else 102)
             exporter.start(interval=.02)
             async with asyncio.timeout(3):
                 while repository(path, target).status()['delivered'] != 3:

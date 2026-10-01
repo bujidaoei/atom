@@ -165,6 +165,11 @@ class AuditExporter:
                     await send_audit_events(self._destination, lease.events, ca_file=self._ca_file)
                 except AuditSendError as error:
                     if not error.retryable:
+                        if lease.generation is not None:
+                            reason = 'invalid_payload' if str(error) in ('invalid_audit_batch', 'audit_batch_capacity') else 'receiver_configuration'
+                            blocked = await self._database(cycle, 'block', generation=lease.generation, lease_owner=lease.owner, reason=reason)
+                            self._record_error('audit_export_destination_blocked' if blocked else 'audit_export_superseded')
+                            return ExportResult('blocked' if blocked else 'superseded', len(ids), enrollment['remaining'], enrollment['capacity_reached'])
                         self._owner.close_admission()
                         self._record_error('audit_export_configuration')
                         raise AuditExporterError(self.last_error) from None
@@ -174,7 +179,10 @@ class AuditExporter:
                 await self._database(cycle, 'acknowledge', event_ids=ids, lease_owner=lease.owner)
                 self._record_error(None)
                 return ExportResult('delivered', len(ids), enrollment['remaining'], enrollment['capacity_reached'])
-        except AuditDeliveryError:
+        except AuditDeliveryError as error:
+            if str(error) == 'audit_destination_inactive':
+                self._record_error('audit_export_destination_inactive')
+                return ExportResult('suspended', 0, False, False)
             self._record_error('audit_export_storage_unavailable')
             raise AuditExporterError(self.last_error) from None
         except TimeoutError:

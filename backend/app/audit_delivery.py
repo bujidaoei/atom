@@ -21,6 +21,7 @@ class DeliveryLease:
     owner: str
     expires_at: int
     events: tuple[dict, ...]
+    generation: int | None = None
 
 
 def _integer(value, low, high):
@@ -38,7 +39,7 @@ class AuditDeliveryRepository:
         self.path = Path(path)
         self.destination_id, self.scope_kind, self.scope_id = destination_id, scope_kind, scope_id
         try:
-            if verify(self.path) != 5:
+            if verify(self.path) not in (5,7):
                 raise AuditDeliveryError('audit_schema_required')
         except MigrationError:
             raise AuditDeliveryError('audit_schema_required') from None
@@ -54,7 +55,7 @@ class AuditDeliveryRepository:
             deadline = time.monotonic()+5
             db.set_progress_handler(lambda: int(time.monotonic() >= deadline), 1000)
             db.execute('BEGIN' if read_only else 'BEGIN IMMEDIATE')
-            if _schema(db) != 5:
+            if _schema(db) not in (5,7):
                 raise AuditDeliveryError('audit_schema_required')
             conflicting = db.execute('SELECT 1 FROM security_audit_delivery d '
                 'JOIN security_audit_events e ON e.event_id=d.event_id WHERE d.destination_id=? '
@@ -62,6 +63,7 @@ class AuditDeliveryRepository:
                 (self.destination_id, self.scope_kind, self.scope_id)).fetchone()
             if conflicting:
                 raise AuditDeliveryError('destination_scope_conflict')
+            self._registry(db)
             yield db
             db.execute('COMMIT')
         except (sqlite3.Error, OSError, MigrationError):
@@ -71,6 +73,42 @@ class AuditDeliveryRepository:
                 if db.in_transaction:
                     db.rollback()
                 db.close()
+
+    def _registry(self, db):
+        if db.execute('PRAGMA user_version').fetchone()[0] == 5:
+            return None
+        row = db.execute('SELECT scope_kind,scope_id,state,generation,required_through_sequence '
+            'FROM security_audit_destinations WHERE destination_id=?', (self.destination_id,)).fetchone()
+        if row is None:
+            raise AuditDeliveryError('audit_destination_unregistered')
+        if row[:2] != (self.scope_kind, self.scope_id):
+            raise AuditDeliveryError('destination_scope_conflict')
+        return row
+
+    def _require_active(self, db):
+        row = self._registry(db)
+        if row is not None and row[2] != 'active':
+            raise AuditDeliveryError('audit_destination_inactive')
+        return row[3] if row is not None else None
+
+    def block(self, *, generation, lease_owner, reason):
+        from .audit_governance import AuditGovernanceRepository, AuditGovernanceError
+        if not isinstance(lease_owner, str) or re.fullmatch(r'[0-9a-f]{32}', lease_owner) is None:
+            raise AuditDeliveryError('invalid_delivery_batch')
+        if reason not in ('receiver_configuration', 'invalid_payload'):
+            raise AuditDeliveryError('invalid_delivery_reason')
+        if type(generation) is not int or not 1 <= generation < 2**63-1:
+            raise AuditDeliveryError('invalid_delivery_generation')
+        try:
+            AuditGovernanceRepository(self.path).execute(command_id='export-block-'+lease_owner,
+                operator_id='audit-exporter', destination_id=self.destination_id,
+                scope_kind=self.scope_kind, scope_id=self.scope_id, action='block',
+                expected_generation=generation, reason=reason)
+            return True
+        except AuditGovernanceError as error:
+            if str(error) in ('audit_generation_conflict', 'audit_transition_denied'):
+                return False
+            raise AuditDeliveryError('audit_delivery_unavailable') from None
 
     @staticmethod
     def _now():
@@ -83,6 +121,7 @@ class AuditDeliveryRepository:
         _integer(limit, 1, 100)
         _integer(max_outstanding, 1, 10000)
         with self._transaction() as db:
+            self._require_active(db)
             now = self._now()
             outstanding = len(db.execute('SELECT 1 FROM security_audit_delivery '
                 "WHERE destination_id=? AND state<>'delivered' LIMIT ?",
@@ -106,6 +145,7 @@ class AuditDeliveryRepository:
         _integer(lease_seconds, 1, 300)
         _integer(max_bytes, 2, 262144)
         with self._transaction() as db:
+            generation = self._require_active(db)
             now = self._now()
             owner = secrets.token_hex(16)
             rows = db.execute('SELECT '+','.join('e.'+key for key in _FIELDS)+
@@ -129,7 +169,7 @@ class AuditDeliveryRepository:
                 db.execute("UPDATE security_audit_delivery SET state='leased',attempt=attempt+1,"
                     'lease_owner=?,lease_expires_at=? WHERE destination_id=? AND event_id=?',
                     (owner, now+lease_seconds, self.destination_id, event['event_id']))
-            return DeliveryLease(owner, now+lease_seconds, tuple(events))
+            return DeliveryLease(owner, now+lease_seconds, tuple(events), generation)
 
     @staticmethod
     def _batch(event_ids, lease_owner):
@@ -170,6 +210,8 @@ class AuditDeliveryRepository:
     def status(self):
         with self._transaction(read_only=True) as db:
             now = self._now()
+            registry = self._registry(db)
+            through = registry[4] if registry and registry[2] == 'retired' else 2**63-1
             rows = db.execute('SELECT state,count(*) FROM security_audit_delivery '
                 'WHERE destination_id=? GROUP BY state', (self.destination_id,)).fetchall()
             result = dict.fromkeys(('pending', 'leased', 'delivered'), 0)
@@ -183,11 +225,13 @@ class AuditDeliveryRepository:
                 'WHERE d.destination_id=?', (self.destination_id,)).fetchone()
             result['unenrolled'], result['oldest_unenrolled_at'] = db.execute(
                 'SELECT count(*),min(e.occurred_at) FROM security_audit_events e '
-                'WHERE e.scope_kind=? AND e.scope_id=? AND NOT EXISTS '
+                'WHERE e.scope_kind=? AND e.scope_id=? AND e.sequence<=? AND NOT EXISTS '
                 '(SELECT 1 FROM security_audit_delivery d WHERE d.destination_id=? AND d.event_id=e.event_id)',
-                (self.scope_kind, self.scope_id, self.destination_id)).fetchone()
+                (self.scope_kind, self.scope_id, through, self.destination_id)).fetchone()
             times = [value for value in (result['oldest_unacked_at'], result['oldest_unenrolled_at']) if value is not None]
             result['oldest_unacked_at'] = min(times) if times else None
             result['backlog'] = result['pending']+result['leased']+result['unenrolled']
             result['observed_at'] = now
+            if registry is not None:
+                result.update(registry_state=registry[2], generation=registry[3], required_through_sequence=registry[4])
             return result
