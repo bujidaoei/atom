@@ -60,3 +60,21 @@ class ContentRepository:
         # The immutable binding is captured above. Recheck current visibility
         # in the release ledger; no permission is inferred from knowing its ID.
         return self._releases.resolve(slug=slug,viewer=viewer,release_id=release_id)
+
+    def sharing_binding(self, *, slug: str) -> ContentBinding:
+        """Capture the current public route atomically; never allocate on GET."""
+        if (not isinstance(slug,str) or len(slug)>63
+                or re.fullmatch(r'[a-z0-9]+(?:-[a-z0-9]+)*',slug) is None):
+            raise VerificationError('content_not_found')
+        with self._releases._ledger._transaction() as db:
+            self._require_schema(db)
+            row = db.execute('''SELECT p.project_id,p.release_id,p.live,r.audience,b.id
+                FROM release_publications p
+                JOIN release_records r ON r.id=p.release_id AND r.project_id=p.project_id
+                LEFT JOIN content_bindings b ON b.release_id=r.id AND b.project_id=p.project_id
+                WHERE p.slug=?''',(slug,)).fetchone()
+            if row is None or not row['live'] or row['audience'] != 'public':
+                raise VerificationError('content_not_found')
+            if row['id'] is None:
+                raise VerificationError('content_binding_unavailable')
+            return ContentBinding(row['id'],row['project_id'],row['release_id'])

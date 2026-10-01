@@ -28,9 +28,22 @@ class ContentHosts:
     def url(self, binding_id: str) -> str:
         return 'https://' + self.hostname(binding_id) + '/'
 
-    def binding(self, headers: list[tuple[bytes, bytes]]) -> str:
-        """Use exactly one actual Host header, never forwarded host metadata.
+    def sharing_url(self, slug: str) -> str:
+        if (not isinstance(slug,str) or len(slug)>63
+                or re.fullmatch(r'[a-z0-9]+(?:-[a-z0-9]+)*',slug) is None):
+            raise ContentHostError('invalid_content_slug')
+        return f'https://share.{self.suffix}/s/{slug}'
 
+    def binding(self, headers: list[tuple[bytes, bytes]]) -> str:
+        binding = self.route(headers)
+        if binding is None:
+            raise ContentHostError('invalid_content_host')
+        return binding
+
+    def route(self, headers: list[tuple[bytes, bytes]]) -> str | None:
+        """Return a pinned binding, or None for the dedicated sharing host.
+
+        Use exactly one actual Host header, never forwarded host metadata.
         An ingress must preserve the validated authority in Host. This parser
         does not assert TLS, DNS ownership, registrable-site isolation or auth.
         """
@@ -46,6 +59,8 @@ class ContentHosts:
             raise ContentHostError('invalid_content_host') from None
         if host.endswith(':443'):
             host = host[:-4]
+        if host == 'share.' + self.suffix:
+            return None
         match = re.fullmatch(r'r-([0-9a-f]{32})\.' + re.escape(self.suffix),host)
         if match is None:
             raise ContentHostError('invalid_content_host')

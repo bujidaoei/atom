@@ -65,3 +65,29 @@ def test_binding_requires_v3(release):
 def test_invalid_or_missing_binding_is_denied(content,identity):
     with pytest.raises(VerificationError,match='content_not_found'):
         content[1].resolve(binding_id=identity)
+
+
+def test_sharing_tracks_only_live_public_bound_release_without_writes(content):
+    path,repository,releases,args=content
+    with pytest.raises(VerificationError,match='content_not_found'):
+        repository.sharing_binding(slug='site')
+    public=args|{'release_id':'public','expected_generation':1,'audience':'public'}
+    releases.publish(**public)
+    with pytest.raises(VerificationError,match='content_binding_unavailable'):
+        repository.sharing_binding(slug='site')
+    with sqlite3.connect(path) as db:
+        assert db.execute('SELECT count(*) FROM content_bindings').fetchone()==(0,)
+    first=repository.bind(owner='user',project_id='project',release_id='public')
+    assert repository.sharing_binding(slug='site')==first
+    releases.publish(**(public|{'release_id':'new','expected_generation':2}))
+    with pytest.raises(VerificationError,match='content_binding_unavailable'):
+        repository.sharing_binding(slug='site')
+    second=repository.bind(owner='user',project_id='project',release_id='new')
+    assert repository.sharing_binding(slug='site')==second
+    assert repository.resolve(binding_id=first.id).release_id=='public'
+    releases.publish(**(args|{'release_id':'private','expected_generation':3}))
+    with pytest.raises(VerificationError,match='content_not_found'):
+        repository.sharing_binding(slug='site')
+    releases.unpublish(owner='user',project_id='project',command_id='off',expected_release='private',expected_generation=4)
+    with pytest.raises(VerificationError,match='content_not_found'):
+        repository.sharing_binding(slug='site')

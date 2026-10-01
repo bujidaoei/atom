@@ -62,9 +62,17 @@ class ContentService:
     def _response(self, scope):
         method = scope.get('method')
         try:
-            binding = self.hosts.binding(scope.get('headers',[]))
+            binding = self.hosts.route(scope.get('headers',[]))
             if method not in ('GET','HEAD'):
                 response = Response(status_code=405,headers={**HEADERS,'Allow':'GET, HEAD'})
+            elif binding is None:
+                path = scope.get('path','/')
+                if not path.startswith('/s/'):
+                    response = Response(status_code=404,headers=HEADERS)
+                else:
+                    destination = self.repository.sharing_binding(slug=path[3:])
+                    response = Response(status_code=307,headers={**HEADERS,
+                        'Location':self.hosts.url(destination.id)})
             else:
                 # Browser navigation metadata is a fallback hint, never auth.
                 navigation = any(k.lower()==b'sec-fetch-mode' and v==b'navigate' for k,v in scope['headers'])

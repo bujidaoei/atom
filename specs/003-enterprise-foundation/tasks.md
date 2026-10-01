@@ -164,3 +164,5 @@ Feature008 T017 progress: bounded content response admission/send lifetime and c
 Feature008 T017 progress: bounded truthful ASGI drain and actual Linux Uvicorn TCP serving/startup/shutdown verified (21 targeted tests). Cancelled callers do not erase active IO ownership, and failed drain does not reopen admission. Public TLS/browser/private access/verifier/supervisor deployment gates remain unaccepted; T027 stays open.
 
 Feature008 T017 evidence increment: Chromium local HTTPS attack fixtures validate actual production response headers with network/worker positive controls and console/sibling storage isolation. End-to-end artifact/browser/private-access/verifier/public-TLS acceptance remains open; enterprise T027 remains unchecked.
+
+Feature008 T017 progress: stable public sharing routes now follow current immutable binding with tested denial for private/offline/missing binding and no client-controlled redirect. SQLite, real Linux artifact/ASGI and TCP checks pass (53 tests). Production/private/UI/verifier gates remain open; T027 stays unchecked.

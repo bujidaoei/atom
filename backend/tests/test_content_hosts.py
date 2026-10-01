@@ -38,3 +38,19 @@ def test_duplicate_missing_and_non_ascii_hosts_are_denied():
 @pytest.mark.parametrize('identity',['a'*31,'A'*32,'../content','a'*33,None])
 def test_invalid_binding_cannot_form_url(identity):
     with pytest.raises(ContentHostError):ContentHosts('content.test').url(identity)
+
+
+def test_sharing_host_is_distinct_and_not_a_binding():
+    hosts=ContentHosts('content.test')
+    assert hosts.sharing_url('my-site')=='https://share.content.test/s/my-site'
+    assert hosts.route([(b'host',b'SHARE.CONTENT.TEST:443')]) is None
+    with pytest.raises(ContentHostError):hosts.binding([(b'host',b'share.content.test')])
+    for authority in (b'share.content.test.attacker.test',b'share.content.test:80',b'share.content.test.'):
+        with pytest.raises(ContentHostError):hosts.route([(b'host',authority)])
+    with pytest.raises(ContentHostError):
+        hosts.route([(b'host',b'share.content.test'),(b'host',b'share.content.test')])
+
+
+@pytest.mark.parametrize('slug',['','../site','site/','site?next=evil','https://evil.test','a'*64,None])
+def test_invalid_share_slug_cannot_form_url(slug):
+    with pytest.raises(ContentHostError):ContentHosts('content.test').sharing_url(slug)

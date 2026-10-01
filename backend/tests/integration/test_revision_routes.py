@@ -213,6 +213,13 @@ async def content_test():
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=service),base_url=hosts.url(binding.id)) as client:
         page=await client.get('/')
         assert page.status_code==200 and page.text=='<h1>committed</h1>'
+        shared=await client.get(hosts.sharing_url('site')+'?next=https://attacker.invalid/')
+        assert shared.status_code==307 and shared.headers['location']==hosts.url(binding.id)
+        assert shared.headers['cache-control']=='no-store' and not shared.content
+        assert (await client.head(hosts.sharing_url('site'))).headers['location']==hosts.url(binding.id)
+        assert (await client.get(hosts.sharing_url('missing'))).status_code==404
+        assert (await client.get(hosts.sharing_url('site')+'/extra')).status_code==404
+        assert (await client.post(hosts.sharing_url('site'))).status_code==405
         assert page.headers['x-atom-release']=='http-release'
         assert page.headers['x-atom-revision']==main.revision_id
         assert page.headers['cache-control']=='no-store'
@@ -340,6 +347,9 @@ async def content_test():
                 assert real_page.status_code==200 and real_page.content==page.content
                 assert (await network.head('/',headers=valid)).headers['content-length']==page.headers['content-length']
                 assert (await network.get('/style.css',headers=valid)).text=='body { color: blue; }'
+                redirect=await network.get('/s/site',headers={'host':'share.'+hosts.suffix})
+                assert redirect.status_code==307 and redirect.headers['location']==hosts.url(binding.id)
+                assert redirect.headers['cache-control']=='no-store'
                 assert (await network.get('/')).status_code==404
                 assert (await network.get('/',headers={'x-forwarded-host':hosts.hostname(binding.id)})).status_code==404
         finally:
@@ -394,7 +404,11 @@ async def content_test():
             results=[{'key':'page','checkIndex':0,'passed':True,'note':'fixture'}])
         releases.publish(owner='owner',project_id='p',release_id='second-http',verification_id=second_check.id,
             expected_revision='second-revision',expected_generation=5,policy_digest='c'*64,runner_version='fixture-runner',audience='public',slug='site')
+        missing_binding=await client.get(hosts.sharing_url('site'))
+        assert missing_binding.status_code==503 and 'location' not in missing_binding.headers
         second_binding=content.bind(owner='owner',project_id='p',release_id='second-http')
+        shared=await client.get(hosts.sharing_url('site'))
+        assert shared.status_code==307 and shared.headers['location']==hosts.url(second_binding.id)
         # Publication changed between initial HTML and these resource requests.
         old_css=await client.get('/style.css')
         assert old_css.text==css.text and old_css.headers['x-atom-release']=='http-release'
@@ -411,12 +425,15 @@ async def content_test():
             expected_revision='second-revision',expected_generation=6,policy_digest='c'*64,runner_version='fixture-runner',audience='owner',slug='site')
         # Current privacy applies even to a previously public, pinned hostname.
         assert (await client.get('/')).status_code==404
+        denied_share=await client.get(hosts.sharing_url('site'),headers={'cookie':'session=owner'})
+        assert denied_share.status_code==404 and 'location' not in denied_share.headers
         private=content.bind(owner='owner',project_id='p',release_id='private-http')
         assert (await client.get(hosts.url(private.id),headers={'cookie':'session=owner','authorization':'Bearer owner'})).status_code==404
         assert (await client.head('/',headers=conditional)).status_code==404
         assert (await client.get(hosts.url(second_binding.id)+'style.css',headers=conditional)).status_code==404
         releases.unpublish(owner='owner',project_id='p',command_id='http-off',expected_release='private-http',expected_generation=7)
         assert (await client.get('/style.css')).status_code==404
+        assert (await client.get(hosts.sharing_url('site'))).status_code==404
         assert not list(Path('/tmp').glob('atom-release-*'))
 asyncio.run(content_test())
 print(json.dumps({'routes':'verified','legacy':(legacy/'index.html').read_text()}))
