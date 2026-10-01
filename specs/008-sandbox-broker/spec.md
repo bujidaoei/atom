@@ -15,6 +15,8 @@ Independent acceptance: real timeout/cancel/restart/daemon failure tests preserv
 Project owner uses current write/read/edit/glob/grep and recovery, with verified snapshots preserving results across isolated attempts.
 Independent acceptance: actual Pi and file tools through broker/containers; byte-exact input/output snapshots; failed or stale promotion preserves prior revision; cancellation reports uncheckpointed data loss accurately.
 
+Malformed grep regular expressions MUST return a bounded deterministic tool-input error while preserving the authorized attempt for later valid reads/writes. Only uncertain external effects or failed broker/container transport may retire that attempt.
+
 ### Edge Cases
 Duplicate creates, same identity/different grant, lost create response, worker or broker crash, expiry during operation, stale fencing token, output flooding, symlink/path attacks, quota/OOM, interrupted checkpoint, previously acquired sandbox not released, daemon unavailable, partial adoption/migration.
 

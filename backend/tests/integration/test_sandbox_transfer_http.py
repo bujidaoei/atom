@@ -168,6 +168,17 @@ def test_real_seed_files_receipts_and_revocation_over_http(environment):
         assert client.post(url, json=conflict, headers=headers).status_code == 409
         read = client.post(url, json={**body, "operation_id": "read", "operation": {"op": "read_bytes", "path": "a.txt"}}, headers=headers)
         assert read.json()["outcome"]["data"]["sha256"] == hashlib.sha256("真实".encode()).hexdigest()
+        invalid_pattern = {"operation_id": "invalid-pattern", "tool_call_id": "tool:grep",
+                           "operation": {"op": "grep", "pattern": r"^  (function |var |window\.__)|^})\(\);",
+                                         "path": ".", "glob": "", "case_sensitive": False, "limit": 200}}
+        rejected = client.post(url, json=invalid_pattern, headers=headers)
+        assert rejected.status_code == 200
+        assert rejected.json()["outcome"] == {"ok": False, "error": "invalid_pattern"}
+        assert client.post(url, json=invalid_pattern, headers=headers).json() == rejected.json()
+        assert Registry(config.registry_path).find(attempt_id).state == "ready"
+        following_read = client.post(url, json={**body, "operation_id": "read-after-invalid-pattern",
+                                                "operation": {"op": "read_bytes", "path": "a.txt"}}, headers=headers)
+        assert following_read.json()["outcome"]["data"]["sha256"] == hashlib.sha256("真实".encode()).hexdigest()
         cas = client.post(url, json={**conflict, "operation_id": "cas", "operation": {**conflict["operation"], "expected_sha256": "f" * 64}}, headers=headers)
         assert cas.json()["outcome"] == {"ok": False, "error": "file_conflict"}
         assert client.post("/v1/admin/revoke", json={"grant_id": grant.jti}, headers={"authorization": "Bearer " + config.admin_token}).status_code == 200

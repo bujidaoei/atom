@@ -40,7 +40,7 @@ class FileOperations:
             if response["ok"] and set(response) == {"ok", "result"} and isinstance(response["result"], dict):
                 return response["result"]
             if set(response) == {"ok", "error"} and isinstance(response["error"], str) and response["error"] in {
-                "invalid_operation", "invalid_path", "file_too_large", "unsafe_file", "file_conflict", "entry_limit",
+                "invalid_operation", "invalid_pattern", "invalid_path", "file_too_large", "unsafe_file", "file_conflict", "entry_limit",
                 "output_limit", "unsupported_platform", "operation_timeout", "input_limit", "file_operation_failed",
             }:
                 raise FileError(response["error"])

@@ -252,7 +252,10 @@ def execute(request):
                     if len(matches) == request["limit"]:
                         break
             return _text(sorted(matches), "(no matches)")
-        matcher = re.compile(request["pattern"], 0 if request["case_sensitive"] else re.IGNORECASE)
+        try:
+            matcher = re.compile(request["pattern"], 0 if request["case_sensitive"] else re.IGNORECASE)
+        except re.error:
+            raise FileError("invalid_pattern") from None
         matches = []
         output_bytes = 0
         for path, directory, size in _grep_candidates(root, request["path"]):
