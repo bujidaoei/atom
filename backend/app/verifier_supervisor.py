@@ -13,10 +13,10 @@ import re
 import secrets
 import struct
 import time
-from typing import Callable
 
 from .artifacts import ArtifactError
 from .sandbox.docker_driver import DriverError, run_bounded, run_verifier_bounded
+from .sandbox.daemon_lease import DaemonLeaseError, VerifierCoordinatorLease
 from .snapshots import MAX_ARCHIVE_BYTES, SnapshotError, verify_snapshot
 from .verification_contract import ContractError, MAX_BYTES, load_contract, load_report
 from .verifier_authority import VerifierAssignment, VerifierAuthority
@@ -147,14 +147,22 @@ class VerifierSupervisor:
         except (DriverError, UnicodeError):
             raise SupervisorError('verifier_inventory_unknown') from None
 
-    def reap_orphans(self, *, lease_guard: Callable[[], None] | None = None):
-        """Cold-start operation; a live coordinator supplies its lease guard."""
-        if lease_guard is not None:
-            lease_guard()
+    def _require_lease(self, lease: VerifierCoordinatorLease) -> None:
+        if (type(lease) is not VerifierCoordinatorLease
+                or lease.verifier_id != self.verifier_id or lease.image != self.image
+                or lease.executable != self.executable):
+            raise SupervisorError('verifier_coordinator_lease_lost')
+        try:
+            lease.assert_owner()
+        except DaemonLeaseError:
+            raise SupervisorError('verifier_coordinator_lease_lost') from None
+
+    def reap_orphans(self, *, lease: VerifierCoordinatorLease):
+        """Cold-start operation requiring this exact live daemon lease."""
+        self._require_lease(lease)
         identities = self._owned_ids()
         for identity in identities:
-            if lease_guard is not None:
-                lease_guard()
+            self._require_lease(lease)
             try:
                 status, raw, _ = run_bounded([self.executable, 'container', 'inspect',
                     '--format', '{{json .Config.Labels}}|{{.Name}}|{{.Image}}', identity],
@@ -176,20 +184,17 @@ class VerifierSupervisor:
                     raise ValueError
             except (DriverError, UnicodeError, ValueError, TypeError):
                 raise SupervisorError('verifier_inventory_unknown') from None
-            if lease_guard is not None:
-                lease_guard()
+            self._require_lease(lease)
             self._cleanup(name[1:])
-        if lease_guard is not None:
-            lease_guard()
+        self._require_lease(lease)
         if self._owned_ids():
             raise SupervisorError('verifier_termination_unknown')
         return len(identities)
 
     def verify_and_register(self, *, assignment: VerifierAssignment, store,
                             authority: VerifierAuthority, budget_seconds: int = 30,
-                            lease_guard: Callable[[], None] | None = None):
-        if lease_guard is not None:
-            lease_guard()
+                            lease: VerifierCoordinatorLease):
+        self._require_lease(lease)
         if (type(assignment) is not VerifierAssignment or type(authority) is not VerifierAuthority
                 or assignment.verifier_id != self.verifier_id
                 or assignment.environment_digest != self.environment_digest
@@ -216,8 +221,7 @@ class VerifierSupervisor:
             raise SupervisorError('verifier_artifact_mismatch') from None
         if contract.digest != assignment.request.contract.digest:
             raise SupervisorError('worker_scope_mismatch')
-        if lease_guard is not None:
-            lease_guard()
+        self._require_lease(lease)
         self._image()
         job = {'routeId': assignment.route_id, 'artifactKey': assignment.artifact.key,
                'snapshotRevision': assignment.artifact.revision,
@@ -250,11 +254,9 @@ class VerifierSupervisor:
                 raise SupervisorError('verifier_execution_failed')
             results = _decode(output, assignment)
         finally:
-            if lease_guard is not None:
-                lease_guard()
+            self._require_lease(lease)
             self._cleanup(name)
-        if lease_guard is not None:
-            lease_guard()
+        self._require_lease(lease)
         return authority.register(request_id=assignment.request.id, route_id=assignment.route_id,
             verifier_id=assignment.verifier_id,
             environment_digest=assignment.environment_digest,

@@ -146,3 +146,11 @@ class VerifierCoordinatorLease(_DaemonIdentityLease):
                                   verifier_id.encode("ascii")).hexdigest()[:32]
         super().__init__(identity, image, namespace="verifier-coordinator",
                          executable=executable)
+        self.verifier_id = verifier_id
+
+    def assert_owner(self) -> None:
+        if not self.alive:
+            raise DaemonLeaseError("verifier_coordinator_lease_lost")
+        observed = self._inspect()
+        if observed is None or not observed[1] or observed[2] != self._owner:
+            raise DaemonLeaseError("verifier_coordinator_lease_lost")

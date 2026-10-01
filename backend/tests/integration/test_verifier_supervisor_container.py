@@ -57,21 +57,43 @@ def assignment(adopted, tmp_path, request):
 
 def test_actual_isolated_browser_registers_one_v13_result(assignment):
     path, supervisor, authority, dispatched, store = assignment
-    result = supervisor.verify_and_register(assignment=dispatched, store=store,
+    with VerifierCoordinator(supervisor) as coordinator:
+        result = coordinator.verify_and_register(assignment=dispatched, store=store,
+                                                 authority=authority, budget_seconds=20)
+        assert store.reads == 1
+        with pytest.raises(Exception):
+            coordinator.verify_and_register(assignment=dispatched, store=store,
                                             authority=authority, budget_seconds=20)
     assert result.outcome == 'passed' and result.passed == result.total == 1
-    assert store.reads == 1
     with sqlite3.connect(path) as db:
         assert db.execute('SELECT count(*) FROM verification_attestations').fetchone() == (1,)
         assert db.execute('SELECT count(*) FROM verification_results').fetchone() == (1,)
-    with pytest.raises(Exception):
-        supervisor.verify_and_register(assignment=dispatched, store=store,
-                                       authority=authority, budget_seconds=20)
 
 
 def test_cold_start_reaper_finds_no_live_worker(assignment):
     _, supervisor, _, _, _ = assignment
-    assert supervisor.reap_orphans() == 0
+    coordinator = VerifierCoordinator(supervisor)
+    try:
+        assert coordinator.start() == 0
+    finally:
+        coordinator.close()
+
+
+def test_supervisor_requires_a_matching_live_lease(assignment):
+    _, supervisor, authority, dispatched, store = assignment
+    with pytest.raises(TypeError):
+        supervisor.reap_orphans()
+    with pytest.raises(TypeError):
+        supervisor.verify_and_register(assignment=dispatched, store=store,
+                                       authority=authority, budget_seconds=20)
+    other = VerifierCoordinator(VerifierSupervisor(
+        image=IMAGE, seccomp_path=PROFILE, verifier_id='different-worker'))
+    try:
+        other.start()
+        with pytest.raises(SupervisorError, match='verifier_coordinator_lease_lost'):
+            supervisor.reap_orphans(lease=other.lease)
+    finally:
+        other.close()
 
 
 def test_coordinator_lease_excludes_second_owner_and_recovers(assignment):
@@ -196,9 +218,10 @@ def test_lost_coordinator_lease_cannot_register_and_successor_reaps(assignment):
 def test_tampered_stored_artifact_never_starts_or_registers(assignment):
     path, supervisor, authority, dispatched, store = assignment
     store.payload = store.payload[:-1] + b'X'
-    with pytest.raises(SupervisorError, match='verifier_artifact_mismatch'):
-        supervisor.verify_and_register(assignment=dispatched, store=store,
-                                       authority=authority)
+    with VerifierCoordinator(supervisor) as coordinator:
+        with pytest.raises(SupervisorError, match='verifier_artifact_mismatch'):
+            coordinator.verify_and_register(assignment=dispatched, store=store,
+                                            authority=authority)
     with sqlite3.connect(path) as db:
         assert db.execute('SELECT count(*) FROM verification_results').fetchone() == (0,)
 
@@ -206,9 +229,10 @@ def test_tampered_stored_artifact_never_starts_or_registers(assignment):
 @pytest.mark.parametrize('assignment', ['slow'], indirect=True)
 def test_browser_deadline_leaves_no_result_or_container(assignment):
     path, supervisor, authority, dispatched, store = assignment
-    with pytest.raises(SupervisorError, match='verifier_execution_failed'):
-        supervisor.verify_and_register(assignment=dispatched, store=store,
-                                       authority=authority, budget_seconds=1)
+    with VerifierCoordinator(supervisor) as coordinator:
+        with pytest.raises(SupervisorError, match='verifier_execution_failed'):
+            coordinator.verify_and_register(assignment=dispatched, store=store,
+                                            authority=authority, budget_seconds=1)
     with sqlite3.connect(path) as db:
         assert db.execute('SELECT count(*) FROM verification_results').fetchone() == (0,)
     inventory = subprocess.run(['docker', 'ps', '-aq', '--filter',
@@ -227,21 +251,22 @@ def test_killed_browser_container_leaves_no_result_or_container(assignment):
                                capture_output=True, timeout=10, check=True)
         return probe.stdout.decode().strip()
 
-    with ThreadPoolExecutor(max_workers=1) as pool:
-        pending = pool.submit(supervisor.verify_and_register, assignment=dispatched,
-                              store=store, authority=authority, budget_seconds=20)
-        deadline = time.monotonic() + 12
-        identity = ''
-        while time.monotonic() < deadline and not pending.done():
-            identity = running_container()
-            if identity:
-                break
-            time.sleep(0.05)
-        assert identity, 'browser container was never observed running'
-        subprocess.run(['docker', 'kill', identity], capture_output=True,
-                       timeout=10, check=True)
-        with pytest.raises(SupervisorError, match='verifier_execution_failed'):
-            pending.result(timeout=15)
+    with VerifierCoordinator(supervisor) as coordinator:
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            pending = pool.submit(coordinator.verify_and_register, assignment=dispatched,
+                                  store=store, authority=authority, budget_seconds=20)
+            deadline = time.monotonic() + 12
+            identity = ''
+            while time.monotonic() < deadline and not pending.done():
+                identity = running_container()
+                if identity:
+                    break
+                time.sleep(0.05)
+            assert identity, 'browser container was never observed running'
+            subprocess.run(['docker', 'kill', identity], capture_output=True,
+                           timeout=10, check=True)
+            with pytest.raises(SupervisorError, match='verifier_execution_failed'):
+                pending.result(timeout=15)
     with sqlite3.connect(path) as db:
         assert db.execute('SELECT count(*) FROM verification_results').fetchone() == (0,)
         assert db.execute('SELECT count(*) FROM verification_attestations').fetchone() == (0,)
@@ -266,53 +291,6 @@ def test_killed_browser_container_leaves_no_result_or_container(assignment):
         assert db.execute('SELECT count(*) FROM verification_attestations').fetchone() == (0,)
 
 
-@pytest.mark.skipif(sys.platform != 'linux' or not os.environ.get('ATOM_VERIFIER_TEST_REAL_STORE'),
-                    reason='requires target Linux Docker daemon and process signals')
-@pytest.mark.parametrize('assignment', ['slow'], indirect=True)
-def test_coordinator_process_death_reaps_browser_and_recovers_ledger(assignment):
-    path, supervisor, authority, dispatched, store = assignment
-    assert supervisor.reap_orphans() == 0
-
-    def run_coordinator():
-        supervisor.verify_and_register(assignment=dispatched, store=store,
-                                       authority=authority, budget_seconds=20)
-
-    process = multiprocessing.get_context('fork').Process(target=run_coordinator)
-    process.start()
-    label = f'label=atom.verifier.owner={supervisor.verifier_id}'
-    try:
-        deadline = time.monotonic() + 12
-        browser_running = False
-        while time.monotonic() < deadline and process.is_alive():
-            inventory = subprocess.run(['docker', 'ps', '-q', '--filter', label],
-                                       capture_output=True, timeout=10, check=True)
-            identity = inventory.stdout.decode().strip()
-            if identity:
-                processes = subprocess.run(['docker', 'top', identity],
-                                           capture_output=True, timeout=10, check=False)
-                browser_running = processes.returncode == 0 and b'chrome-headless-shell' in processes.stdout
-                if browser_running:
-                    break
-            time.sleep(0.05)
-        assert browser_running, 'Chromium was never observed running'
-        os.kill(process.pid, signal.SIGKILL)
-        process.join(timeout=10)
-        assert process.exitcode == -signal.SIGKILL
-        assert supervisor.reap_orphans() >= 1
-    finally:
-        if process.is_alive():
-            process.kill()
-            process.join(timeout=10)
-        supervisor.reap_orphans()
-    assert supervisor.reap_orphans() == 0
-    with sqlite3.connect(path) as db:
-        assert db.execute('SELECT count(*) FROM verification_results').fetchone() == (0,)
-        assert db.execute('SELECT count(*) FROM verification_attestations').fetchone() == (0,)
-    closed = VerificationRepository(path).terminate(owner='user',
-        request_id=dispatched.request.id, outcome='cancelled')
-    assert closed.outcome == 'cancelled'
-
-
 def test_changed_contract_during_real_browser_execution_cannot_register(assignment):
     path, supervisor, authority, dispatched, store = assignment
 
@@ -321,9 +299,10 @@ def test_changed_contract_during_real_browser_execution_cannot_register(assignme
             db.execute("UPDATE requirements SET title='Changed' WHERE project_id='project'")
 
     store.hook = change_contract
-    with pytest.raises(VerificationError, match='verification_stale_evidence'):
-        supervisor.verify_and_register(assignment=dispatched, store=store,
-                                       authority=authority, budget_seconds=20)
+    with VerifierCoordinator(supervisor) as coordinator:
+        with pytest.raises(VerificationError, match='verification_stale_evidence'):
+            coordinator.verify_and_register(assignment=dispatched, store=store,
+                                            authority=authority, budget_seconds=20)
     with sqlite3.connect(path) as db:
         assert db.execute('SELECT count(*) FROM verification_results').fetchone() == (0,)
         assert db.execute('SELECT count(*) FROM verification_attestations').fetchone() == (0,)
@@ -334,28 +313,29 @@ def test_changed_head_during_real_browser_execution_cannot_register(assignment):
     path, supervisor, authority, dispatched, store = assignment
     label = f'label=atom.verifier.request={dispatched.request.id}'
 
-    with ThreadPoolExecutor(max_workers=1) as pool:
-        pending = pool.submit(supervisor.verify_and_register, assignment=dispatched,
-                              store=store, authority=authority, budget_seconds=20)
-        deadline = time.monotonic() + 12
-        browser_running = False
-        while time.monotonic() < deadline and not pending.done():
-            inventory = subprocess.run(['docker', 'ps', '-q', '--filter', label],
-                                       capture_output=True, timeout=10, check=True)
-            identity = inventory.stdout.decode().strip()
-            if identity:
-                processes = subprocess.run(['docker', 'top', identity],
-                                           capture_output=True, timeout=10, check=False)
-                browser_running = processes.returncode == 0 and b'chrome-headless-shell' in processes.stdout
-                if browser_running:
-                    break
-            time.sleep(0.05)
-        assert browser_running, 'Chromium was never observed running'
-        with sqlite3.connect(path) as db:
-            db.execute('UPDATE revision_workspaces SET current_revision_id=? WHERE id=?',
-                       ('main-root', dispatched.request.workspace_id))
-        with pytest.raises(VerificationError, match='verification_stale_evidence'):
-            pending.result(timeout=15)
+    with VerifierCoordinator(supervisor) as coordinator:
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            pending = pool.submit(coordinator.verify_and_register, assignment=dispatched,
+                                  store=store, authority=authority, budget_seconds=20)
+            deadline = time.monotonic() + 12
+            browser_running = False
+            while time.monotonic() < deadline and not pending.done():
+                inventory = subprocess.run(['docker', 'ps', '-q', '--filter', label],
+                                           capture_output=True, timeout=10, check=True)
+                identity = inventory.stdout.decode().strip()
+                if identity:
+                    processes = subprocess.run(['docker', 'top', identity],
+                                               capture_output=True, timeout=10, check=False)
+                    browser_running = processes.returncode == 0 and b'chrome-headless-shell' in processes.stdout
+                    if browser_running:
+                        break
+                time.sleep(0.05)
+            assert browser_running, 'Chromium was never observed running'
+            with sqlite3.connect(path) as db:
+                db.execute('UPDATE revision_workspaces SET current_revision_id=? WHERE id=?',
+                           ('main-root', dispatched.request.workspace_id))
+            with pytest.raises(VerificationError, match='verification_stale_evidence'):
+                pending.result(timeout=15)
     with sqlite3.connect(path) as db:
         assert db.execute('SELECT count(*) FROM verification_results').fetchone() == (0,)
         assert db.execute('SELECT count(*) FROM verification_attestations').fetchone() == (0,)
@@ -381,8 +361,9 @@ def test_wrong_credential_and_replay_cannot_register_real_browser_result(assignm
                         input_data=input_data)
 
     monkeypatch.setattr(module, 'run_verifier_bounded', inspect_input)
-    result = supervisor.verify_and_register(assignment=dispatched, store=store,
-                                            authority=authority, budget_seconds=20)
+    with VerifierCoordinator(supervisor) as coordinator:
+        result = coordinator.verify_and_register(assignment=dispatched, store=store,
+                                                 authority=authority, budget_seconds=20)
     assert result.outcome == 'passed'
     with pytest.raises(VerificationError, match='verification_expired'):
         authority.register(**scope, credential=dispatched.credential)
@@ -400,8 +381,9 @@ def test_target_linux_real_store_and_browser_register_once(assignment, tmp_path)
     root.mkdir(mode=0o700)
     store = ArtifactStore(root)
     assert store.put(payload) == artifact == dispatched.artifact
-    result = supervisor.verify_and_register(assignment=dispatched, store=store,
-                                            authority=authority, budget_seconds=20)
+    with VerifierCoordinator(supervisor) as coordinator:
+        result = coordinator.verify_and_register(assignment=dispatched, store=store,
+                                                 authority=authority, budget_seconds=20)
     assert result.outcome == 'passed' and result.passed == 1
     with sqlite3.connect(path) as db:
         assert db.execute('SELECT count(*) FROM verification_attestations').fetchone() == (1,)

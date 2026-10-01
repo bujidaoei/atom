@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from threading import RLock
 
-from .sandbox.daemon_lease import VerifierCoordinatorLease
+from .sandbox.daemon_lease import DaemonLeaseError, VerifierCoordinatorLease
 from .verifier_supervisor import SupervisorError, VerifierSupervisor
 
 
@@ -26,8 +26,12 @@ class VerifierCoordinator:
         self._started = False
 
     def _require_lease(self) -> None:
-        if not self._started or not self.lease.alive:
+        if not self._started:
             raise SupervisorError('verifier_coordinator_lease_lost')
+        try:
+            self.lease.assert_owner()
+        except DaemonLeaseError:
+            raise SupervisorError('verifier_coordinator_lease_lost') from None
 
     def start(self) -> int:
         with self._lock:
@@ -36,7 +40,7 @@ class VerifierCoordinator:
             self.lease.acquire()
             self._started = True
             try:
-                return self.supervisor.reap_orphans(lease_guard=self._require_lease)
+                return self.supervisor.reap_orphans(lease=self.lease)
             except BaseException:
                 self._started = False
                 self.lease.close()
@@ -48,7 +52,7 @@ class VerifierCoordinator:
             self._require_lease()
             return self.supervisor.verify_and_register(
                 assignment=assignment, store=store, authority=authority,
-                budget_seconds=budget_seconds, lease_guard=self._require_lease)
+                budget_seconds=budget_seconds, lease=self.lease)
 
     def close(self) -> None:
         with self._lock:
