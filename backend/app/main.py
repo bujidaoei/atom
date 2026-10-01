@@ -15,7 +15,7 @@ from .execution_service import ExecutionGateway, execution_resources
 from .sandbox.client import BrokerClientError
 from .errors import AtomError
 from .models import Base
-from .routers import auth, preview, projects, publish, settings, usage
+from .routers import content_access, auth, preview, projects, publish, settings, usage
 from .schema_guard import verify as verify_schema
 from .services.orchestrator import orchestrator
 from .services.runtime_client import runtime_client
@@ -131,6 +131,7 @@ async def health() -> JSONResponse:
 
 
 app.include_router(auth.router, prefix="/api")
+app.include_router(content_access.router, prefix="/api")
 app.include_router(settings.router, prefix="/api")
 app.include_router(projects.router, prefix="/api")
 app.include_router(publish.router, prefix="/api")

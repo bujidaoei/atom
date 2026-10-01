@@ -194,3 +194,5 @@ T027 continuation (008/T023/T025): real HTTP bootstrap now supplies browser nonc
 T027 continuation (008/T022): actual console auth routes now support explicit durable v4 session mode, real password login and revoke-before-clear logout. 88 targeted tests pass. Existing broker v1 compatibility, console handoff issuance, account-wide revoke/audit and production rollout remain unfinished; no enterprise task closure.
 
 T027 continuation (008/T010/T022): v4 runtime compatibility now passes 130 ledger/fault tests and all 12 actual main-app/own-runtime/broker cases across v1/v4, including durable session coexistence. Earlier schema incompatibility resolved; live migration/rollback, console issuer, full browser and enterprise deployment remain unfinished.
+
+T027 continuation (008/T022): real durable console handoff API now enforces scope/origin/body bounds; 104 regressions pass, including login/issue/logout invalidation and cancelled worker ownership. User action UI, composed browser issuer flow and enterprise operational/deployment gates remain open.

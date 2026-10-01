@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     secret: str = Field(repr=False)
     session_mode: Literal["legacy", "durable"] = "legacy"
     console_origin: str | None = None
+    content_host_suffix: str | None = None
     cookie_secure: bool = False
     cookie_path: str = "/"
     session_days: int = Field(default=14, ge=1, le=90)
@@ -88,6 +89,12 @@ class Settings(BaseSettings):
             ContentNavigation(self.console_origin)
             if not self.cookie_secure or self.cookie_path != '/':
                 raise ValueError('durable sessions require secure root cookies')
+        if self.content_host_suffix is not None:
+            from .content_hosts import ContentHosts
+            from .content_bootstrap import ContentNavigation
+            if self.session_mode != 'durable':
+                raise ValueError('content handoff requires durable sessions')
+            ContentNavigation(self.console_origin).validate_content_hosts(ContentHosts(self.content_host_suffix))
         self.sandbox_mode = self.sandbox_mode or ('broker' if self.environment == 'production' else 'local')
         if self.environment == 'production' and self.sandbox_mode != 'broker':
             raise ValueError('production requires broker execution')
