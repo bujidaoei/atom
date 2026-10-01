@@ -143,6 +143,38 @@ def test_private_verifier_process_owns_browser_and_registers_real_result(adopted
                 'requestId':reserved.id}, headers=headers)
             assert replay.status_code == 409
             assert replay.json() == {'error':'verifier_already_dispatched'}
+            slow_checks = [{'type':'flow','selector':'#missing','expect':'body'}]
+            with sqlite3.connect(path) as db:
+                db.execute('UPDATE requirements SET checks_json=? WHERE project_id=?',
+                           (json.dumps(slow_checks), 'project'))
+            slow_contract = capture_contract([{'key':'page','title':'Page','detail':'',
+                'checks':slow_checks}]).digest
+            slow = VerificationRepository(path).reserve(**(intent | {
+                'request_id':'abandoned-http', 'expected_contract':slow_contract}))
+            with pytest.raises(httpx.ReadTimeout):
+                client.post('/v1/verify', json={'owner':'user','requestId':slow.id},
+                            headers=headers, timeout=.2)
+            deadline = time.monotonic() + 10
+            while True:
+                with sqlite3.connect(path) as db:
+                    dispatched = db.execute('SELECT 1 FROM verification_dispatches '
+                        'WHERE request_id=?', (slow.id,)).fetchone() is not None
+                if dispatched:
+                    break
+                assert time.monotonic() < deadline, 'abandoned request was not dispatched'
+                time.sleep(.02)
+            busy = client.post('/v1/verify', json={'owner':'user',
+                'requestId':slow.id}, headers=headers)
+            assert busy.status_code == 503 and busy.json() == {'error':'verifier_busy'}
+            deadline = time.monotonic() + 45
+            while True:
+                settled = client.post('/v1/verify', json={'owner':'user',
+                    'requestId':slow.id}, headers=headers)
+                if settled.status_code == 409:
+                    assert settled.json() == {'error':'verifier_already_dispatched'}
+                    break
+                assert settled.status_code == 503 and time.monotonic() < deadline
+                time.sleep(.1)
         with sqlite3.connect(path) as db:
             assert db.execute('SELECT outcome FROM verification_results').fetchone() == ('passed',)
             assert db.execute('SELECT count(*) FROM verification_attestations').fetchone() == (1,)
