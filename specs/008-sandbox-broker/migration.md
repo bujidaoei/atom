@@ -39,3 +39,6 @@ Console audit compatibility update: AccessRepository now supports verified4/5 an
 
 
 V5 content-audit update: ContentAccessRepository now emits handoff/session events with the same business transaction. Full content ledger test matrix runs on4/5. Revision/release/verification/content-serving consumer compatibility remains a separate incomplete migration gate, so this is still not production v5 selection.
+
+
+V5 release compatibility update: VerificationRepository/ReleaseRepository now support exact verified5 and co-commit release audit events; new5 publication also allocates content binding. RevisionRepository/main broker and ContentRepository serving compatibility still require completion and genuine integrated tests before5 deployment.

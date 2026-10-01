@@ -47,7 +47,7 @@ class VerificationRepository:
             raise VerificationError('invalid_verification_configuration')
         self.path, self.timeout = Path(path), lock_timeout
         try:
-            if verify(self.path) not in (2, 3, 4):
+            if verify(self.path) not in (2, 3, 4, 5):
                 raise VerificationError('verification_schema_required')
         except MigrationError:
             raise VerificationError('verification_schema_required') from None
@@ -60,7 +60,7 @@ class VerificationRepository:
             db.execute('PRAGMA foreign_keys=ON')
             db.execute('PRAGMA synchronous=FULL')
             db.execute('BEGIN IMMEDIATE')
-            if _schema(db) not in (2, 3, 4):
+            if _schema(db) not in (2, 3, 4, 5):
                 raise VerificationError('verification_schema_required')
             db.row_factory = sqlite3.Row
             yield db

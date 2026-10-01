@@ -231,3 +231,6 @@ T027/008-T026-T027 increment: console-session security transitions now persist a
 
 
 T027/008-T027 increment: private credential transitions now carry actual transactional revision/release audit provenance; 54 scoped tests pass. Full publication audit, runtime compatibility, observation/export and enterprise acceptance remain unfinished.
+
+
+T027/008-T027 increment: publication and unpublication now carry actual v5 audit transitions atomically with release state; 54 ledger/audit regressions pass. Main serving/runtime5, observation/export/retention and full enterprise rollout remain unfinished.

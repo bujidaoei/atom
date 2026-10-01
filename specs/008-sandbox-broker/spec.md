@@ -222,3 +222,6 @@ Console audit implementation increment: v5 session creation, single revoke and a
 
 
 Content audit increment: on v5, successful handoff issuance and content-session redemption each co-commit one typed event with authoritative binding/project/release/revision/generation. Audit failures roll back credential insertion and both consumption markers; read-only scope inspection and replay denial must not fabricate committed events. Credential secrets, challenges and credential digests are excluded.
+
+
+Release audit increment: explicit v5 publication/unpublication co-commits one authoritative release transition event with pointer/binding/receipt mutations. Receipt replay must not repromote or duplicate audit history. Any failure writing the event preserves the previously published state.

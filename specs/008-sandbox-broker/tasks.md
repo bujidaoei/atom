@@ -214,3 +214,6 @@ T026/T027 increment: AccessRepository4/5 compatibility and transactional console
 
 
 T027 increment: content handoff issuance and session redemption now co-commit typed v5 events including authoritative artifact scope. 54 tests pass across content access4/5 and audit rollback/provenance/redaction/replay cases. Faulted redemption preserves credentials and consumption state, then retries successfully. Publication events and full application/runtime5 gates remain open; no task closure.
+
+
+T026/T027 increment: verification/release ledger5 compatibility and transactional publish/unpublish events implemented. 54 targeted regressions pass, including receipt replay without duplicate events, competing publishers with one event, and before/after-audit failure preserving records/binding/pointer/receipt/event state. Physical artifact verification, independent verifier and full main-runtime5/serving acceptance remain separate open gates; neither task closed.

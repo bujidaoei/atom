@@ -208,3 +208,6 @@ AccessRepository now accepts fully verified4/5 at construction and each writer e
 
 
 Extend the typed audit writer with content transitions. Resolve project/release/revision using bound ledger rows in the already authorized transaction, not caller-provided display metadata. Issue and exchange append their event after credential mutation and before commit. Audit insert/late failure uses existing transaction rollback to preserve retryability. Version4 behavior remains explicit;5 now covers console/content transitions but release events/runtime consumer compatibility remain incomplete.
+
+
+VerificationRepository now accepts exact verified2/3/4/5, enabling ReleaseRepository-owned transactions on5. V5 publication allocates immutable binding before promotion and appends a fixed release audit event after receipt insertion; unpublish similarly records its command id and next generation. Writer resolves release/revision/binding from stored scope. Existing receipt replay returns before event creation. Full main-runtime/content-serving5 compatibility remains separate.

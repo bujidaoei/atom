@@ -187,3 +187,6 @@ Console audit tests: run test_security_audit.py, test_access_repository.py, test
 
 
 Content audit checks: run test_content_audit.py, test_content_access.py and test_security_audit.py. Complete content ledger suite runs4/5. Additional v5 tests compare all bootstrap/handoff/session/audit rows around audit insert and late failures, then retry actual exchange. Check stored project/release/revision/generation, unchanged state on read-only scope inspection/replay, and absence of raw bootstrap/handoff/session credentials and credential digests in event rows. This is real SQLite authorization, not new HTTP/browser acceptance.
+
+
+Release audit checks: run test_release_audit.py with release/verification repository and content audit suites. Tests seed a passing report/descriptor then migrate disposable DB to5, publish/unpublish and replay. Compare all release/pointer/binding/receipt/audit rows around forced audit insert/late failures; run competing publishers and verify only winning transition is recorded. This proves real SQLite transaction behavior, not a trusted verifier or physical artifact build.
