@@ -12,7 +12,7 @@ from .verification_contract import capture_contract, ContractError
 from .verification_repository import VerificationRepository, VerificationError
 from .artifacts import Artifact, ArtifactError, ArtifactStore
 from .content_policy import validate_content_manifest
-from .snapshots import verify_snapshot
+from .snapshots import SnapshotError, verify_snapshot
 from .content_bindings import ensure_binding
 from .security_audit import record_release_transition
 
@@ -93,7 +93,10 @@ class ReleaseRepository:
             raise VerificationError('release_capacity')
         try:
             payload = store.read(candidate.key)
-            manifest = verify_snapshot(io.BytesIO(payload))
+            try:
+                manifest = verify_snapshot(io.BytesIO(payload))
+            except SnapshotError:
+                raise ArtifactError('release_artifact_mismatch') from None
             if (hashlib.sha256(payload).hexdigest() != candidate.key
                     or len(payload) != candidate.size or manifest.revision != candidate.revision):
                 raise ArtifactError('release_artifact_mismatch')
@@ -179,7 +182,7 @@ class ReleaseRepository:
                 (id,project_id,workspace_id,revision_id,verification_id,contract_digest,policy_digest,audience,creator_id,previous_release_id,created_at)
                 VALUES (?,?,?,?,?,?,?,?,?,?,?)''',(release_id,project_id,workspace['id'],expected_revision,verification_id,
                 contract.digest,policy_digest,audience,owner,pointer['release_id'] if pointer else None,int(time.time())))
-            if db.execute('PRAGMA user_version').fetchone()[0] in (3, 4, 5, 6, 7, 9, 10):
+            if db.execute('PRAGMA user_version').fetchone()[0] in (3, 4, 5, 6, 7, 9, 10, 12):
                 # The verified v3 schema supports serving identity. Allocate it
                 # before promotion so binding, release, pointer and receipt are
                 # committed together or all rolled back on any failure.
@@ -191,7 +194,7 @@ class ReleaseRepository:
             receipt = ReleaseReceipt(release_id,expected_revision,generation,slug)
             db.execute('INSERT INTO command_receipts(project_id,key,digest,response_json,created_at) VALUES (?,?,?,?,?)',
                 (project_id,key,digest,json.dumps(receipt.__dict__,sort_keys=True,separators=(',',':')),datetime.now(timezone.utc).isoformat()))
-            if db.execute('PRAGMA user_version').fetchone()[0] in (5,6,7,9,10):
+            if db.execute('PRAGMA user_version').fetchone()[0] in (5,6,7,9,10,12):
                 record_release_transition(db,kind='release.published',user_id=owner,project_id=project_id,
                     release_id=release_id,operation_id=release_id,generation=generation,occurred_at=int(time.time()))
             return receipt
@@ -229,7 +232,7 @@ class ReleaseRepository:
                        (receipt.generation,project_id))
             db.execute('INSERT INTO command_receipts(project_id,key,digest,response_json,created_at) VALUES (?,?,?,?,?)',
                 (project_id,key,digest,json.dumps(receipt.__dict__,sort_keys=True,separators=(',',':')),datetime.now(timezone.utc).isoformat()))
-            if db.execute('PRAGMA user_version').fetchone()[0] in (5,6,7,9,10):
+            if db.execute('PRAGMA user_version').fetchone()[0] in (5,6,7,9,10,12):
                 record_release_transition(db,kind='release.unpublished',user_id=owner,project_id=project_id,
                     release_id=expected_release,operation_id=command_id,generation=receipt.generation,occurred_at=int(time.time()))
             return receipt
