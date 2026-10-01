@@ -14,6 +14,9 @@ import pytest
 
 from app.migrations import migrate
 from app.artifacts import ArtifactStore
+from app.content_repository import ContentRepository
+from app.release_repository import ReleaseRepository
+from app.release_view import materialized_content
 from app.verification_contract import capture_contract
 from app.verification_repository import VerificationRepository
 from app.verification_repository import VerificationError
@@ -68,6 +71,50 @@ def test_actual_isolated_browser_registers_one_v13_result(assignment):
     with sqlite3.connect(path) as db:
         assert db.execute('SELECT count(*) FROM verification_attestations').fetchone() == (1,)
         assert db.execute('SELECT count(*) FROM verification_results').fetchone() == (1,)
+
+
+@pytest.mark.skipif(sys.platform != 'linux' or not os.environ.get('ATOM_VERIFIER_TEST_REAL_STORE'),
+                    reason='requires target Linux Docker daemon and real ArtifactStore')
+def test_actual_browser_attestation_publishes_exact_pinned_store_bytes(assignment, tmp_path):
+    path, supervisor, authority, dispatched, fixture_store = assignment
+    root = tmp_path / 'artifacts'
+    root.mkdir(mode=0o700)
+    store = ArtifactStore(root)
+    assert store.put(fixture_store.payload) == dispatched.artifact
+    with VerifierCoordinator(supervisor) as coordinator:
+        observed = coordinator.verify_and_register(assignment=dispatched, store=store,
+                                                   authority=authority, budget_seconds=20)
+        assert observed.outcome == 'passed' and observed.passed == observed.total == 1
+    request = dispatched.request
+    intent = dict(owner='user', project_id=request.project_id,
+        release_id='browser-observed-release', verification_id=request.id,
+        expected_revision=request.revision_id, expected_generation=0,
+        policy_digest=request.policy_digest, runner_version=request.runner_version,
+        audience='public', slug='browser-observed-site')
+    release = ReleaseRepository(path).publish_verified(store, **intent)
+    content = ContentRepository(path)
+    binding = content.sharing_binding(slug=release.slug)
+    assert content.bind(owner='user', project_id='project', release_id=release.release_id) == binding
+    with materialized_content(content, store, binding_id=binding.id) as view:
+        assert view.publication.revision_id == request.revision_id
+        assert view.publication.artifact == dispatched.artifact
+        assert (view.path / 'index.html').read_bytes() == b'<html>heat</html>'
+    ReleaseRepository(path).unpublish(owner='user', project_id='project',
+        command_id='browser-release-off', expected_release=release.release_id,
+        expected_generation=release.generation)
+    with pytest.raises(VerificationError, match='content_not_found'):
+        content.sharing_binding(slug=release.slug)
+    with pytest.raises(VerificationError, match='release_not_found'):
+        content.resolve(binding_id=binding.id)
+    with sqlite3.connect(path) as db:
+        assert db.execute('SELECT outcome FROM verification_results').fetchone() == ('passed',)
+        assert db.execute('SELECT count(*) FROM verification_attestations').fetchone() == (1,)
+        assert db.execute('SELECT event_kind FROM security_audit_events ORDER BY sequence').fetchall() == [
+            ('release.published',), ('release.unpublished',)]
+        assert db.execute('PRAGMA foreign_key_check').fetchall() == []
+    inventory = subprocess.run(['docker', 'ps', '-aq', '--filter',
+        f'label=atom.verifier.request={request.id}'], capture_output=True, timeout=10, check=True)
+    assert not inventory.stdout.strip()
 
 
 def test_cold_start_reaper_finds_no_live_worker(assignment):
