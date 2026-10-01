@@ -21,6 +21,7 @@ from .seeding import MAX_SEED_BYTES
 from .file_helper import validate
 from .checkpoints import CheckpointExport
 from ..snapshots import MAX_ARCHIVE_BYTES
+from ..audit_archive import ArchiveError, MAX_ARCHIVE_BYTES as MAX_AUDIT_ARCHIVE_BYTES, decode_archive
 
 _LOG = logging.getLogger("atom.sandbox")
 _CHECKPOINT_SEND_SECONDS = 10
@@ -28,9 +29,9 @@ _CHECKPOINT_SEND_SECONDS = 10
 
 class _SnapshotResponse(Response):
     """Own the transfer slot until bounded ASGI delivery completes or fails."""
-    def __init__(self, content, *, lock, headers):
+    def __init__(self, content, *, lock, headers, media_type="application/octet-stream"):
         self._lock = lock
-        super().__init__(content, media_type="application/octet-stream", headers=headers)
+        super().__init__(content, media_type=media_type, headers=headers)
 
     async def __call__(self, scope, receive, send):
         try:
@@ -249,6 +250,44 @@ def create_app(config: BrokerConfig | None = None) -> FastAPI:
             payload = await _read_body(request, "application/octet-stream", MAX_SEED_BYTES)
             attempt = await control(lifecycle.seed, grant, payload)
             return JSONResponse({"attempt_id": attempt.id, "state": attempt.state, "deadline": attempt.deadline})
+
+    @app.post("/v1/admin/audit/recover")
+    async def recover_audit(request: Request):
+        authenticate(request)
+        digests = request.headers.getlist('x-atom-archive-sha256')
+        if len(digests) != 1 or re.fullmatch(r'[0-9a-f]{64}', digests[0]) is None:
+            raise ServiceError(400, 'invalid_archive_digest')
+        lifecycle, lock = await acquire_transfer()
+        try:
+            payload = await _read_body(request, 'application/octet-stream', MAX_AUDIT_ARCHIVE_BYTES)
+            try:
+                decode_archive(payload, expected_sha256=digests[0])
+            except ArchiveError:
+                raise ServiceError(400, 'invalid_audit_archive') from None
+            # Cancellation must not abandon the worker thread or release its admission slot early.
+            operation = asyncio.create_task(control(lifecycle.verify_audit_archive,payload,expected_sha256=digests[0]))
+            try:
+                result = await asyncio.shield(operation)
+            except asyncio.CancelledError:
+                while not operation.done():
+                    try:
+                        await asyncio.shield(operation)
+                    except asyncio.CancelledError:
+                        continue
+                    except Exception:
+                        break
+                if not operation.cancelled():
+                    operation.exception()
+                raise
+            except ArchiveError:
+                raise ServiceError(503, 'archive_recovery_unavailable') from None
+            encoded = json.dumps(result,sort_keys=True,separators=(',',':'),ensure_ascii=True).encode('ascii')
+            if len(encoded) > MAX_AUDIT_ARCHIVE_BYTES+2048:
+                raise ServiceError(503, 'archive_recovery_unavailable')
+            return _SnapshotResponse(encoded,lock=lock,headers={'cache-control':'no-store'},media_type='application/json')
+        except BaseException:
+            lock.release()
+            raise
 
     @app.post("/v1/admin/checkpoints/status")
     async def checkpoint_status(request: Request):

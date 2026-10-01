@@ -295,3 +295,6 @@ Acceptance limitation: current recover CLI verifies bytes/full fields but still 
 
 
 Isolated-worker component regression: with explicit pinned sandbox image, run `backend/.venv/Scripts/python.exe -m pytest backend/tests/integration/test_isolated_audit_recovery.py backend/tests/test_audit_archive.py backend/tests/test_audit_repository.py -q`. The four real Linux cases include a20s timeout. This internal broker method is not yet exposed through an authenticated recovery endpoint or used by archive_admin; do not interpret existing schema9 receipts as protocol-v2 isolated evidence.
+
+
+Broker isolated-recovery endpoint is POST /v1/admin/audit/recover with protected admin bearer, x-atom-archive-sha256 and application/octet-stream body. Use only bounded committed bytes and expected digest from the owner's trusted ledger. Runtime grants are rejected. No production client/CLI integration or isolated durable receipt exists yet; do not substitute a manual HTTP success for a source verification record. Integration regression: `backend/.venv/Scripts/python.exe -m pytest backend/tests/integration/test_audit_recovery_http.py backend/tests/test_sandbox_http_boundary.py -q` with explicit pinned sandbox image.
