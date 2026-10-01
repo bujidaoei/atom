@@ -1,0 +1,15 @@
+[Unit]
+Description=Start Atom API before its sandbox broker
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+TimeoutStartSec=120
+ExecStart=/usr/bin/docker start atom-candidate
+ExecStart=/usr/bin/docker start atom-candidate-broker
+
+[Install]
+WantedBy=multi-user.target
