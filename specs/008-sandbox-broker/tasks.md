@@ -256,7 +256,7 @@ T029/T030 increment: operator JSON backlog command and redacted exporter failure
 ## Governance prerequisites for T029/T030 — not implemented
 - [x] T031 [T029] Add explicit next offline audit-governance migration and durable destination registry; preserve v1-v5 hashes, discover historical removed-config identities, reject mixed scope, extend exact-schema consumers and prove rollback/crash/restore compatibility. See contracts/audit-governance.md.
 - [x] T032 [T029] Implement generation-fenced operator register/suspend/resume/block/retire with durable command receipts and redacted administrative evidence; preserve blocked state across restart and expose all historical obligations. Depends on T031.
-- [ ] T033 [T029/T030] Implement read-only policy-bound retention planning and bounded immutable archive/manifest creation with independent full-payload restore verification, holds and complete destination obligation coverage. Depends on T031/T032.
+- [x] T033 [T029/T030] Implement read-only policy-bound retention planning and bounded immutable archive/manifest creation with independent full-payload restore verification, holds and complete destination obligation coverage. Depends on T031/T032.
 - [ ] T034 [T029/T030] Implement explicitly authorized bounded pruning/receipt/watermark under new-schema maintenance authority; prove policy/hold/destination races, missing/corrupt archive, process crashes and reader gap semantics plus deployment backup/restore. Depends on T033; current delete guards remain active until then.
 Research/diagnostic increment:35 actual configuration-lifecycle/status/delivery tests pass, showing config omission retains old backlog and another receiver ack does not settle it. This justifies T031 before deletion work; none of T029-T034 is closed.
 
@@ -363,3 +363,16 @@ T033 cold container recovery increment (2026-10-01): an actual Linux writer publ
 
 
 T033 real storage-exhaustion evidence (2026-10-01): actual ENOSPC is now exercised on dedicated container tmpfs filesystems for both archive storage and source SQLite storage, on schemas9 and10. Archive-full failure leaves no committed object/stage or manifest/receipt. Source-full failure after archive publication leaves one safe unregistered object and no manifest/receipt. In both cases the complete source database dump remains unchanged; freeing only the test filler permits a reopened service to publish/register and exactly replay the archive. Five focused cases including ordinary success pass with zero failures/errors/skips. This supplements injected write/fsync failures with genuine kernel/SQLite exhaustion; it does not measure production throughput/reserve or prove host power-loss durability. T033/T034 remain open, T035 accepted; no production access, push or deployment.
+
+
+T033 component acceptance audit (2026-10-01): the stated task (read-only policy-bound planning, bounded immutable archive/manifest, independent full-payload restore, holds and complete destination obligations) is accepted after inspecting current source and recorded real test outputs. T031/T032 and T035 dependencies are accepted. T033 is now checked at this component scope; this does not enable retention deletion or close production capacity/egress/off-host disaster recovery. Contract acceptance item7 explicitly keeps operational gates separate, and T034 explicitly owns deletion, reader gaps and deployment backup/restore. Earlier blanket T033-open notes are superseded only for its implemented component requirements. T034, T029/T030 and the enterprise goal remain open; all current event/delivery delete guards remain active. No production migration, push or deployment.
+
+
+T034 implementation breakdown — governed by contracts/audit-pruning.md:
+
+- [ ] T034.1 Add explicit next-schema prune receipts/archived markers and persistent connection-scoped deletion guards; preserve frozen SQL, prove migration and ordinary-connection denial.
+- [ ] T034.2 Implement bounded owner/CLI transaction with verified archive/isolated receipt, all mutable gate rechecks, exact membership/counts and immutable replay.
+- [ ] T034.3 Implement authorized live/archived union pagination and explicit API/UI archived state; preserve stable upper/cursor and identity non-reuse.
+- [ ] T034.4 Prove policy/hold/destination/lease races, corrupt/missing archive and verifier/command mismatches with real storage/worker evidence.
+- [ ] T034.5 Prove actual pre/post-commit process death, source ENOSPC and no authority leakage; integrate exact serving/runtime/browser schema compatibility.
+- [ ] T034.6 Validate deployment backup/restore, storage reserve and operator procedure before any production prune.

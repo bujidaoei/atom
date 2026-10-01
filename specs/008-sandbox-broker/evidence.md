@@ -1132,3 +1132,23 @@ Evidence: `.logs/isolated-cold-recovery.xml`; `test_isolated_receipt.py -k "cold
 T033 real storage-exhaustion evidence (2026-10-01): actual ENOSPC is now exercised on dedicated container tmpfs filesystems for both archive storage and source SQLite storage, on schemas9 and10. Archive-full failure leaves no committed object/stage or manifest/receipt. Source-full failure after archive publication leaves one safe unregistered object and no manifest/receipt. In both cases the complete source database dump remains unchanged; freeing only the test filler permits a reopened service to publish/register and exactly replay the archive. Five focused cases including ordinary success pass with zero failures/errors/skips. This supplements injected write/fsync failures with genuine kernel/SQLite exhaustion; it does not measure production throughput/reserve or prove host power-loss durability. T033/T034 remain open, T035 accepted; no production access, push or deployment.
 
 Evidence: `.logs/archive-enospc.xml`; test_actual_full_archive_filesystem_preserves_source_and_retries with capacity/source-capacity on9/10 plus happy regression. Archive1MiB and source32MiB tmpfs are separate; bounded4096-byte writes must encounter errno.ENOSPC and statvfs reports zero available blocks. No host filesystem is filled. Actual source registration failure maps to retention_unavailable; archive write failure maps to archive_store_io_error. Entire source iterdump is compared before/after failure, then reopened publication/readback/replay succeeds after filler removal. No recovery receipt is issued by these nondestructive archive-only tests.
+
+
+T033 component acceptance audit (2026-10-01): the stated task (read-only policy-bound planning, bounded immutable archive/manifest, independent full-payload restore, holds and complete destination obligations) is accepted after inspecting current source and recorded real test outputs. T031/T032 and T035 dependencies are accepted. T033 is now checked at this component scope; this does not enable retention deletion or close production capacity/egress/off-host disaster recovery. Contract acceptance item7 explicitly keeps operational gates separate, and T034 explicitly owns deletion, reader gaps and deployment backup/restore. Earlier blanket T033-open notes are superseded only for its implemented component requirements. T034, T029/T030 and the enterprise goal remain open; all current event/delivery delete guards remain active. No production migration, push or deployment.
+
+
+T033 requirement-to-evidence audit (recorded XML was re-read; all listed suites have zero failures/errors/skips):
+
+| Requirement | Current code/evidence |
+|---|---|
+| Explicit policy/holds/generation, no defaults | audit_retention.py and retention_admin; audit-retention-authority.xml78 |
+| Bounded read snapshot, all historical registered obligations, age/hold/context gates | _plan_snapshot; retention-plan.xml59; governance/export10 regression separately recorded |
+| Complete typed payload and bounded canonical manifest | audit_archive.py; audit-archive-codec.xml60 |
+| Protected immutable registration and full backup/migration proof | audit_archiving.py, schema9/10; audit-archive-schema.xml74 and audit-isolated-migration.xml62 |
+| Durable no-overwrite store independent of writer | audit_archive_store.py; audit-archive-persistence.xml1; isolated-cold-recovery.xml2 |
+| Full independent recovery with no source authority | accepted T035 matrix above; worker, HTTP/client, source denial, persisted versioned receipt and crash replay |
+| Pagination and policy change | isolated-archive-pages.xml13, actual102-event100+2 exact recovery and between-page hold |
+| Missing/corrupt/partial/crash/storage-full consistency | audit-archive-cli.xml11; isolated-archive-pages.xml13; archive-enospc.xml5; store write/fsync/fork evidence recorded earlier |
+| Serving/runtime/browser compatibility | audit-v10-consumers.xml457, audit-v10-revisions.xml64, audit-v10-runtime.xml6, content-browser-v10.json |
+
+No suite totals are added together as independent coverage; several suites overlap. Full operational acceptance remains unproved and no deletion permission follows from T033 completion.
