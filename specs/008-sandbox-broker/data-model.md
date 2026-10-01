@@ -110,3 +110,6 @@ AuditDeliveryRepository implements existing v5 delivery transitions without chan
 
 
 AuditDestination(host,path,addresses,scope_kind,scope_id,token) is immutable in-memory validated operator configuration. No new database table or v1-v5 migration modification. destination_id hashes logical receiver/scope; credential and approved-IP rotation preserve identity. The token is repr-hidden; no API serialization or durable storage of it is introduced. Destination configuration authorization/persistence and operational rotation workflow remain pending.
+
+
+Unified Settings now owns audit_export_config (secret-bearing raw JSON, repr-hidden/model-dump excluded), audit_export_interval_seconds and optional audit_export_ca_file. Parsed immutable destination policies remain in process memory; no raw token enters SQLite, tenant settings or event payloads. Main keeps AuditExportService ownership across shutdown outcomes. No database migration change or durable terminal-configuration registry added.

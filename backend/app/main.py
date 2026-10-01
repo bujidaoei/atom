@@ -9,6 +9,7 @@ from starlette.routing import Route
 
 from .db import engine
 from .access_repository import AccessError
+from .audit_service import AuditExportService
 from .console_auth import credentials
 from .bounded_operations import BoundedOperations
 from .config import get_settings
@@ -24,8 +25,12 @@ from .services.runtime_client import runtime_client
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    previous_exports = getattr(_app.state, 'audit_exports', None)
+    if previous_exports is not None and previous_exports.pending_count:
+        raise RuntimeError('audit_export_operations_pending')
     if get_settings().session_mode == 'durable':
         credentials()  # Fail closed on missing/offline migration before serving.
+    _app.state.audit_exports = AuditExportService(get_settings())
     _app.state.execution = None
     orchestrator.execution = None
     async with execution_resources(get_settings()) as resources:
@@ -36,19 +41,24 @@ async def lifespan(_app: FastAPI):
         orchestrator.execution = resources
         _app.state.execution = resources
         try:
+            await _app.state.audit_exports.start()
             _app.state.content_issuer.start()
             _app.state.audit_reads.start()
             yield
         finally:
             _app.state.content_issuer.close_admission()
             _app.state.audit_reads.close_admission()
+            _app.state.audit_exports.stop_admission()
             _app.state.execution = None
             try:
                 try:
                     try:
                         await _app.state.content_issuer.drain()
                     finally:
-                        await _app.state.audit_reads.drain()
+                        try:
+                            await _app.state.audit_reads.drain()
+                        finally:
+                            await _app.state.audit_exports.close()
                 finally:
                     await orchestrator.shutdown()
             finally:

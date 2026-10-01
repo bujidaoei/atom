@@ -257,3 +257,6 @@ T027/008-T029 increment: real HTTPS audit batch transport now validates explicit
 
 
 T027/008-T029 increment: real audit ledger and HTTPS sender are composed by an owned recurring exporter with tested cancellation/drain semantics and terminal-error stop.56 checks pass, including actual TLS lost-ack scheduled retry/dedup. Main-service enablement/configuration/global supervision, production receiver/egress and retention remain open.
+
+
+T027/008-T029 increment: operator export settings and real main startup/shutdown integration implemented with max4 destinations/process and all-before-send preflight.113 related regressions pass; main fixture uses injected sender outcome, with realTLS transport evidence kept separate. Production composition, operational visibility, retention and deployment remain open.

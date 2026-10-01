@@ -56,11 +56,18 @@ class AuditExporter:
         self._loop = loop
 
     async def run_once(self):
+        return await self._admit(prepare=False)
+
+    async def prepare(self):
+        """Verify exact storage/scope before enabling any network schedule."""
+        return await self._admit(prepare=True)
+
+    async def _admit(self, *, prepare):
         self._bind_loop()
         token = self._owner.acquire()
         if token is None:
             raise AuditExporterError('audit_export_not_admitted')
-        worker = asyncio.create_task(self._cycle(token))
+        worker = asyncio.create_task(self._cycle(token, prepare=prepare))
         self._workers.add(worker)
         worker.add_done_callback(self._finished)
         # A cancelled waiter must not abort an in-flight send or lose its local ack.
@@ -96,9 +103,7 @@ class AuditExporter:
         self._bind_loop()
         if type(timeout) not in (int, float) or not math.isfinite(timeout) or not .01 <= timeout <= 60:
             raise AuditExporterError('invalid_audit_close_timeout')
-        self._closed = True
-        self._stop.set()
-        self._owner.close_admission()
+        self.stop_admission()
         try:
             async with asyncio.timeout(timeout):
                 await self._owner.drain(timeout)
@@ -107,6 +112,11 @@ class AuditExporter:
         except TimeoutError:
             raise RuntimeError('bounded_drain_timeout') from None
         self._executor.shutdown(wait=False)
+
+    def stop_admission(self):
+        self._closed = True
+        self._stop.set()
+        self._owner.close_admission()
 
     async def _database(self, cycle, operation, **arguments):
         def call():
@@ -119,10 +129,13 @@ class AuditExporter:
         cycle.database = self._executor.submit(call)
         return await asyncio.shield(asyncio.wrap_future(cycle.database))
 
-    async def _cycle(self, token):
+    async def _cycle(self, token, *, prepare=False):
         cycle = _Cycle()
         try:
             async with asyncio.timeout(40):
+                if prepare:
+                    await self._database(cycle, 'status')
+                    return ExportResult('ready', 0, False, False)
                 enrollment = await self._database(cycle, 'enroll')
                 # Shutdown stops follow-on network work when only enrollment was underway.
                 if self._closed:

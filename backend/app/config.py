@@ -26,6 +26,9 @@ class Settings(BaseSettings):
     cookie_secure: bool = False
     cookie_path: str = "/"
     session_days: int = Field(default=14, ge=1, le=90)
+    audit_export_config: str = Field(default='[]', repr=False, exclude=True)
+    audit_export_interval_seconds: int = Field(default=5, ge=1, le=300)
+    audit_export_ca_file: Path | None = None
 
     # --- storage --------------------------------------------------------
     data_dir: Path = Path("./data")
@@ -84,6 +87,14 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_transport(self) -> Settings:
+        destinations = self.audit_destinations
+        if destinations and self.session_mode != 'durable':
+            raise ValueError('audit_export_requires_durable_sessions')
+        if self.audit_export_ca_file is not None and not self.audit_export_ca_file.is_absolute():
+            raise ValueError('audit_export_requires_absolute_ca_file')
+        if any(item.token in (self.secret, self.runtime_token, self.llm_api_key,
+                self.broker_admin_token, self.broker_grant_key, self.completion_grant_key) for item in destinations):
+            raise ValueError('audit_export_requires_independent_credentials')
         if self.session_mode == 'durable':
             from .content_bootstrap import ContentNavigation
             ContentNavigation(self.console_origin)
@@ -139,6 +150,11 @@ class Settings(BaseSettings):
             if target.scheme != "https" and not loopback:
                 raise ValueError("production runtime transport requires HTTPS or a literal loopback address")
         return self
+
+    @property
+    def audit_destinations(self):
+        from .audit_configuration import audit_destinations
+        return audit_destinations(self.audit_export_config)
 
     @property
     def projects_dir(self) -> Path:
