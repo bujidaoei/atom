@@ -30,6 +30,7 @@ from app.verifier_supervisor import SupervisorError, VerifierSupervisor
 from app.verifier_coordinator import VerifierCoordinator
 from app.verifier_service import (VerifierProcessConfig, VerifierStartupError,
                                   create_app as create_verifier_app)
+from app.verifier_client import VerifierClient, VerifierClientError, VerifierObservation
 from app.sandbox.daemon_lease import DaemonLeaseError
 from test_adoption_repository import Store, prepared, snapshot
 from test_adoption_verification_repository import adopted
@@ -133,12 +134,14 @@ def test_private_verifier_process_owns_browser_and_registers_real_result(adopted
                 + b'"requestId":"' + reserved.id.encode() + b'"}',
                 headers=headers | {'content-type':'application/json'})
             assert invalid.status_code == 400
-            result = client.post('/v1/verify', json={'owner':'user',
-                'requestId':reserved.id}, headers=headers)
-            assert result.status_code == 200
-            assert result.json() == {'requestId':reserved.id,
-                'revisionId':reserved.revision_id, 'outcome':'passed',
-                'total':1, 'passed':1}
+            async def trusted_dispatch():
+                async with VerifierClient(f'http://127.0.0.1:{port}', token) as transport:
+                    result = await transport.verify(owner='user', request_id=reserved.id)
+                    assert result == VerifierObservation(reserved.id,
+                        reserved.revision_id, 'passed', 1, 1)
+                    with pytest.raises(VerifierClientError, match='verifier_already_dispatched'):
+                        await transport.verify(owner='user', request_id=reserved.id)
+            asyncio.run(trusted_dispatch())
             replay = client.post('/v1/verify', json={'owner':'user',
                 'requestId':reserved.id}, headers=headers)
             assert replay.status_code == 409
