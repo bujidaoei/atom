@@ -113,3 +113,6 @@ AuditDestination(host,path,addresses,scope_kind,scope_id,token) is immutable in-
 
 
 Unified Settings now owns audit_export_config (secret-bearing raw JSON, repr-hidden/model-dump excluded), audit_export_interval_seconds and optional audit_export_ca_file. Parsed immutable destination policies remain in process memory; no raw token enters SQLite, tenant settings or event payloads. Main keeps AuditExportService ownership across shutdown outcomes. No database migration change or durable terminal-configuration registry added.
+
+
+Audit delivery status adds unenrolled count, oldest_unenrolled_at, backlog and observed_at; oldest_unacked_at now includes all unacknowledged scoped events, including those never assigned to the destination. Snapshot is read-only; no new table or migration. Exporter diagnostic_failures is an in-memory saturated64-bit count of raised log-handler failures, not a persisted audit event or restart-stable health registry. Operational state-change record keys: event,destination_id,code only.

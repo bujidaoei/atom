@@ -44,15 +44,16 @@ class AuditDeliveryRepository:
             raise AuditDeliveryError('audit_schema_required') from None
 
     @contextmanager
-    def _transaction(self):
+    def _transaction(self, *, read_only=False):
         db = None
         try:
-            db = sqlite3.connect(self.path.as_uri()+'?mode=rw', uri=True, timeout=3, isolation_level=None)
+            db = sqlite3.connect(self.path.as_uri()+('?mode=ro' if read_only else '?mode=rw'),
+                                 uri=True, timeout=3, isolation_level=None)
             db.execute('PRAGMA foreign_keys=ON')
             db.execute('PRAGMA synchronous=FULL')
             deadline = time.monotonic()+5
             db.set_progress_handler(lambda: int(time.monotonic() >= deadline), 1000)
-            db.execute('BEGIN IMMEDIATE')
+            db.execute('BEGIN' if read_only else 'BEGIN IMMEDIATE')
             if _schema(db) != 5:
                 raise AuditDeliveryError('audit_schema_required')
             conflicting = db.execute('SELECT 1 FROM security_audit_delivery d '
@@ -167,7 +168,7 @@ class AuditDeliveryRepository:
         self._settle(event_ids=event_ids, lease_owner=lease_owner, delivered=False)
 
     def status(self):
-        with self._transaction() as db:
+        with self._transaction(read_only=True) as db:
             now = self._now()
             rows = db.execute('SELECT state,count(*) FROM security_audit_delivery '
                 'WHERE destination_id=? GROUP BY state', (self.destination_id,)).fetchall()
@@ -180,4 +181,13 @@ class AuditDeliveryRepository:
                 "SELECT min(CASE WHEN d.state<>'delivered' THEN e.occurred_at END),max(d.delivered_at) "
                 'FROM security_audit_delivery d JOIN security_audit_events e ON e.event_id=d.event_id '
                 'WHERE d.destination_id=?', (self.destination_id,)).fetchone()
+            result['unenrolled'], result['oldest_unenrolled_at'] = db.execute(
+                'SELECT count(*),min(e.occurred_at) FROM security_audit_events e '
+                'WHERE e.scope_kind=? AND e.scope_id=? AND NOT EXISTS '
+                '(SELECT 1 FROM security_audit_delivery d WHERE d.destination_id=? AND d.event_id=e.event_id)',
+                (self.scope_kind, self.scope_id, self.destination_id)).fetchone()
+            times = [value for value in (result['oldest_unacked_at'], result['oldest_unenrolled_at']) if value is not None]
+            result['oldest_unacked_at'] = min(times) if times else None
+            result['backlog'] = result['pending']+result['leased']+result['unenrolled']
+            result['observed_at'] = now
             return result

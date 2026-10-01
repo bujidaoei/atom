@@ -248,3 +248,6 @@ T029/T030 increment: real main+auth+exporter+TLS+independent-receiver compositio
 
 
 Audit main integration regression:18 actual Linux main/own Node/broker execution cases pass across schema1/4/5 (exports disabled in this matrix). Separately28 enabled-export/main/TLS/service checks pass. Pi1905 files match locked SHA. Production combined deployment/observability/retention gates remain open.
+
+
+T029/T030 increment: operator JSON backlog command and redacted exporter failure/recovery logging implemented.44 status/delivery/exporter/real-main-TLS regressions pass. Includes real CLI subprocess exit/redaction cases, unenrolled backlog visibility, read-only unchanged dump and writer-lock coexistence, duplicate-log suppression/recovery and failed diagnostic sink preserving actual acknowledgement. Retention, durable operational status/terminal registry, security-denial observationT028, production operations and broader enterprise gates remain open; no task closure.

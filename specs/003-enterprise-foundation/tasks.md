@@ -266,3 +266,6 @@ T027/008-T029/T030 increment: true main-auth-export-TLS composition now tested w
 
 
 Audit main integration regression:18 actual Linux main/own Node/broker execution cases pass across schema1/4/5 (exports disabled in this matrix). Separately28 enabled-export/main/TLS/service checks pass. Pi1905 files match locked SHA. Production combined deployment/observability/retention gates remain open.
+
+
+T027/008-T029/T030 increment: actual operator backlog inspection now counts unenrolled work and exporter operational logs redact/deduplicate state changes.44 related regressions pass, including CLI subprocess failures and real TLS/main recovery. Durable observability/denial sink/retention/production gates remain open.

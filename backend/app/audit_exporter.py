@@ -3,12 +3,16 @@ import asyncio
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 import math
+import json
+import logging
 from pathlib import Path
 
 from .audit_delivery import AuditDeliveryRepository, AuditDeliveryError
 from .audit_destination import AuditDestination
 from .audit_sender import AuditSendError, send_audit_events
 from .bounded_operations import BoundedOperations
+
+_LOG = logging.getLogger(__name__)
 
 
 class AuditExporterError(RuntimeError):
@@ -44,6 +48,19 @@ class AuditExporter:
         self._stop = asyncio.Event()
         self._scheduler = None
         self.last_error = None
+        self.diagnostic_failures = 0
+
+    def _record_error(self, code):
+        if code == self.last_error:
+            return
+        self.last_error = code
+        message = json.dumps({'event': 'audit.export.state', 'destination_id': self._destination.destination_id,
+                              'code': code or 'audit_export_recovered'}, separators=(',', ':'))
+        try:
+            _LOG.log(logging.WARNING if code else logging.INFO, message)
+        except Exception:
+            # A broken diagnostic sink cannot invalidate an already committed audit/ack.
+            self.diagnostic_failures = min(2**63-1, self.diagnostic_failures+1)
 
     @property
     def pending_count(self):
@@ -149,27 +166,27 @@ class AuditExporter:
                 except AuditSendError as error:
                     if not error.retryable:
                         self._owner.close_admission()
-                        self.last_error = 'audit_export_configuration'
+                        self._record_error('audit_export_configuration')
                         raise AuditExporterError(self.last_error) from None
                     await self._database(cycle, 'retry', event_ids=ids, lease_owner=lease.owner)
-                    self.last_error = 'audit_export_retry_pending'
+                    self._record_error('audit_export_retry_pending')
                     return ExportResult('retry', len(ids), enrollment['remaining'], enrollment['capacity_reached'])
                 await self._database(cycle, 'acknowledge', event_ids=ids, lease_owner=lease.owner)
-                self.last_error = None
+                self._record_error(None)
                 return ExportResult('delivered', len(ids), enrollment['remaining'], enrollment['capacity_reached'])
         except AuditDeliveryError:
-            self.last_error = 'audit_export_storage_unavailable'
+            self._record_error('audit_export_storage_unavailable')
             raise AuditExporterError(self.last_error) from None
         except TimeoutError:
-            self.last_error = 'audit_export_cycle_timeout'
+            self._record_error('audit_export_cycle_timeout')
             raise AuditExporterError(self.last_error) from None
         except asyncio.CancelledError:
-            self.last_error = 'audit_export_interrupted'
+            self._record_error('audit_export_interrupted')
             raise
         except AuditExporterError:
             raise
         except Exception:
-            self.last_error = 'audit_export_failed'
+            self._record_error('audit_export_failed')
             raise AuditExporterError(self.last_error) from None
         finally:
             future = cycle.database
