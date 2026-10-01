@@ -69,6 +69,8 @@ branch=Path('/tmp/branch');branch.mkdir();(branch/'index.html').write_text('<h1>
 heat=import_workspace(repo,store,owner='owner',project_id='p',heat_id='heat',source=branch)
 (legacy/'index.html').write_text('<h1>uncommitted stale legacy</h1>')
 (legacy/'legacy-only.txt').write_text('not committed')
+with session_scope() as s:
+    s.get(Project,'p').status='ready'
 settings.sandbox_mode='broker'
 # Actual routes/dependencies/auth/database/storage; lifespan is separately tested.
 app.state.execution=SimpleNamespace(repository=repo,store=store)
@@ -81,6 +83,10 @@ async def main_test():
         detail=await client.get('/api/projects/p',headers=headers)
         assert detail.status_code==200,detail.text
         project=detail.json()['project']
+        assert project['legacyPublicationAvailable'] is False
+        denied=await client.post('/api/projects/p/publish',headers=headers)
+        assert denied.status_code==409
+        assert not (settings.published_dir/'published').exists()
         assert project['revisionId']==main.revision_id
         assert [item['path'] for item in project['files']]==['index.html','style.css']
         assert all(item['timestampSource']=='revision' and len(item['sha256'])==64 for item in project['files'])

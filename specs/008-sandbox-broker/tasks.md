@@ -94,6 +94,7 @@ T008/T011 continuation: reproduced premature cleanup termination when either can
 - [ ] T016 Implement fenced adoption and transactional evidence/release repository; test SQLite races/replay/crash. Depends on T015.
 - [ ] T017 Implement pinned serving, isolated verifier and trusted evidence registration; test origin, identity, forgery and stale results. Depends on T016.
 - [ ] T018 Wire API/UI acceptance, adoption, publication and rollback to exact identities; preserve labelled legacy history. Depends on T017.
+- [ ] T018.1 Permanently reject legacy mutable-directory publication in broker mode and expose an honest disabled UI state until the verified release route is wired. Prove a ready project with stale legacy bytes cannot publish those bytes.
 - [ ] T019 Run browser/release/fault/migration and deployed rollback gates. Depends on T018.
 T010/T011/T012 remain open; unfinished cancellation/recovery and parent enterprise requirements are unchanged.
 

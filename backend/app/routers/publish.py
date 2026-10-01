@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException, status
 
 from .. import storage
+from ..config import get_settings
 from ..deps import DbSession, OwnedProject
 from ..models import Publication
 
@@ -23,6 +24,11 @@ def _slugify(title: str) -> str:
 
 @router.post("/{project_id}/publish")
 def publish(project: OwnedProject, session: DbSession) -> dict[str, str]:
+    if get_settings().sandbox_mode == "broker":
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "隔离制品尚无独立验收的发布版本，不能通过旧发布入口发布",
+        )
     if project.status != "ready":
         raise HTTPException(status.HTTP_409_CONFLICT, "生成尚未完成，请完成后再发布")
     workspace = storage.workspace_dir(project.id)

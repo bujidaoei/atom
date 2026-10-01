@@ -5,6 +5,7 @@ Status: design only, not implemented or accepted. Source baseline e7c4bd3, revie
 ## Verified source gaps
 
 - routers/publish.py checks ready and legacy index.html, copies a mutable directory, then commits Publication. It records neither revision nor acceptance. Filesystem changes and database commit are separate effects.
+- On the deployed broker dataset a ready project's local `index.html` and committed artifact initially matched, but after a broker revise another project's local `index.html` hash differed from the committed catalogue. The legacy publisher could therefore serve stale bytes while the UI displays a newer revision. Broker-mode calls to this legacy publisher must be denied before file copy; only the future pinned release route may publish broker artifacts.
 - routers/projects.py adopts a heat by copying its legacy directory and updating winner/status; the registered main head is unchanged.
 - record_acceptance validates coverage but accepts client booleans without revision, contract digest or trusted verifier identity.
 - serialize.acceptance_json compares timestamps with Run start time. Head adoption, contract changes and an old loaded iframe are not captured reliably.

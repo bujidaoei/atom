@@ -303,11 +303,15 @@ function ProjectWorkspace({ id }: { id: string | undefined }) {
             variant={project.slug ? "secondary" : "primary"}
             size="sm"
             loading={publishBusy}
-            disabled={!project.slug && (!hasFiles || project.status !== "ready")}
+            disabled={!project.slug && (!hasFiles || project.status !== "ready" || !project.legacyPublicationAvailable)}
+            title={!project.slug && !project.legacyPublicationAvailable ? "隔离制品尚无独立验收的发布版本" : undefined}
             onClick={() => void togglePublish()}
           >
             {project.slug ? "取消发布" : "发布"}
           </Button>
+          {!project.slug && project.status === "ready" && !project.legacyPublicationAvailable ? (
+            <span className="text-xs text-neutral-60">当前版本尚无独立验收的发布版本</span>
+          ) : null}
 
           <IconButton label="刷新项目" onClick={() => void load(true)}>
             <Icon name="refresh" size={14} />

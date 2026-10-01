@@ -121,6 +121,28 @@ def test_publish_requires_a_built_page(signed_in: TestClient) -> None:
     assert signed_in.post(f"/api/projects/{project_id}/publish").status_code == 409
 
 
+def test_broker_publish_rejects_stale_legacy_workspace(signed_in: TestClient, monkeypatch) -> None:
+    from app import storage
+    from app.config import get_settings
+    from app.db import session_scope
+    from app.models import Project, Publication
+
+    project_id = signed_in.post("/api/projects", json={"prompt": "作品集"}).json()["project"]["id"]
+    with session_scope() as session:
+        session.get(Project, project_id).status = "ready"
+    (storage.workspace_dir(project_id) / "index.html").write_text(
+        "stale mutable bytes", encoding="utf-8"
+    )
+    monkeypatch.setattr(get_settings(), "sandbox_mode", "broker")
+
+    response = signed_in.post(f"/api/projects/{project_id}/publish")
+    assert response.status_code == 409
+    assert "旧发布入口" in response.json()["detail"]
+    with session_scope() as session:
+        assert session.get(Project, project_id).slug is None
+        assert session.query(Publication).count() == 0
+
+
 def test_race_validates_model_selection(signed_in: TestClient) -> None:
     project_id = signed_in.post("/api/projects", json={"prompt": "落地页"}).json()["project"]["id"]
     # Fewer than two models never reaches the handler.

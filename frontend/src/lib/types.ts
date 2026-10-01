@@ -132,6 +132,7 @@ export type ProjectDetail = ProjectSummary & {
   activeRunId: string | null;
   latestRun: { id: string; status: string; phase: string; error: string | null; startedAt: string; finishedAt: string | null } | null;
   buildBudgetSeconds: number;
+  legacyPublicationAvailable: boolean;
   race: RaceSummary | null;
 };
 
