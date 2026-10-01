@@ -10,6 +10,11 @@ os.environ.update(ATOM_ENVIRONMENT='test', ATOM_SANDBOX_MODE='local',
     ATOM_DATA_DIR='/tmp/data', ATOM_DB_PATH='/tmp/data/api.db', ATOM_LLM_API_KEY='',
     ATOM_RUNTIME_URL='http://127.0.0.1:1')
 
+private_exchange=os.environ.get('ATOM_FIXTURE_PRIVATE_EXCHANGE')=='1'
+if private_exchange:
+    os.environ.update(ATOM_SESSION_MODE='durable',ATOM_CONSOLE_ORIGIN='https://console.atom-console.test',
+        ATOM_CONTENT_HOST_SUFFIX='atom-content.test',ATOM_COOKIE_SECURE='true')
+from app.security import hash_password
 from app.config import get_settings
 from app.db import engine, session_scope
 from app.models import Base, User, Project, Requirement
@@ -32,7 +37,7 @@ settings = get_settings()
 Base.metadata.create_all(engine)
 requirement = {'key':'page', 'title':'Page', 'detail':'', 'checks':[{'type':'exists','selector':'h1'}]}
 with session_scope() as session:
-    session.add(User(id='owner',email='owner@example.invalid',name='Owner',password_hash='fixture'))
+    session.add(User(id='owner',email='owner@example.org',name='Owner',password_hash=hash_password('Fixture-login-pass-713!')))
     session.flush()
     session.add(Project(id='project',user_id='owner',title='Fixture',prompt='Fixture'))
     session.flush()
@@ -89,9 +94,10 @@ if private_exchange:
     from app.content_access import ContentAccessRepository
     migrate(settings.db_path,Path('/tmp/data/before-v4.db'),target_version=4)
     access=ContentAccessRepository(settings.db_path)
-    source=access.create_console_session(user_id='owner',lifetime_seconds=120)
     navigation=ContentNavigation('https://console.atom-console.test')
 service = ContentService(content,store,hosts,access=access,navigation=navigation)
+if private_exchange:
+    from app.main import app as console_app
 
 
 async def fixture(scope,receive,send):
@@ -99,15 +105,8 @@ async def fixture(scope,receive,send):
     if (scope['type']=='http' and scope.get('path')=='/_fixture'
             and (b'host',b'fixture.invalid') in scope.get('headers',[])):
         await JSONResponse({'host':hosts.hostname(binding.id),'revision':imported.revision_id,'conflict':conflict,'preflightChecked':True})(scope,receive,send)
-    elif (private_exchange and scope['type']=='http' and scope.get('path')=='/_fixture/issue'
-          and scope.get('method')=='POST' and (b'host',b'fixture.invalid') in scope.get('headers',[])):
-        # Dedicated loopback harness issuer. This is NOT a console auth endpoint.
-        event=await receive()
-        challenge=event.get('body',b'')
-        assert event['type']=='http.request' and not event.get('more_body') and len(challenge)==64
-        handoff=access.issue_handoff(viewer_id='owner',source_session_id=source.id,
-            binding_id=binding.id,challenge=challenge.decode('ascii'))
-        await JSONResponse({'handoff':handoff.secret})(scope,receive,send)
+    elif private_exchange and scope['type']=='http' and (b'host',b'console.atom-console.test') in scope.get('headers',[]):
+        await console_app(dict(scope,scheme='https'),receive,send)
     else:
         # This disposable wrapper models the local TLS ingress termination.
         await service(dict(scope,scheme='https') if scope['type']=='http' else scope,receive,send)

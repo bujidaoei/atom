@@ -72,14 +72,15 @@ def _issue(token, body, suffix):
             'expiresAt':handoff.expires_at}
 
 
-def _describe(token, body, _suffix):
+def _describe(token, body, suffix):
     codec = credentials()
     source = codec.authenticate(token)
     if source is None:
         _deny(401)
-    return ContentAccessRepository(codec.repository.path).describe_handoff(
+    result = ContentAccessRepository(codec.repository.path).describe_handoff(
         viewer_id=source.user_id,source_session_id=source.id,
         binding_id=body['binding'],challenge=body['challenge'])
+    return {**result, 'contentOrigin':ContentHosts(suffix).url(body['binding']).rstrip('/')}
 
 
 def _detached_done(worker):

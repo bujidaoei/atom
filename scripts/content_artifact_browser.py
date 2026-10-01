@@ -9,6 +9,7 @@ from http.client import HTTPConnection
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import io
 import json
+import mimetypes
 import os
 from pathlib import Path
 import re
@@ -91,33 +92,47 @@ sys.path.insert(0,str(root));runpy.run_path(str(root/'fixture.py'),run_name='__m
                         # Test ingress strips its ephemeral port while preserving
                         # the configured hostname; no forwarded authority is used.
                         host=self.headers.get('Host','').split(':')[0]
-                        if host=='console.atom-console.test' and self.path.startswith('/content-access?'):
-                            payload=b'<h1>Console fixture</h1>'
-                            self.send_response(200);self.send_header('Content-Type','text/html')
-                            self.send_header('Content-Length',str(len(payload)));self.end_headers()
-                            self.wfile.write(payload);return
-                        if host!=metadata['host']:
+                        if host=='console.atom-console.test' and not self.path.startswith('/api/'):
+                            relative=urlsplit(self.path).path.lstrip('/')
+                            candidate=(ROOT/'frontend/dist'/relative).resolve()
+                            dist=(ROOT/'frontend/dist').resolve()
+                            if not candidate.is_relative_to(dist):self.send_error(404);return
+                            if not candidate.is_file():candidate=dist/'index.html'
+                            payload=candidate.read_bytes()
+                            self.send_response(200);self.send_header('Content-Type',mimetypes.guess_type(candidate.name)[0] or 'application/octet-stream')
+                            self.send_header('Referrer-Policy','no-referrer');self.send_header('Content-Length',str(len(payload)))
+                            self.end_headers();self.wfile.write(payload);return
+                        if host not in (metadata['host'],'console.atom-console.test'):
                             self.send_error(404);return
                         upstream=HTTPConnection('127.0.0.1',port,timeout=10)
                         try:
                             headers={'Host':host,'Sec-Fetch-Mode':self.headers.get('Sec-Fetch-Mode','')}
-                            for field in ('Cookie','Content-Type','Content-Length','Origin','Sec-Fetch-Dest','Sec-Purpose','Purpose'):
+                            for field in ('Cookie','Content-Type','Content-Length','Origin','Sec-Fetch-Dest','Sec-Purpose','Purpose','X-Atom-Intent'):
                                 if field in self.headers:headers[field]=self.headers[field]
                             # Exact local test origin maps to the configured 443 origin.
                             if headers.get('Origin')==f'https://{host}:{server.server_port}':
                                 headers['Origin']='https://'+host
                             size=int(self.headers.get('Content-Length','0'))
-                            if not 0<=size<=64:self.send_error(413);return
+                            if not 0<=size<=256:self.send_error(413);return
                             payload=self.rfile.read(size) if self.command=='POST' else None
                             upstream.request(self.command,self.path,body=payload,headers=headers)
                             response=upstream.getresponse();body=response.read()
                             observed.append((self.path,response.status,response.getheader('X-Atom-Revision')))
+                            if host=='console.atom-console.test' and self.path.startswith('/api/content-access/') and response.status==200:
+                                document=json.loads(body)
+                                for field in ('url','contentOrigin'):
+                                    if field in document:
+                                        document[field]=document[field].replace('https://'+metadata['host'],f'https://{metadata["host"]}:{server.server_port}',1)
+                                if 'url' in document:
+                                    metadata['handoff']=urlsplit(document['url']).fragment
+                                body=json.dumps(document).encode()
                             self.send_response(response.status)
                             for key,value in response.getheaders():
-                                if key.lower() not in ('connection','transfer-encoding','server','date'):
+                                if key.lower() not in ('connection','transfer-encoding','server','date','content-length'):
                                     if key.lower()=='location' and value.startswith('https://console.atom-console.test/'):
                                         value=value.replace('https://console.atom-console.test/',f'https://console.atom-console.test:{server.server_port}/',1)
                                     self.send_header(key,value)
+                            self.send_header('Content-Length',str(len(body)))
                             self.end_headers();self.wfile.write(body)
                         finally:upstream.close()
                     do_POST=do_GET
@@ -136,21 +151,23 @@ sys.path.insert(0,str(root));runpy.run_path(str(root/'fixture.py'),run_name='__m
                         base=f'https://{metadata["host"]}:{server.server_port}'
                         if options.private_exchange:
                             assert page.goto(base+'/',timeout=5000).status==404
-                            # The console page is a display fixture; issuance is explicit below.
                             page.goto(base+'/_atom/bootstrap',wait_until='domcontentloaded',timeout=5000)
-                            target=urlsplit(page.url)
-                            assert target.hostname=='console.atom-console.test' and target.path=='/content-access'
-                            query=parse_qs(target.query)
+                            page.get_by_label('邮箱',exact=True).fill('owner@example.org')
+                            page.get_by_role('button',name='继续',exact=True).click()
+                            page.get_by_label('密码',exact=True).fill('Fixture-login-pass-713!')
+                            page.get_by_role('button',name='登录',exact=True).click()
+                            page.get_by_role('heading',name='确认要打开的版本').wait_for(timeout=10000)
+                            page.get_by_role('heading',name='Fixture',exact=True).wait_for(timeout=5000)
+                            assert not any(path=='/api/content-access/handoff' for path,_,_ in observed)
                             initial={c['name']:c for c in context.cookies()}
-                            nonce=initial['__Host-atom_bootstrap']
-                            assert nonce['httpOnly'] and nonce['secure'] and nonce['sameSite']=='Lax'
-                            assert nonce['value'] not in page.url
-                            connection=HTTPConnection('127.0.0.1',port,timeout=5)
-                            connection.request('POST','/_fixture/issue',body=query['challenge'][0].encode(),
-                                headers={'Host':'fixture.invalid','Content-Type':'application/octet-stream'})
-                            issued=connection.getresponse()
-                            assert issued.status==200
-                            metadata['handoff']=json.loads(issued.read())['handoff'];connection.close()
+                            assert initial['__Host-atom_bootstrap']['httpOnly'] and initial['__Host-atom_console']['httpOnly']
+                            for width,height in ((1440,900),(390,844)):
+                                page.set_viewport_size({'width':width,'height':height})
+                                assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
+                                page.screenshot(path=str(ROOT/f'.logs/content-consent-{width}.png'),full_page=True)
+                            context.route('**/_atom/exchange*',lambda route:route.abort(),times=1)
+                            with page.expect_request('**/_atom/exchange*'):
+                                page.get_by_role('button',name='确认并打开',exact=True).click(no_wait_after=True)
                             copied=browser.new_context(ignore_https_errors=True)
                             copied_page=copied.new_page()
                             copied_page.goto(base+'/_atom/exchange#'+metadata['handoff'],timeout=5000)
@@ -184,9 +201,9 @@ sys.path.insert(0,str(root));runpy.run_path(str(root/'fixture.py'),run_name='__m
                         denied=page.goto(f'https://{metadata["host"]}:{server.server_port}/_atom/access',timeout=5000)
                         assert denied.status==404
                         assert all(status==200 and revision==metadata['revision'] for path,status,revision in observed
-                                   if path not in ('/favicon.ico','/_atom/access','/_atom/exchange','/_atom/bootstrap') and not (options.private_exchange and status==404))
+                                   if not path.startswith('/api/') and path not in ('/favicon.ico','/_atom/access','/_atom/exchange','/_atom/bootstrap') and not (options.private_exchange and status==404))
                         print(json.dumps({'browser':browser.version,'artifactRevision':metadata['revision'],
-                            'scripts':len(loaded),'styles':len(styles),'privateExchange':options.private_exchange,'httpBootstrap':options.private_exchange,'responses':observed,
+                            'scripts':len(loaded),'styles':len(styles),'privateExchange':options.private_exchange,'httpBootstrap':options.private_exchange,'realLoginAndConsent':options.private_exchange,'responses':observed,
                             'scope':'actual Linux artifact HTTP to Chromium through local test TLS ingress'}))
                         browser.close()
                 finally:

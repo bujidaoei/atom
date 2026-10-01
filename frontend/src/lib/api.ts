@@ -53,6 +53,8 @@ type RequestOptions = {
   silent401?: boolean;
   accept?: string;
   commandKey?: string;
+  intent?: "inspect-private-content" | "open-private-content";
+  signal?: AbortSignal;
 };
 
 async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
@@ -63,8 +65,10 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
     const send = () => fetch(withBase(path), {
       method,
       credentials: "include",
+      signal: options.signal,
       headers: {
         Accept: accept,
+        ...(options.intent ? { "X-Atom-Intent": options.intent } : {}),
         ...(body === undefined ? {} : { "Content-Type": "application/json" }),
         ...(options.commandKey ? { "Idempotency-Key": options.commandKey } : {}),
       },
@@ -101,6 +105,12 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
 }
 
 export const api = {
+  inspectContentAccess: (binding: string, challenge: string, signal: AbortSignal) =>
+    request<unknown>("/api/content-access/request?" + new URLSearchParams({ binding, challenge }),
+      { intent: "inspect-private-content", signal }),
+  issueContentAccess: (binding: string, challenge: string, signal: AbortSignal) =>
+    request<unknown>("/api/content-access/handoff",
+      { method: "POST", body: { binding, challenge }, intent: "open-private-content", signal }),
   // ---- auth
   lookup: (email: string) =>
     request<LookupResult>("/api/auth/lookup", { method: "POST", body: { email } }),

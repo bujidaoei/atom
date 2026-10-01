@@ -2,6 +2,7 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { AppShell } from "./components/AppShell";
 import { AuthProvider, RequireAuth } from "./lib/auth";
 import { ThemeProvider } from "./lib/theme";
+import { ContentAccessPage } from "./pages/ContentAccess";
 import { AuthPage } from "./pages/Auth";
 import { DashboardPage } from "./pages/Dashboard";
 import { LandingPage } from "./pages/Landing";
@@ -19,6 +20,7 @@ export function App() {
         <AuthProvider>
           <Routes>
             <Route path="/" element={<LandingPage />} />
+            <Route path="/content-access" element={<RequireAuth><ContentAccessPage /></RequireAuth>} />
             <Route path="/login" element={<AuthPage mode="login" />} />
             <Route path="/register" element={<AuthPage mode="register" />} />
             <Route
