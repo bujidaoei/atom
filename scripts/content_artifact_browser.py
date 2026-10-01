@@ -36,7 +36,7 @@ def main():
     parser=argparse.ArgumentParser()
     parser.add_argument('--reserved-path',action='store_true',help='Verify rejection of an actual conflicting artifact')
     parser.add_argument('--private-exchange',action='store_true',help='Exercise real login, confirmation and private HTTP exchange')
-    parser.add_argument('--audit-schema',action='store_true',help='Use schema5 for audited private browser flow')
+    parser.add_argument('--audit-schema',type=int,nargs='?',const=5,default=0,choices=(5,6,7),help='Select audited private browser schema (default5 when flag has no value)')
     options=parser.parse_args()
     if options.audit_schema and not options.private_exchange:parser.error('audit schema requires private exchange')
     if options.private_exchange and options.reserved_path:parser.error('select one fixture mode')
@@ -54,7 +54,7 @@ root=Path('/tmp/code');root.mkdir()
 payload=json.loads(sys.stdin.buffer.read())
 os.environ['ATOM_FIXTURE_RESERVED_PATH']='1' if payload['conflict'] else '0'
 os.environ['ATOM_FIXTURE_PRIVATE_EXCHANGE']='1' if payload['private'] else '0'
-os.environ['ATOM_FIXTURE_AUDIT_SCHEMA']='1' if payload['audit'] else '0'
+os.environ['ATOM_FIXTURE_AUDIT_SCHEMA']=str(payload['audit'])
 with zipfile.ZipFile(io.BytesIO(base64.b64decode(payload['code']))) as source:source.extractall(root)
 sys.path.insert(0,str(root));runpy.run_path(str(root/'fixture.py'),run_name='__main__')
 """
@@ -292,7 +292,9 @@ sys.path.insert(0,str(root));runpy.run_path(str(root/'fixture.py'),run_name='__m
                             connection=HTTPConnection('127.0.0.1',port,timeout=3)
                             try:
                                 connection.request('GET','/_fixture',headers={'Host':'fixture.invalid'})
-                                audit_counts=json.loads(connection.getresponse().read())['auditCounts']
+                                final_metadata=json.loads(connection.getresponse().read())
+                                assert final_metadata['schemaVersion']==options.audit_schema
+                                audit_counts=final_metadata['auditCounts']
                             finally:connection.close()
                             assert audit_counts=={'release.published':1,'console.session.created':3,
                                 'console.session.revoked':1,'console.account_sessions.revoked':1,

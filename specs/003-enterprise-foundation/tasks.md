@@ -293,3 +293,6 @@ Schema7 runtime follow-through:30 actual Linux main/own Node/broker cases pass a
 
 
 008-T032 operational visibility increment: audit_admin status now reads every registered historical obligation in one exact7 read-only snapshot, independently of process configuration. A bounded keyset detail page includes never-enrolled/pending/leased/delivered/expired counts and timestamps, while registered_drained is checked over the entire registry, not the page. Empty registry is not drained.64 focused tests pass. Scope is explicitly registered_destinations, not all possible unregistered business scopes or proof of active transport; retention/deployment/full-task gates remain open.
+
+
+008-T031/T032 are accepted at component scope: versioned governance schema and exact consumer compatibility, durable generation-fenced administration and registry-wide obligation inspection. Actual Chromium5/7 private content/auth/revocation checks supplement prior migration/crash/TLS/runtime evidence. This does not close retention, denial observation, trusted verifier, live model or enterprise production acceptance. Parent enterprise task remains open.

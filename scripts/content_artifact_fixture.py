@@ -11,6 +11,8 @@ os.environ.update(ATOM_ENVIRONMENT='test', ATOM_SANDBOX_MODE='local',
     ATOM_RUNTIME_URL='http://127.0.0.1:1')
 
 private_exchange=os.environ.get('ATOM_FIXTURE_PRIVATE_EXCHANGE')=='1'
+audit_schema=int(os.environ.get('ATOM_FIXTURE_AUDIT_SCHEMA','0'))
+if audit_schema not in (0,5,6,7):raise ValueError('invalid_fixture_audit_schema')
 if private_exchange:
     os.environ.update(ATOM_SESSION_MODE='durable',ATOM_CONSOLE_ORIGIN='https://console.atom-console.test',
         ATOM_CONTENT_HOST_SUFFIX='atom-content.test',ATOM_COOKIE_SECURE='true')
@@ -60,7 +62,7 @@ for index in range(8):
     (workspace/f'style-{index}.css').write_text(f'h1 {{ --asset-{index}: {index}; }}')
     (workspace/f'script-{index}.js').write_text(f'(window.loaded ||= []).push({index});')
 imported = import_workspace(repository,store,owner='owner',project_id='project',source=workspace)
-migrate(settings.db_path,Path('/tmp/data/before-v3.db'),target_version=5 if os.environ.get('ATOM_FIXTURE_AUDIT_SCHEMA')=='1' else 3)
+migrate(settings.db_path,Path('/tmp/data/before-v3.db'),target_version=audit_schema or 3)
 verification = VerificationRepository(settings.db_path)
 request = verification.reserve(owner='owner',workspace_id=imported.workspace_id,request_id='fixture-check',
     expected_revision=imported.revision_id,expected_contract=capture_contract([requirement]).digest,
@@ -92,7 +94,7 @@ access=None
 navigation=None
 if private_exchange:
     from app.content_access import ContentAccessRepository
-    migrate(settings.db_path,Path('/tmp/data/before-v4.db'),target_version=5 if os.environ.get('ATOM_FIXTURE_AUDIT_SCHEMA')=='1' else 4)
+    migrate(settings.db_path,Path('/tmp/data/before-v4.db'),target_version=audit_schema or 4)
     access=ContentAccessRepository(settings.db_path)
     navigation=ContentNavigation('https://console.atom-console.test')
 service = ContentService(content,store,hosts,access=access,navigation=navigation)
@@ -105,10 +107,11 @@ async def fixture(scope,receive,send):
     if (scope['type']=='http' and scope.get('path')=='/_fixture'
             and (b'host',b'fixture.invalid') in scope.get('headers',[])):
         audit_counts={}
-        if os.environ.get('ATOM_FIXTURE_AUDIT_SCHEMA')=='1':
+        if audit_schema:
             with sqlite3.connect(settings.db_path) as db:
                 audit_counts=dict(db.execute('SELECT event_kind,count(*) FROM security_audit_events GROUP BY event_kind').fetchall())
-        await JSONResponse({'host':hosts.hostname(binding.id),'revision':imported.revision_id,'conflict':conflict,'preflightChecked':True,'auditCounts':audit_counts})(scope,receive,send)
+        with sqlite3.connect(settings.db_path) as db: schema_version=db.execute('PRAGMA user_version').fetchone()[0]
+        await JSONResponse({'host':hosts.hostname(binding.id),'revision':imported.revision_id,'conflict':conflict,'preflightChecked':True,'auditCounts':audit_counts,'schemaVersion':schema_version})(scope,receive,send)
     elif private_exchange and scope['type']=='http' and (b'host',b'console.atom-console.test') in scope.get('headers',[]):
         await console_app(dict(scope,scheme='https'),receive,send)
     else:

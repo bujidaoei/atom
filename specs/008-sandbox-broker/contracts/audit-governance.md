@@ -1,6 +1,6 @@
-# Audit destination governance and retention — design, not implementation
+# Audit destination governance and retention — implementation and remaining design
 
-Reviewed 2026-10-01 against 5a35473. Refines T029/T030 and parent FR-008/FR-011/FR-012. No retention mutation is authorized by merely producing this document, and no task below is accepted as implemented.
+Reviewed 2026-10-01 against 5a35473. Refines T029/T030 and parent FR-008/FR-011/FR-012. No retention mutation is authorized by merely producing this document, and retention remains design. Current component acceptance is recorded at the end of this contract and in tasks.md.
 
 ## Official evidence and limits
 
@@ -84,3 +84,6 @@ Current schema7 compatibility (supersedes earlier not-yet-compatible notes): aut
 
 
 T032 operational visibility increment: audit_admin status now reads every registered historical obligation in one exact7 read-only snapshot, independently of process configuration. A bounded keyset detail page includes never-enrolled/pending/leased/delivered/expired counts and timestamps, while registered_drained is checked over the entire registry, not the page. Empty registry is not drained.64 focused tests pass. Scope is explicitly registered_destinations, not all possible unregistered business scopes or proof of active transport; retention/deployment/full-task gates remain open.
+
+
+T031/T032 are accepted at component scope: versioned governance schema and exact consumer compatibility, durable generation-fenced administration and registry-wide obligation inspection. Actual Chromium5/7 private content/auth/revocation checks supplement prior migration/crash/TLS/runtime evidence. This does not close retention, denial observation, trusted verifier, live model or enterprise production acceptance.

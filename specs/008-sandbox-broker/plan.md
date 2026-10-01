@@ -270,3 +270,6 @@ Schema7 main integration extends explicit exact-schema allowlists for authentica
 
 
 AuditGovernanceRepository.obligations uses one exact7 mode=ro/BEGIN transaction for event upper watermark, registry count, global registered unpaid-existence check and limit+1 destination detail page. Detail aggregates include all scoped events up to the snapshot upper bound or explicit retired cutoff, using left join to expose never-enrolled work. Registry-wide drained excludes empty registry and covers identities outside the returned page. Reads retain3s lock and5s SQLite progress deadline; errors return unavailable, never substitute zero counters. A page is a point-in-time snapshot; independent page calls may observe later commits and are not a retention plan. No pagination cursor is represented as an immutable multi-page snapshot. app.audit_admin status is local trusted-operator inspection, separate from configured-only app.audit_status.
+
+
+T031/T032 are accepted at component scope: versioned governance schema and exact consumer compatibility, durable generation-fenced administration and registry-wide obligation inspection. Actual Chromium5/7 private content/auth/revocation checks supplement prior migration/crash/TLS/runtime evidence. This does not close retention, denial observation, trusted verifier, live model or enterprise production acceptance.
