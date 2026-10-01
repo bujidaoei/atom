@@ -147,13 +147,47 @@ def test_authenticated_main_routes_reconcile_real_browser_result(adopted, tmp_pa
                     assert repeat.status_code == 200 and repeat.json() == result.json()
                     foreign = await client.get('/api/projects/other/verifications/' + key)
                     assert foreign.status_code == 404
+                    slow_checks = [{'type':'flow','selector':'#missing','expect':'body'}]
+                    with sqlite3.connect(path) as db:
+                        db.execute('UPDATE requirements SET checks_json=? WHERE project_id=?',
+                                   (json.dumps(slow_checks), 'project'))
+                    slow_key = secrets.token_hex(16)
+                    next_request = await client.post(route, json={'requestId':slow_key},
+                                                     headers=intent_headers)
+                    assert next_request.status_code == 200
+                    async with VerifierClient(f'http://127.0.0.1:{port}', token,
+                                              timeout=1) as short:
+                        api.state.verifier_client = short
+                        uncertain = await client.post(route + '/' + slow_key + '/run',
+                                                      headers=intent_headers)
+                        assert uncertain.status_code == 202
+                        assert uncertain.json()['state'] == 'running'
+                    api.state.verifier_client = trusted
+                    deadline = time.monotonic() + 30
+                    while True:
+                        later = await client.get(route + '/' + slow_key)
+                        if later.json()['state'] == 'failed':
+                            assert later.json()['total'] == 1
+                            assert later.json()['passed'] == 0
+                            break
+                        assert later.json()['state'] in ('running','unresolved')
+                        assert time.monotonic() < deadline
+                        await asyncio.sleep(.1)
+                    no_redispatch = await client.post(route + '/' + slow_key + '/run',
+                                                      headers=intent_headers)
+                    assert no_redispatch.status_code == 200
+                    assert no_redispatch.json() == later.json()
                 async with httpx.AsyncClient(transport=httpx.ASGITransport(app=api),
                     base_url='https://console.example.org', trust_env=False) as anonymous:
                     assert (await anonymous.get(route + '/' + key)).status_code == 401
-        asyncio.run(exercise())
+                return key, slow_key
+        passed_id, failed_id = asyncio.run(exercise())
         with sqlite3.connect(path) as db:
-            assert db.execute('SELECT outcome FROM verification_results').fetchone() == ('passed',)
-            assert db.execute('SELECT count(*) FROM verification_attestations').fetchone() == (1,)
+            assert db.execute('SELECT outcome FROM verification_results WHERE request_id=?',
+                              (passed_id,)).fetchone() == ('passed',)
+            assert db.execute('SELECT outcome FROM verification_results WHERE request_id=?',
+                              (failed_id,)).fetchone() == ('failed',)
+            assert db.execute('SELECT count(*) FROM verification_attestations').fetchone() == (2,)
             assert db.execute('PRAGMA foreign_key_check').fetchall() == []
         engine.dispose()
     finally:
