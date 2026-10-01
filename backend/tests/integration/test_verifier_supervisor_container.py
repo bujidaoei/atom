@@ -139,18 +139,33 @@ def test_changed_contract_during_real_browser_execution_cannot_register(assignme
         assert db.execute('SELECT count(*) FROM verification_attestations').fetchone() == (0,)
 
 
+@pytest.mark.parametrize('assignment', ['slow'], indirect=True)
 def test_changed_head_during_real_browser_execution_cannot_register(assignment):
     path, supervisor, authority, dispatched, store = assignment
+    label = f'label=atom.verifier.request={dispatched.request.id}'
 
-    def change_head():
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        pending = pool.submit(supervisor.verify_and_register, assignment=dispatched,
+                              store=store, authority=authority, budget_seconds=20)
+        deadline = time.monotonic() + 12
+        browser_running = False
+        while time.monotonic() < deadline and not pending.done():
+            inventory = subprocess.run(['docker', 'ps', '-q', '--filter', label],
+                                       capture_output=True, timeout=10, check=True)
+            identity = inventory.stdout.decode().strip()
+            if identity:
+                processes = subprocess.run(['docker', 'top', identity],
+                                           capture_output=True, timeout=10, check=False)
+                browser_running = processes.returncode == 0 and b'chrome-headless-shell' in processes.stdout
+                if browser_running:
+                    break
+            time.sleep(0.05)
+        assert browser_running, 'Chromium was never observed running'
         with sqlite3.connect(path) as db:
             db.execute('UPDATE revision_workspaces SET current_revision_id=? WHERE id=?',
                        ('main-root', dispatched.request.workspace_id))
-
-    store.hook = change_head
-    with pytest.raises(VerificationError, match='verification_stale_evidence'):
-        supervisor.verify_and_register(assignment=dispatched, store=store,
-                                       authority=authority, budget_seconds=20)
+        with pytest.raises(VerificationError, match='verification_stale_evidence'):
+            pending.result(timeout=15)
     with sqlite3.connect(path) as db:
         assert db.execute('SELECT count(*) FROM verification_results').fetchone() == (0,)
         assert db.execute('SELECT count(*) FROM verification_attestations').fetchone() == (0,)
