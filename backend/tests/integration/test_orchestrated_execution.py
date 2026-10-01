@@ -21,12 +21,11 @@ pytestmark = pytest.mark.skipif(not IMAGE or not os.environ.get('ATOM_TEST_DOCKE
                                reason='requires explicit local API and sandbox image digests')
 
 
-_LEGACY_CASES = [(True,None),(False,None),(None,None),(False,'cancel'),(False,'deadline'),
-                 (False,'deadline_checkpoint')]
+_OUTCOME_CASES = [(True,None),(False,None),(None,None),(False,'cancel'),(False,'deadline'),
+                  (False,'deadline_checkpoint')]
 _CASES = [pytest.param(version,valid,interrupt,
     id=f'schema-v{version}-{valid}-{interrupt or "normal"}')
-    for version in (1,4,5,6,7,9,10) for valid,interrupt in _LEGACY_CASES]
-_CASES.append(pytest.param(13,True,None,id='schema-v13-success'))
+    for version in (1,4,5,6,7,9,10,13) for valid,interrupt in _OUTCOME_CASES]
 
 
 @pytest.mark.parametrize('schema_version,valid,interrupt',_CASES)
