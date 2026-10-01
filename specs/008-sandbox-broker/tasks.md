@@ -227,3 +227,6 @@ T029 increment: actual bounded audit read repository now enforces current source
 
 
 T029 increment: real authenticated GET /api/audit/events is mounted with strict query/origin/intent checks, derived account scope and fixed-watermark continuation. Content issuer and audit queries share a reusable ownership/response primitive with independent capacities. Actual password/cookie/SQLite API tests and ASGI cancellation/send faults plus main two-pool shutdown tests verify the component. Audit UI, destination protections/export/retry/retention and full enterprise acceptance remain open; T029 stays unchecked.
+
+
+T029 increment: internal real SQLite delivery-state repository now implements bounded idempotent enrollment, scope-stable destination identities, exclusive/reclaimable leases, atomic stale-safe ack/retry and backlog status. Targeted regression includes8 actual subprocess before/after-commit crashes, concurrent enrollment/claim, byte/capacity/backoff bounds, late rollback and unchanged ledger. No remote receiver or production dispatcher is enabled. Authorized destination configuration, network protections/ack acceptance, scheduler lifecycle, UI and retention remain open; T029 not closed.

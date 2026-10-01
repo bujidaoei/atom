@@ -245,3 +245,6 @@ T027/008-T029 increment: audit read foundation implemented with actual scope/sou
 
 
 T027/008-T029 increment: mounted actual signed-cookie audit read API, strict current scope and bounded independent read/delivery ownership. HTTP/auth/storage/fault/lifespan regression evidence recorded in008. UI, enterprise role model, export/retention and production readiness remain open.
+
+
+T027/008-T029 increment: durable audit delivery-state operations are implemented and tested with real ledger rows, concurrency and8 subprocess commit-boundary crashes. No network exporter is enabled; destination security, worker lifecycle, actual remote acknowledgement and retention remain open.
