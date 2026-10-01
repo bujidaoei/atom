@@ -331,3 +331,6 @@ Cold recovery regression: with pinned API/sandbox images run `backend/.venv/Scri
 
 
 Real storage exhaustion regression: set the pinned ATOM_TEST_API_IMAGE and run `backend/.venv/Scripts/python.exe -m pytest backend/tests/integration/test_audit_archiving.py -k "full_archive or happy" -q --junitxml=.logs/archive-enospc.xml`. Five cases pass. Only disposable1MiB/32MiB container tmpfs mounts are filled; this is not a production load or capacity-sizing run.
+
+
+Offline schema11 foundation regression: `backend/.venv/Scripts/python.exe -m pytest backend/tests/test_audit_pruning_migration.py backend/tests/test_audit_isolated_migration.py -q --junitxml=.logs/audit-pruning-schema.xml`.55 pass. Do not migrate serving databases to11: no prune owner/CLI or gap-aware readers exist yet and existing consumers reject it.
