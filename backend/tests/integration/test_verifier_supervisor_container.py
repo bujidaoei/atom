@@ -28,7 +28,8 @@ from app.verification_repository import VerificationError
 from app.verifier_authority import VerifierAuthority
 from app.verifier_supervisor import SupervisorError, VerifierSupervisor
 from app.verifier_coordinator import VerifierCoordinator
-from app.verifier_service import VerifierProcessConfig, VerifierStartupError
+from app.verifier_service import (VerifierProcessConfig, VerifierStartupError,
+                                  create_app as create_verifier_app)
 from app.sandbox.daemon_lease import DaemonLeaseError
 from test_adoption_repository import Store, prepared, snapshot
 from test_adoption_verification_repository import adopted
@@ -84,6 +85,9 @@ def test_private_verifier_process_owns_browser_and_registers_real_result(adopted
     token = secrets.token_urlsafe(48)
     config = VerifierProcessConfig(path, root, IMAGE, PROFILE, 'service-worker', token)
     assert config.verifier_id == 'service-worker'
+    with pytest.raises(VerifierStartupError, match='verifier_schema_v13_required'):
+        create_verifier_app(VerifierProcessConfig(tmp_path / 'before-v13.db', root,
+            IMAGE, PROFILE, 'service-worker', token))
     with pytest.raises(VerifierStartupError, match='verifier_configuration_invalid'):
         VerifierProcessConfig(path, root, IMAGE, PROFILE, 'service-worker', 'short')
     listener = socket.socket()
@@ -159,6 +163,10 @@ def test_private_verifier_process_owns_browser_and_registers_real_result(adopted
             process.kill()
             process.wait(timeout=5)
         assert process.returncode is not None
+        leases = subprocess.run(['docker','ps','-aq','--filter',
+            'label=atom.verifier-coordinator-lease.owner'], capture_output=True,
+            text=True, check=True)
+        assert leases.stdout.strip() == ''
 
 
 def test_actual_isolated_browser_registers_one_v13_result(assignment):

@@ -84,6 +84,11 @@ def _nonfinite(_value):
     raise ValueError('nonfinite_number')
 
 
+def _error(code: str, status: int):
+    return JSONResponse({'error':code}, status_code=status,
+                        headers={'cache-control':'no-store'})
+
+
 def create_app(config: VerifierProcessConfig | None = None) -> FastAPI:
     if config is None:
         config = VerifierProcessConfig.from_environment()
@@ -124,60 +129,79 @@ def create_app(config: VerifierProcessConfig | None = None) -> FastAPI:
         return coordinator.verify_and_register(assignment=assignment, store=store,
                                                authority=authority, budget_seconds=30)
 
+    def finish_abandoned(task, token):
+        try:
+            error = task.exception()
+            if error is not None:
+                _LOG.warning('verifier_abandoned_request_failed',
+                             extra={'exception_type':type(error).__name__})
+        except asyncio.CancelledError:
+            _LOG.warning('verifier_abandoned_request_cancelled')
+        finally:
+            operations.release(token)
+
     @app.post('/v1/verify')
     async def verify_request(request: Request):
         headers = request.scope['headers']
         authorization = [value for key, value in headers if key.lower() == b'authorization']
         expected = b'Bearer ' + config.control_token.encode('ascii')
         if len(authorization) != 1 or not hmac.compare_digest(authorization[0], expected):
-            return JSONResponse({'error':'unauthorized'}, status_code=401)
+            return _error('unauthorized', 401)
         if request.scope.get('query_string'):
-            return JSONResponse({'error':'invalid_request'}, status_code=400)
+            return _error('invalid_request', 400)
         if ([value.lower() for key, value in headers if key.lower() == b'content-type']
                 != [b'application/json']
                 or any(key.lower() == b'content-encoding' for key, _ in headers)):
-            return JSONResponse({'error':'unsupported_content_type'}, status_code=415)
+            return _error('unsupported_content_type', 415)
         body = bytearray()
         try:
             async with asyncio.timeout(5):
                 async for chunk in request.stream():
                     if len(body) + len(chunk) > 512:
-                        return JSONResponse({'error':'request_too_large'}, status_code=413)
+                        return _error('request_too_large', 413)
                     body.extend(chunk)
         except (TimeoutError, ClientDisconnect):
-            return JSONResponse({'error':'invalid_request'}, status_code=400)
+            return _error('invalid_request', 400)
         try:
             data = json.loads(body.decode('utf-8'), object_pairs_hook=_unique,
                               parse_constant=_nonfinite)
         except (ValueError, UnicodeError, RecursionError):
-            return JSONResponse({'error':'invalid_request'}, status_code=400)
+            return _error('invalid_request', 400)
         if (type(data) is not dict or set(data) != {'owner', 'requestId'}
                 or any(type(data[key]) is not str or _IDENTIFIER.fullmatch(data[key]) is None
                        for key in ('owner', 'requestId'))):
-            return JSONResponse({'error':'invalid_request'}, status_code=400)
+            return _error('invalid_request', 400)
         token = operations.acquire()
         if token is None:
-            return JSONResponse({'error':'verifier_busy'}, status_code=503)
+            return _error('verifier_busy', 503)
         task = asyncio.create_task(asyncio.to_thread(run, data['owner'], data['requestId']))
         try:
             result = await asyncio.shield(task)
             response = {'requestId':result.request_id, 'revisionId':result.revision_id,
                         'outcome':result.outcome, 'total':result.total,
                         'passed':result.passed}
-            return OwnedJSONResponse(response, operations, token)
+            return OwnedJSONResponse(response, operations, token,
+                                     headers={'cache-control':'no-store'})
         except asyncio.CancelledError:
-            task.add_done_callback(lambda _task: operations.release(token))
+            task.add_done_callback(lambda finished: finish_abandoned(finished, token))
             raise
         except VerificationError as error:
-            status = 404 if str(error) == 'verification_not_found' else 409
+            status = (404 if str(error) == 'verification_not_found' else
+                      409 if str(error) in {
+                          'verifier_already_dispatched', 'verification_expired',
+                          'verification_stale_contract', 'verification_stale_artifact',
+                          'verification_stale_evidence'} else 503)
             return OwnedJSONResponse({'error':str(error)}, operations, token,
-                                     status_code=status)
+                                     status_code=status,
+                                     headers={'cache-control':'no-store'})
         except (SupervisorError, ArtifactError):
             return OwnedJSONResponse({'error':'verifier_unavailable'}, operations,
-                                     token, status_code=503)
+                                     token, status_code=503,
+                                     headers={'cache-control':'no-store'})
         except Exception as error:
             _LOG.error('verifier_request_failed', extra={'exception_type':type(error).__name__})
             return OwnedJSONResponse({'error':'verifier_unavailable'}, operations,
-                                     token, status_code=503)
+                                     token, status_code=503,
+                                     headers={'cache-control':'no-store'})
 
     return app
