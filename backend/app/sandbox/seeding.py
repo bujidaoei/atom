@@ -11,7 +11,20 @@ from ..snapshots import MAX_ARCHIVE_BYTES
 
 MAX_SEED_BYTES = MAX_ARCHIVE_BYTES
 _LOG = logging.getLogger('atom.sandbox.seeding')
-_REASON = re.compile(rb'seed_failure:([a-z_]{1,64})\n?\Z')
+_REASON = re.compile(rb'seed_failure:([a-z_]{1,64})\Z')
+
+
+def _failure_class(diagnostic: bytes) -> str:
+    for line in diagnostic.splitlines():
+        if match := _REASON.fullmatch(line):
+            return match.group(1).decode('ascii')
+    if b'OCI runtime exec failed' in diagnostic or b'Error response from daemon' in diagnostic:
+        return 'docker_exec_error'
+    if b'Cannot connect to the Docker daemon' in diagnostic or b'context canceled' in diagnostic:
+        return 'docker_transport_error'
+    if b'Traceback (most recent call last)' in diagnostic:
+        return 'python_exception'
+    return 'empty_stderr' if not diagnostic else 'unclassified_stderr'
 _SNAPSHOT_SOURCE = Path(__file__).parents[1].joinpath("snapshots.py").read_text(encoding="utf-8")
 _ENTRY = r'''
 import fcntl, signal
@@ -66,9 +79,8 @@ class SeedOperations:
              "/usr/local/bin/python3", "-I", "-c", _SNAPSHOT_SOURCE + _ENTRY, attempt.base_revision],
             input_data=payload, timeout=25, output_limit=4096)
         if status != 0:
-            reason = _REASON.fullmatch(diagnostic)
-            _LOG.warning('broker_seed_helper_failed code=%s',
-                         reason.group(1).decode('ascii') if reason else 'unknown')
+            _LOG.warning('broker_seed_helper_failed code=%s status=%d stderr_bytes=%d stdout_bytes=%d',
+                         _failure_class(diagnostic), status, len(diagnostic), len(out))
             raise DriverError("seed_execution_unknown")
         try:
             response = json.loads(out)

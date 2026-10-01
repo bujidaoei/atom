@@ -12,7 +12,20 @@ from .registry import Attempt
 
 _SOURCE = Path(__file__).parents[1].joinpath("snapshots.py").read_text(encoding="utf-8")
 _LOG = logging.getLogger('atom.sandbox.checkpoints')
-_REASON = re.compile(rb'checkpoint_failure:([a-z_]{1,64})\n?\Z')
+_REASON = re.compile(rb'checkpoint_failure:([a-z_]{1,64})\Z')
+
+
+def _failure_class(diagnostic: bytes) -> str:
+    for line in diagnostic.splitlines():
+        if match := _REASON.fullmatch(line):
+            return match.group(1).decode('ascii')
+    if b'OCI runtime exec failed' in diagnostic or b'Error response from daemon' in diagnostic:
+        return 'docker_exec_error'
+    if b'Cannot connect to the Docker daemon' in diagnostic or b'context canceled' in diagnostic:
+        return 'docker_transport_error'
+    if b'Traceback (most recent call last)' in diagnostic:
+        return 'python_exception'
+    return 'empty_stderr' if not diagnostic else 'unclassified_stderr'
 _ENTRY = r'''
 import fcntl,signal
 def _deadline(_signum,_frame):
@@ -61,9 +74,8 @@ class CheckpointOperations:
             [self.driver.executable, "container", "exec", state.id, "/usr/local/bin/python3", "-I", "-c", _SOURCE + _ENTRY],
             timeout=25, output_limit=MAX_ARCHIVE_BYTES)
         if status != 0:
-            reason = _REASON.fullmatch(diagnostic)
-            _LOG.warning('broker_checkpoint_helper_failed code=%s',
-                         reason.group(1).decode('ascii') if reason else 'unknown')
+            _LOG.warning('broker_checkpoint_helper_failed code=%s status=%d stderr_bytes=%d stdout_bytes=%d',
+                         _failure_class(diagnostic), status, len(diagnostic), len(out))
             raise DriverError("checkpoint_export_unknown")
         verified = verify_snapshot(io.BytesIO(out))
         return CheckpointExport(attempt.id, attempt.version, verified.revision, out)
