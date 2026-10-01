@@ -242,10 +242,13 @@ module.AdoptionRepository(Path(sys.argv[1])).adopt(owner='user',project_id='proj
     assert state(path) == before and verify(path) == 12
 
 
-def test_execution_continues_from_adopted_main_revision(prepared):
+@pytest.mark.parametrize('revision_schema', [12, 13])
+def test_execution_continues_from_adopted_main_revision(prepared, tmp_path, revision_schema):
     from app.revisions import RevisionRepository
     path, main, _, payload, artifact = prepared
     adopted = adopt(AdoptionRepository(path), Store(artifact.key, payload))
+    if revision_schema == 13:
+        migrate(path, tmp_path / 'before-v13.db', target_version=13)
     with sqlite3.connect(path) as db:
         db.execute("UPDATE projects SET active_run_id='run' WHERE id='project'")
     revisions = RevisionRepository(path)

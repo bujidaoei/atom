@@ -100,7 +100,7 @@ class RevisionRepository:
             raise RevisionError('invalid_revision_configuration')
         self.path, self.timeout = Path(path), lock_timeout
         try:
-            if verify(self.path) not in (1, 4, 5, 6, 7, 9, 10, 12):
+            if verify(self.path) not in (1, 4, 5, 6, 7, 9, 10, 12, 13):
                 raise RevisionError('revision_schema_required')
         except MigrationError:
             raise RevisionError('revision_schema_required') from None
@@ -119,7 +119,7 @@ class RevisionRepository:
             db.row_factory = None
             version = _schema(db)
             db.row_factory = sqlite3.Row
-            if version not in (1, 4, 5, 6, 7, 9, 10, 12):
+            if version not in (1, 4, 5, 6, 7, 9, 10, 12, 13):
                 raise RevisionError('revision_schema_required')
             yield db
             db.execute('COMMIT')
