@@ -298,3 +298,6 @@ Isolated-worker component regression: with explicit pinned sandbox image, run `b
 
 
 Broker isolated-recovery endpoint is POST /v1/admin/audit/recover with protected admin bearer, x-atom-archive-sha256 and application/octet-stream body. Use only bounded committed bytes and expected digest from the owner's trusted ledger. Runtime grants are rejected. No production client/CLI integration or isolated durable receipt exists yet; do not substitute a manual HTTP success for a source verification record. Integration regression: `backend/.venv/Scripts/python.exe -m pytest backend/tests/integration/test_audit_recovery_http.py backend/tests/test_sandbox_http_boundary.py -q` with explicit pinned sandbox image.
+
+
+Recovery client component regression: `backend/.venv/Scripts/python.exe -m pytest backend/tests/integration/test_audit_recovery_client.py backend/tests/test_broker_client.py -q` with explicit pinned sandbox image. AuditRecoveryClient needs origin/admin bearer/expected pinned image/policy digest, not a grant-signing key. It validates full returned bytes/metadata but is not yet wired into archive_admin or new persistent verification receipts.

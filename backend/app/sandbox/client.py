@@ -96,15 +96,15 @@ def _snapshot(payload, revision):
         raise BrokerClientError('invalid_checkpoint')
 
 
-class BrokerClient:
-    def __init__(self, origin: str, admin_token: str, codec: GrantCodec, *, timeout: float = 45):
+class AdminTransport:
+    def __init__(self, origin: str, admin_token: str, *, timeout: float = 45):
         self._origin = _origin(origin)
         if (not isinstance(admin_token, str) or not 32 <= len(admin_token) <= 128
                 or any(not 33 <= ord(c) <= 126 for c in admin_token)
-                or not isinstance(codec, GrantCodec) or isinstance(timeout, bool)
+                or isinstance(timeout, bool)
                 or not isinstance(timeout, (int,float)) or not 0 < timeout <= 60):
             raise BrokerClientError('invalid_broker_client_configuration')
-        self._admin, self._codec, self._timeout = admin_token, codec, timeout
+        self._admin, self._timeout = admin_token, timeout
         try:
             self._http = httpx.AsyncClient(base_url=self._origin, follow_redirects=False,
                 trust_env=False, timeout=timeout, limits=httpx.Limits(max_connections=4,max_keepalive_connections=2))
@@ -116,16 +116,6 @@ class BrokerClient:
 
     async def __aexit__(self, *_args):
         await self._http.aclose()
-
-    def _token(self, grant):
-        try:
-            return self._codec.issue(grant)
-        except (GrantError, TypeError, AttributeError):
-            raise BrokerClientError('invalid_broker_request') from None
-
-    def runtime_token(self, grant: Grant) -> str:
-        """Issue scoped bearer authority for a trusted coordinator's ready lease."""
-        return self._token(grant)
 
     async def _request(self, route, payload, *, headers=None, expected=200,
                        media='application/json', limit=16384, method='POST'):
@@ -153,6 +143,23 @@ class BrokerClient:
         _, payload = await self._request(route,json.dumps(body,separators=(',',':')).encode(),
             headers={'content-type':'application/json'},expected=expected)
         return _json(payload)
+
+class BrokerClient(AdminTransport):
+    def __init__(self, origin: str, admin_token: str, codec: GrantCodec, *, timeout: float = 45):
+        if not isinstance(codec, GrantCodec):
+            raise BrokerClientError('invalid_broker_client_configuration')
+        super().__init__(origin,admin_token,timeout=timeout)
+        self._codec = codec
+
+    def _token(self, grant):
+        try:
+            return self._codec.issue(grant)
+        except (GrantError, TypeError, AttributeError):
+            raise BrokerClientError('invalid_broker_request') from None
+
+    def runtime_token(self, grant: Grant) -> str:
+        """Issue scoped bearer authority for a trusted coordinator's ready lease."""
+        return self._token(grant)
 
     async def require_ready(self) -> None:
         try:

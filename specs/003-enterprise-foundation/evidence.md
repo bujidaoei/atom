@@ -175,3 +175,6 @@ Child 008 now implements verified immutable local Linux artifact storage with sy
 
 
 008 T035 admin recovery endpoint implemented with authentication, bounded intake/send and cancellation-owned cleanup.24 ASGI/actual-Docker HTTP boundary tests pass. Client and versioned receipt integration remain open; current archive CLI is not yet isolated. See ../008-sandbox-broker/evidence.md.
+
+
+008 T035 bounded client:42 client/transport checks pass including actual socket broker plus isolated Docker restore and strict provenance/full-payload rejection tests. No grant-signing key required by recovery client. Versioned receipt/owner wiring still open; T035/T033/T034 unchecked. See ../008-sandbox-broker/evidence.md.

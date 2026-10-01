@@ -330,3 +330,6 @@ T035 isolated-worker foundation (2026-10-01): trusted Lifecycle.verify_audit_arc
 
 
 T035 administrative HTTP boundary (2026-10-01): POST /v1/admin/audit/recover now requires existing broker admin authentication, one strict archive digest header and a bounded binary body before executing the fixed isolated worker. Runtime grants do not authorize it. Transfer admission stays owned through worker cleanup and bounded response send; repeated request cancellation drains the worker task before release.24 HTTP-boundary/actual-container tests pass. Client transport, archive owner integration and versioned durable receipts remain open; current archive_admin still uses historical in-process recovery. T035/T033/T034 remain unchecked.
+
+
+T035 bounded recovery client (2026-10-01): AuditRecoveryClient now calls the admin recovery endpoint over the existing bounded transport without a runtime grant-signing key. It requires explicit expected pinned image/policy digest and verifies protocol, attempt identity, exact full event dictionaries and all manifest fields with strict scalar types.42 actual-wire/client regression tests pass, including a real loopback Uvicorn-to-Docker recovery. Versioned durable isolated receipts and archive owner/CLI wiring remain open; current schema9 recovery receipts retain their historical in-process meaning. T035/T033/T034 remain unchecked.
