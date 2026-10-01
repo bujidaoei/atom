@@ -196,3 +196,6 @@ V5 full-path checks: test_revision_repository.py now runs complete matrix on1/4/
 
 
 Audit crash check: run test_audit_crash.py with security/content/release audit suites. Fourteen cases launch an actual child process for seven operations and two crash phases, send ephemeral credential fixtures through stdin only, require exit71/72 and empty stdout/stderr, then verify schema/integrity and actual persisted paired effects. Before-commit compares all nine tables unchanged. After-commit checks exact event delta and sessions/consumption/publication/receipt effects. Current execution is Windows SQLite process exit; repeat under production filesystem/backup conditions separately before power-loss or production acceptance claims.
+
+
+Audit reader checks: run test_audit_repository.py, test_security_audit.py and test_release_audit.py. Real event writers populate disposable5 ledger; reader verifies signed-source identity is supplied by trusted caller and rechecks durable scope itself. Page tests freeze equal timestamps, append new actual sessions between pages and retain initial upper. Ownership transfer and revoke/expiry must deny later reads. Complete SQL dump is unchanged after successful account/project reads. This does not exercise external HTTP authentication or an audit viewer.

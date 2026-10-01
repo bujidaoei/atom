@@ -36,3 +36,8 @@ Connect actor and operation to immutable revision, verification report, publicat
 5. Slow/unavailable receiver, duplicate delivery, lost ack, worker crash and restart preserve backlog and correctly deduplicate at receiver; bounded shutdown retains unfinished ownership.
 6. Capacity/retention/observation-overflow drills distinguish recorded, pending, rejected and missing evidence. No silent success or unbounded memory/disk growth.
 7. All affected repositories/main runtime/content/browser paths pass on the new schema; immutable Pi remains unchanged. Production backup/restore and export destination checks stay independent gates.
+
+
+
+### Implemented reader component
+AuditRepository.page is an internal trusted-caller API (session id is not a bearer). It rechecks source within a read-only snapshot, derives own-account scope or checks current project ownership, and returns fixed-column events with upper/next_after. Bounds:1-100 events, integer signed64-bit nonnegative cursors, SQLite lock3s/progress5s. Retain upper from first page for a stable scan; authorization is independent of cursor input. No HTTP endpoint, generalized enterprise roles or export added in this component.

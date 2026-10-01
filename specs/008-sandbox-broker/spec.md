@@ -231,3 +231,6 @@ Audit schema runtime compatibility: explicit v5 is now an accepted exact-schema 
 
 
 Audit crash acceptance boundary: abrupt process exit after event insertion but before commit must recover unchanged business/audit state; abrupt exit after commit and before returning must preserve both. This acceptance is distinct from power-loss/filesystem durability and remote export acknowledgement.
+
+
+Audit read boundary: authenticated account scope is derived from the caller, never another supplied user id. Project scope requires current ownership. Each page rechecks live source and ownership in the same read snapshot as event retrieval. A fixed upper sequence and exclusive after cursor make a bounded scan stable across equal timestamps and new appends. Only explicit event columns are returned, without export credentials/state.

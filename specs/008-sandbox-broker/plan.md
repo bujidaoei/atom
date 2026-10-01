@@ -217,3 +217,6 @@ RevisionRepository accepts exact verified1/4/5; ContentRepository accepts3/4/5. 
 
 
 Transaction crash harness launches independent Python processes against real disposable5 SQLite databases and wraps the owning transaction exit: os._exit immediately before original COMMIT, or immediately after successful transaction exit before operation returns. Exercise create/single-revoke/account-revoke/handoff/session/publish/unpublish without substituting business implementations. Reopen and verify full schema/integrity and exact event/business effects. Do not expose credential-bearing stdin or subprocess output in diagnostics.
+
+
+AuditRepository uses verified schema5 and read-only SQLite connection/transaction, three-second lock timeout and five-second SQLite progress deadline. Caller must already verify signed credential; repository additionally checks source user/id/lifetime/revocation. Scope is account=current user or owned project. Fixed-column SELECT returns at most100 items plus one lookahead, captured upper sequence and next_after only when more rows remain. Clients must retain returned upper for subsequent pages; caller-supplied cursors never expand authorized scope. HTTP admission/cookie routing/UI and export remain separate pending integration.

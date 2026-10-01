@@ -239,3 +239,6 @@ T027/008-T026 component acceptance: audit schema migration and runtime compatibi
 
 
 T027/008-T027 component accepted: transactional audit emission for all seven committed security transitions has rollback/replay/concurrency and real subprocess before/after-commit recovery evidence. Current34 tests pass. Parent enterpriseT027 remains open; audit denial observations, read/export/retention and production operations are not covered by this closure.
+
+
+T027/008-T029 increment: audit read foundation implemented with actual scope/source checks and snapshot paging; 28 tests pass. No external audit API/UI, export or production acceptance yet.
