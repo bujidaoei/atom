@@ -124,6 +124,8 @@ FR-008 v13 registration boundary: a trusted coordinator may issue exactly one se
 
 FR-008 internal registration checkpoint (2026-10-02): 198 related Windows cases passed with two platform-correct Linux storage skips; the exact 3808c25 source passed 195 Linux cases, including actual immutable storage corruption and recovery before trusted-metadata promotion. The old owner-only v13 report path and metadata-only publish path are rejected. This proves the internal transaction component only, not worker isolation or real-browser truth. Production still serves schema10/3; T017.2c/3 and overall FR-008 remain open.
 
+FR-008 deployment checkpoint (2026-10-02): the final 4380306 source passed 47 focused Linux cases, was built with frontend and locked Pi checks, and now serves both API and broker after a protected integrity-checked backup. Ten literal-IP verified-TLS health calls and SPA assets passed; live databases stayed at schema10/3 with no FK violations. This deployment does not activate v13 verifier authority or establish enterprise release acceptance.
+
 FR-006 next-version migration prerequisite: verified backups must retain the exact supported source schema (baseline or v1), include committed WAL, exclude concurrent writers during capture, and refuse overwrite/drift. Backup verification must explicitly select the expected version rather than accepting any version.
 
 FR-006 migration extension: explicit target v2 may add verification/release identity tables while preserving exact v1 business and journal records. Original evidence is not backfilled or promoted. Runtime startup remains v1-only until repositories, verifier and application adoption pass their gates.
