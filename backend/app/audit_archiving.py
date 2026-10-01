@@ -1,7 +1,10 @@
 """Local trusted-operator archive publication and independently anchored recovery."""
+import asyncio
+import hashlib
+import json
 import time
 
-from .audit_archive import ArchiveError, encode_archive, recover_archive
+from .audit_archive import ArchiveError, decode_archive, encode_archive, recover_archive
 from .audit_archive_store import AuditArchiveStore
 from .audit_retention import RetentionRepository, _identifier
 
@@ -18,7 +21,7 @@ class AuditArchiving:
     @staticmethod
     def _schema(db):
         # The owning repository transaction has already checked exact DDL and migration hashes.
-        if db.execute('PRAGMA user_version').fetchone()[0] != 9:
+        if db.execute('PRAGMA user_version').fetchone()[0] not in (9, 10):
             raise ArchiveError('archive_schema_required')
 
     def archive(self, *, archive_id, operator_id, policy_id, expected_generation, after=0, upper=None, expected_context=None):
@@ -82,6 +85,8 @@ class AuditArchiving:
         for value in (archive_id,recovery_id,verifier_id): _identifier(value)
         with self.repository._transaction(read_only=True) as db:
             self._schema(db)
+            if db.execute('PRAGMA user_version').fetchone()[0] != 9:
+                raise ArchiveError('isolated_recovery_required')
             row = db.execute('SELECT * FROM security_audit_archives WHERE archive_id=?',(archive_id,)).fetchone()
             if row is None or row['archive_store_id'] != self.store_id:
                 raise ArchiveError('archive_not_found')
@@ -102,16 +107,73 @@ class AuditArchiving:
             db.execute('INSERT INTO security_audit_archive_recoveries ('+','.join(receipt)+') VALUES ('+','.join('?' for _ in receipt)+')', tuple(receipt.values()))
             return receipt
 
-    def _read_registered(self, row):
+    async def recover_isolated(self, *, archive_id, recovery_id, verifier_id, client):
+        """Trusted owner: validated remote restore precedes one immutable receipt commit."""
+        from .sandbox.audit_recovery_client import AuditRecoveryClient
+        if not isinstance(client, AuditRecoveryClient):
+            raise ArchiveError('invalid_recovery_client')
+        for value in (archive_id, recovery_id, verifier_id):
+            _identifier(value)
+        image, policy = client.verification_identity
+        def previous(db):
+            old = db.execute('SELECT * FROM security_audit_isolated_recoveries WHERE recovery_id=?', (recovery_id,)).fetchone()
+            if old is not None:
+                if any(old[key] != value for key, value in dict(archive_id=archive_id,
+                        verifier_id=verifier_id,image=image,policy_digest=policy).items()):
+                    raise ArchiveError('recovery_identity_conflict')
+                return dict(old)
+        def prepare():
+            with self.repository._transaction(read_only=True) as db:
+                if db.execute('PRAGMA user_version').fetchone()[0] != 10:
+                    raise ArchiveError('isolated_recovery_schema_required')
+                row = db.execute('SELECT * FROM security_audit_archives WHERE archive_id=?', (archive_id,)).fetchone()
+                if row is None or row['archive_store_id'] != self.store_id:
+                    raise ArchiveError('archive_not_found')
+                old = previous(db)
+                row = dict(row)
+            return row, self._registered_payload(row), old
+        # Cancellation during read/transport cannot schedule a receipt write.
+        row, payload, old = await asyncio.to_thread(prepare)
+        if old is not None:
+            return old
+        result = await client.recover(payload, expected_sha256=row['archive_sha256'])
+        digest = hashlib.sha256(json.dumps(result,sort_keys=True,separators=(',',':'),ensure_ascii=True,
+                                           allow_nan=False).encode()).hexdigest()
+        # Short bounded synchronous transaction: no network/file IO and no await after admission.
+        # Cancellation cannot detach an unowned background write; callers can inspect/replay by ID.
+        with self.repository._transaction() as db:
+            if db.execute('PRAGMA user_version').fetchone()[0] != 10:
+                raise ArchiveError('isolated_recovery_schema_required')
+            current = db.execute('SELECT * FROM security_audit_archives WHERE archive_id=?', (archive_id,)).fetchone()
+            if current is None or dict(current) != row:
+                raise ArchiveError('archive_source_changed')
+            old = previous(db)
+            if old is not None:
+                return old
+            now = int(time.time())
+            if not 0 <= now < 2**63:
+                raise ArchiveError('archive_clock_unavailable')
+            receipt = dict(recovery_id=recovery_id,archive_id=archive_id,verifier_id=verifier_id,
+                protocol=result['protocol'],image=result['image'],policy_digest=result['policy_digest'],
+                attempt_id=result['attempt_id'],archive_sha256=row['archive_sha256'],payload_sha256=row['payload_sha256'],
+                event_count=row['event_count'],result_sha256=digest,verified_at=max(now,row['registered_at']))
+            db.execute('INSERT INTO security_audit_isolated_recoveries ('+','.join(receipt)+') VALUES ('+
+                       ','.join('?' for _ in receipt)+')', tuple(receipt.values()))
+            return receipt
+
+    def _registered_payload(self, row):
         # Expected identity comes exclusively from the immutable ledger, not caller/object metadata.
         payload = self.store.read(expected_sha256=row['archive_sha256'])
-        restored = recover_archive(payload,expected_sha256=row['archive_sha256'])
+        restored = decode_archive(payload,expected_sha256=row['archive_sha256'])
         fields = ('format_version','coverage','scope_kind','scope_id','event_kind','context_sha256',
                   'plan_sha256','payload_sha256','payload_bytes','event_count','upper_sequence')
         if (len(payload) != row['archive_bytes'] or restored['manifest']['after'] != row['after_sequence'] or
                 any(restored['manifest'][key] != row[key] for key in fields)):
             raise ArchiveError('archive_recovery_mismatch')
-        return restored
+        return payload
+
+    def _read_registered(self, row):
+        return recover_archive(self._registered_payload(row),expected_sha256=row['archive_sha256'])
 
     def inspect(self, *, archive_id):
         """Inspect committed bytes and bounded continuation without issuing a recovery receipt."""
@@ -130,6 +192,12 @@ class AuditArchiving:
                 'AND event_kind=? AND sequence>? AND sequence<=?)',
                 (row['scope_kind'],row['scope_id'],row['event_kind'],last,row['upper_sequence'])).fetchone()[0]
             receipts = db.execute('SELECT count(*) FROM security_audit_archive_recoveries WHERE archive_id=?',(archive_id,)).fetchone()[0]
+            isolated = (db.execute('SELECT count(*) FROM security_audit_isolated_recoveries WHERE archive_id=?',
+                                  (archive_id,)).fetchone()[0]
+                        if db.execute('PRAGMA user_version').fetchone()[0] == 10 else None)
         continuation = dict(policy_id=row['policy_id'],expected_generation=row['policy_generation'],after=last,
             upper=row['upper_sequence'],expected_context=row['context_sha256']) if more else None
-        return dict(archive=row,last_sequence=last,continuation=continuation,recovery_receipts=receipts,deletion_authorized=False)
+        result = dict(archive=row,last_sequence=last,continuation=continuation,recovery_receipts=receipts,deletion_authorized=False)
+        if isolated is not None:
+            result['isolated_recovery_receipts'] = isolated
+        return result

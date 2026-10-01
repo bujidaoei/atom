@@ -1,0 +1,53 @@
+import json
+import os
+from pathlib import Path
+import socket
+import threading
+import time
+
+import pytest
+import uvicorn
+
+from app.migrations import migrate
+from app.sandbox.docker_driver import run_bounded
+from test_audit_recovery_http import recovery, planned, reader, audited_release, release, ledger, legacy, IMAGE
+
+API_IMAGE = os.environ.get('ATOM_TEST_API_IMAGE')
+pytestmark = pytest.mark.skipif(not IMAGE or not API_IMAGE,reason='requires pinned API and sandbox images')
+
+
+@pytest.mark.parametrize('scenario',['happy','auth','policy','lost-result','worker','cancelled'])
+def test_real_linux_owner_wire_worker_and_receipt(planned,recovery,tmp_path,monkeypatch,scenario):
+    path,_ = planned
+    migrate(path,tmp_path/'before-ten.db',target_version=10)
+    app,config,_,_,_ = recovery
+    if scenario == 'worker':
+        monkeypatch.setattr('app.sandbox.audit_recovery._PROGRAM','raise SystemExit(2)')
+    sock = socket.socket()
+    sock.bind(('0.0.0.0',0))
+    port = sock.getsockname()[1]
+    server = uvicorn.Server(uvicorn.Config(app,log_level='error',access_log=False))
+    thread = threading.Thread(target=server.run,kwargs={'sockets':[sock]},daemon=True)
+    thread.start()
+    try:
+        deadline = time.monotonic()+10
+        while not server.started and thread.is_alive() and time.monotonic()<deadline:
+            time.sleep(.02)
+        assert server.started
+        backend = Path(__file__).resolve().parents[2]
+        command = ['docker','run','--rm','-i','--read-only','--cap-drop=ALL','--security-opt=no-new-privileges',
+            '--user','1000:1000','--tmpfs','/tmp:rw,nosuid,nodev,size=32m',
+            '--mount',f'type=bind,source={backend},target=/src,readonly',
+            '--mount',f'type=bind,source={path},target=/seed.db,readonly',
+            '--workdir','/src','--env','PYTHONPATH=/src','--entrypoint','/app/backend/.venv/bin/python',API_IMAGE,
+            '-B','/src/tests/integration/_isolated_receipt_probe.py']
+        data = dict(port=port,token=config.admin_token,image=IMAGE,policy=app.state.lifecycle.driver.policy_digest,scenario=scenario)
+        status,out,err = run_bounded(command,timeout=30,input_data=json.dumps(data).encode())
+        assert status == 0,err.decode()
+        assert json.loads(out) == {'scenario':scenario,'receipts':1 if scenario=='happy' else 0}
+        assert not app.state.lifecycle.driver.owned_inventory()
+    finally:
+        server.should_exit = True
+        thread.join(20)
+        sock.close()
+        assert not thread.is_alive()

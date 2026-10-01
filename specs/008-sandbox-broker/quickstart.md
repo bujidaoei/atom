@@ -307,3 +307,6 @@ Recovery crash regression: set ATOM_TEST_DOCKER_IMAGE to the approved pinned san
 
 
 Offline schema10 foundation regression: `backend/.venv/Scripts/python.exe -m pytest backend/tests/test_audit_isolated_migration.py backend/tests/test_audit_archive_migration.py -q --junitxml=.logs/audit-isolated-migration.xml`.62 passed. Migration CLI supports explicit target10 with required backup; default stays1. Serving consumers and archive owner still reject10, so this is not a rollout instruction.
+
+
+Owner integration regression: set explicit ATOM_TEST_API_IMAGE and ATOM_TEST_DOCKER_IMAGE, then run `backend/.venv/Scripts/python.exe -m pytest backend/tests/integration/test_isolated_receipt.py backend/tests/test_audit_retention.py backend/tests/integration/test_audit_archiving.py -q --junitxml=.logs/isolated-receipt.xml`.99 passed. Tests use the API image `/app/backend/.venv/bin/python`. No CLI isolated command or serving10 rollout is available yet.

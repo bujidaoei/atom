@@ -14,6 +14,10 @@ class AuditRecoveryClient(AdminTransport):
         super().__init__(origin,admin_token,timeout=timeout)
         self._image, self._policy = expected_image, expected_policy_digest
 
+    @property
+    def verification_identity(self):
+        return self._image, self._policy
+
     async def recover(self, payload, *, expected_sha256):
         try:
             archive = decode_archive(payload,expected_sha256=expected_sha256)

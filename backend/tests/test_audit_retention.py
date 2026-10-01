@@ -13,7 +13,7 @@ from app.migrations import migrate
 from test_revision_migrations import legacy
 
 
-@pytest.fixture(params=[8,9])
+@pytest.fixture(params=[8,9,10])
 def retention(legacy, monkeypatch, request):
     path, backup = legacy
     migrate(path, backup, target_version=request.param)
