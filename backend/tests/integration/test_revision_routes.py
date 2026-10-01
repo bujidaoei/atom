@@ -235,13 +235,58 @@ async def content_test():
         failed=await client.get('/')
         assert failed.status_code==503 and not failed.content
         target.write_bytes(original_payload)
-        releases.publish(owner='owner',project_id='p',release_id='private-http',verification_id=request.id,
-            expected_revision=main.revision_id,expected_generation=5,policy_digest='c'*64,runner_version='fixture-runner',audience='owner',slug='site')
+        # Separate real artifact bytes, with an explicitly seeded ledger history.
+        # This is serving/promotion coverage, not execution-provenance acceptance.
+        import sqlite3,time
+        from app.models import Run
+        from app.snapshots import export_snapshot
+        changed=Path('/tmp/changed');changed.mkdir()
+        (changed/'index.html').write_text('<link rel="stylesheet" href="/style.css"><h1>second</h1>')
+        (changed/'style.css').write_text('body { color: red; }')
+        stream=io.BytesIO();export_snapshot(changed,stream)
+        artifact=store.put(stream.getvalue())
+        with session_scope() as s:
+            s.add(Run(id='fixture-change',project_id='p',role='engineer',model='fixture',status='succeeded'))
+        now=int(time.time())
+        with sqlite3.connect(settings.db_path) as db:
+            db.execute('PRAGMA foreign_keys=ON')
+            db.execute('INSERT INTO revision_artifacts VALUES (?,?,?,?)',(artifact.key,artifact.revision,artifact.size,now))
+            db.execute("""INSERT INTO revision_attempts
+                (id,workspace_id,project_id,run_id,generation,base_revision_id,deadline,state,termination_state,outcome,created_at,closed_at)
+                VALUES (?,?,?,'fixture-change',1,?,?,'closed','confirmed','succeeded',?,?)""",
+                ('fixture-change',main.workspace_id,'p',main.revision_id,now+60,now,now))
+            db.execute('INSERT INTO revision_records VALUES (?,?,?,?,?,?,?,?)',
+                ('second-revision',main.workspace_id,'p',main.revision_id,artifact.key,artifact.revision,'fixture-change',now))
+            db.execute('UPDATE revision_workspaces SET current_revision_id=?,generation=1 WHERE id=?',('second-revision',main.workspace_id))
+        second_check=verification.reserve(owner='owner',workspace_id=main.workspace_id,request_id='second-check',
+            expected_revision='second-revision',expected_contract=capture_contract([requirement]).digest,
+            policy_digest='c'*64,runner_version='fixture-runner',budget_seconds=60)
+        verification.record_report(owner='owner',request_id=second_check.id,
+            results=[{'key':'page','checkIndex':0,'passed':True,'note':'fixture'}])
+        releases.publish(owner='owner',project_id='p',release_id='second-http',verification_id=second_check.id,
+            expected_revision='second-revision',expected_generation=5,policy_digest='c'*64,runner_version='fixture-runner',audience='public',slug='site')
+        second_binding=content.bind(owner='owner',project_id='p',release_id='second-http')
+        # Publication changed between initial HTML and these resource requests.
+        old_css=await client.get('/style.css')
+        assert old_css.text==css.text and old_css.headers['x-atom-release']=='http-release'
+        new_page=await client.get(hosts.url(second_binding.id))
+        new_css=await client.get(hosts.url(second_binding.id)+'style.css')
+        assert new_page.text==(changed/'index.html').read_text()
+        assert new_css.text==(changed/'style.css').read_text()
+        assert new_css.headers['x-atom-revision']=='second-revision'
+        # Range/conditional hints never bypass authorization or select a new version.
+        conditional={'range':'bytes=0-3','if-none-match':'*','if-modified-since':'Thu, 01 Oct 2099 00:00:00 GMT'}
+        repeated=await client.get('/style.css',headers=conditional)
+        assert repeated.status_code==200 and repeated.content==css.content
+        releases.publish(owner='owner',project_id='p',release_id='private-http',verification_id=second_check.id,
+            expected_revision='second-revision',expected_generation=6,policy_digest='c'*64,runner_version='fixture-runner',audience='owner',slug='site')
         # Current privacy applies even to a previously public, pinned hostname.
         assert (await client.get('/')).status_code==404
         private=content.bind(owner='owner',project_id='p',release_id='private-http')
         assert (await client.get(hosts.url(private.id),headers={'cookie':'session=owner','authorization':'Bearer owner'})).status_code==404
-        releases.unpublish(owner='owner',project_id='p',command_id='http-off',expected_release='private-http',expected_generation=6)
+        assert (await client.head('/',headers=conditional)).status_code==404
+        assert (await client.get(hosts.url(second_binding.id)+'style.css',headers=conditional)).status_code==404
+        releases.unpublish(owner='owner',project_id='p',command_id='http-off',expected_release='private-http',expected_generation=7)
         assert (await client.get('/style.css')).status_code==404
         assert not list(Path('/tmp').glob('atom-release-*'))
 asyncio.run(content_test())

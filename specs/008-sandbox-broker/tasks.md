@@ -128,3 +128,5 @@ T017 continuation: owner-scoped idempotent content binding allocation and curren
 T017 continuation: strict configured content-host syntax and binding extraction now pass tests, including duplicate/malformed/forged authority cases. DNS/TLS/site separation, trusted proxy, actual HTTP serving and private access remain open.
 
 T017 continuation: standalone public content ASGI component now serves verified bytes through immutable Host bindings with current visibility checks, GET/HEAD, explicit navigation fallback and no-store/security headers. Real Linux artifact/SQLite/ASGI integration and 86 repository/host regressions pass. Private credentials, network ingress/TLS, browser isolation, transport bounds and trusted verifier remain open; no task closure or production cutover.
+
+T017 continuation: two distinct stored snapshots now prove pinned HTTP resource consistency across an intervening publication change in restricted Linux ASGI integration. Privacy applies to both hosts, HEAD and conditional/range hints. Revision lineage/report fixture seeding is explicit; no runtime/verifier/browser acceptance inferred. Task remains open.

@@ -113,3 +113,5 @@ Run test_content_repository.py with release/verification repository suites for c
 Run test_content_hosts.py and test_content_repository.py for canonical host roundtrip, forwarded-header denial, malformed configuration/authority and binding lookup regressions. No actual DNS, certificate or reverse-proxy behavior is exercised.
 
 The restricted Linux test_revision_routes.py fixture now migrates its disposable DB through v3 and exercises ContentService using httpx ASGITransport with actual snapshot bytes. Covers root/CSS, HEAD length, extensionless navigation, missing assets/traversal, forged authority, methods, corruption, privacy and unpublish. This is in-process ASGI, not a network listener/TLS/browser test. Fixture verification reports are not trusted browser evidence.
+
+test_revision_routes.py also seeds a second explicit revision history with different real HTML/CSS snapshot bytes. It promotes between requests, checks old and new immutable hosts, and checks conditional/Range/HEAD visibility denial. Synthetic lineage/report setup is only a serving test prerequisite, not execution/verifier evidence.

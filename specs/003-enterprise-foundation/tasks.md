@@ -156,3 +156,5 @@ T027 / feature008 T017: immutable content binding allocation/resolution and v3 i
 T027 / feature008 T017: strict content Host codec now tested; real DNS/TLS/ingress, serving and browser isolation remain open.
 
 Feature008 T017 progress: real Linux artifact-backed public content ASGI requests and related regressions pass. Component is not deployed or mounted in production. Private access, browser/transport isolation, trusted verification and enterprise release gates remain open; T027 remains unchecked.
+
+Feature008 T017 evidence extended: two distinct real snapshot versions remain consistent through intervening release promotion; conditional/Range/HEAD requests obey current privacy. Linux ASGI coverage only, with explicit fixture lineage/reports. Enterprise T027 and browser/production gates remain open.

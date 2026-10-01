@@ -1,6 +1,6 @@
 # Content origin and pinned resource delivery
 
-Status: architecture decision and acceptance contract, not implemented. Audited on d523194, 2026-10-01. Complements revision-release.md and T017/T018.
+Status: partially implemented; public ASGI component has artifact-backed integration coverage, but production ingress, private sessions and browser isolation remain unaccepted. Original architecture audit on d523194, 2026-10-01. Complements revision-release.md and T017/T018.
 
 ## Source evidence
 
@@ -57,3 +57,5 @@ Binding repository now checks owner/project/release and allocates a cryptographi
 ContentHosts now validates bounded ASCII DNS suffix syntax, renders r-<binding>.<suffix> and extracts binding from exactly one actual Host header. ASCII case normalizes; optional :443 is accepted. Other ports, whitespace, trailing dots, suffix extensions, userinfo/path delimiters, invalid encoding and duplicate Host fail. Forwarded headers are ignored as authority. This does not validate public-suffix ownership, separate registrable site, TLS or trusted proxy configuration; those deployment gates remain mandatory.
 
 Public HTTP component now reads actual verified snapshots via binding authority, supports GET/HEAD, returns empty 404/503 denials and sends no-store/nosniff/no-referrer/CSP. Extensionless browser navigations may fall back to index; missing named assets do not. Private bindings remain inaccessible even with supplied console credentials. It remains an unmounted HTTP-only component: no standalone launcher, proxy trust, TLS or private-session implementation exists. Static CSP is provisional until real browser isolation tests; network/response concurrency and cancellation gates stay open.
+
+Serving consistency evidence: the Linux ASGI fixture now stores two distinct real snapshots (blue versus red CSS and different HTML), promotes the second release between page/resource requests, and verifies each immutable host still returns its own bytes/revision. Conditional and Range hints currently receive full 200 responses after authorization; private current state returns 404 for old/new hosts and HEAD as well. This is not real-browser execution or a production ingress test.
