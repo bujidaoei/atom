@@ -9,6 +9,7 @@ import time
 from .verification_contract import capture_contract, ContractError
 from .verification_repository import VerificationRepository, VerificationError
 from .artifacts import Artifact
+from .content_bindings import ensure_binding
 
 
 @dataclass(frozen=True)
@@ -125,6 +126,11 @@ class ReleaseRepository:
                 (id,project_id,workspace_id,revision_id,verification_id,contract_digest,policy_digest,audience,creator_id,previous_release_id,created_at)
                 VALUES (?,?,?,?,?,?,?,?,?,?,?)''',(release_id,project_id,workspace['id'],expected_revision,verification_id,
                 contract.digest,policy_digest,audience,owner,pointer['release_id'] if pointer else None,int(time.time())))
+            if db.execute('PRAGMA user_version').fetchone()[0] == 3:
+                # The verified v3 schema supports serving identity. Allocate it
+                # before promotion so binding, release, pointer and receipt are
+                # committed together or all rolled back on any failure.
+                ensure_binding(db,project_id=project_id,release_id=release_id)
             generation = expected_generation+1
             db.execute('''INSERT INTO release_publications(project_id,slug,release_id,generation,live) VALUES (?,?,?,?,1)
                 ON CONFLICT(project_id) DO UPDATE SET release_id=excluded.release_id,generation=excluded.generation,live=1''',

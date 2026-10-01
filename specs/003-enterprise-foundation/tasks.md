@@ -168,3 +168,5 @@ Feature008 T017 evidence increment: Chromium local HTTPS attack fixtures validat
 Feature008 T017 progress: stable public sharing routes now follow current immutable binding with tested denial for private/offline/missing binding and no client-controlled redirect. SQLite, real Linux artifact/ASGI and TCP checks pass (53 tests). Production/private/UI/verifier gates remain open; T027 stays unchecked.
 
 Feature008 T017 progress: real stored Linux artifact page reaches Chromium with eight CSS/eight JS assets. This exposed and fixed an overly restrictive default response capacity; default is now eight with independent snapshot limits retained. Browser composition, policy regression and 21 lifecycle/capacity checks pass. Enterprise load/private/verifier/production gates remain open; T027 stays unchecked.
+
+Feature008 T016/T017 progress: new v3 release and fixed content address now commit atomically, eliminating the share-readiness gap. Collision/late-failure rollback, concurrent publishers and replay are tested; Linux serving and actual Chromium artifact composition pass. Remaining enterprise/verifier/private/deployment gates are unchanged; T027 stays open.

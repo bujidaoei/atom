@@ -404,8 +404,9 @@ async def content_test():
             results=[{'key':'page','checkIndex':0,'passed':True,'note':'fixture'}])
         releases.publish(owner='owner',project_id='p',release_id='second-http',verification_id=second_check.id,
             expected_revision='second-revision',expected_generation=5,policy_digest='c'*64,runner_version='fixture-runner',audience='public',slug='site')
-        missing_binding=await client.get(hosts.sharing_url('site'))
-        assert missing_binding.status_code==503 and 'location' not in missing_binding.headers
+        ready_binding=await client.get(hosts.sharing_url('site'))
+        assert ready_binding.status_code==307
+        assert ready_binding.headers['location']==hosts.url(content.sharing_binding(slug='site').id)
         second_binding=content.bind(owner='owner',project_id='p',release_id='second-http')
         shared=await client.get(hosts.sharing_url('site'))
         assert shared.status_code==307 and shared.headers['location']==hosts.url(second_binding.id)

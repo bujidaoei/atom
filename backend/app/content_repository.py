@@ -1,20 +1,11 @@
 """Opaque publication bindings. A binding is a route identity, not authority."""
-from dataclasses import dataclass
 import re
-import secrets
 import sqlite3
-import time
 
+from .content_bindings import ContentBinding, ensure_binding
 from .migrations import _schema
 from .release_repository import PublishedArtifact, ReleaseRepository
 from .verification_repository import VerificationError
-
-
-@dataclass(frozen=True)
-class ContentBinding:
-    id: str
-    project_id: str
-    release_id: str
 
 
 class ContentRepository:
@@ -39,13 +30,7 @@ class ContentRepository:
                 WHERE r.id=? AND r.project_id=? AND p.user_id=?''',(release_id,project_id,owner)).fetchone()
             if release is None:
                 raise VerificationError('content_not_found')
-            row = db.execute('SELECT * FROM content_bindings WHERE release_id=?',(release_id,)).fetchone()
-            if row is not None:
-                return ContentBinding(row['id'],row['project_id'],row['release_id'])
-            identity = secrets.token_hex(16)
-            db.execute('INSERT INTO content_bindings(id,project_id,release_id,purpose,created_at) VALUES (?,?,?,\'publication\',?)',
-                       (identity,project_id,release_id,int(time.time())))
-            return ContentBinding(identity,project_id,release_id)
+            return ensure_binding(db,project_id=project_id,release_id=release_id)
 
     def resolve(self, *, binding_id: str, viewer: str | None = None) -> PublishedArtifact:
         if not isinstance(binding_id,str) or re.fullmatch(r'[0-9a-f]{32}',binding_id) is None:
