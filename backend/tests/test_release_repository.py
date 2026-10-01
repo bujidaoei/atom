@@ -180,3 +180,22 @@ def test_resolve_unknown_or_invalid_reference_is_denied(release,fields):
     repository.publish(**(args | {'audience':'public'}))
     with pytest.raises(VerificationError,match='release_not_found'):
         repository.resolve(**fields)
+
+
+def test_content_binding_is_scoped_unique_and_immutable(release,tmp_path):
+    from app.migrations import migrate
+    path,repository,args=release
+    repository.publish(**args)
+    migrate(path,tmp_path/'before-binding.db',target_version=3)
+    with sqlite3.connect(path) as db:
+        db.execute('PRAGMA foreign_keys=ON')
+        insert='INSERT INTO content_bindings VALUES (?,?,?,?,1)'
+        for values in [('a'*32,'foreign','release','publication'),
+                       ('unsafe.host','project','release','publication'),
+                       ('a'*32,'project','release','preview')]:
+            with pytest.raises(sqlite3.IntegrityError):db.execute(insert,values)
+        db.execute(insert,('a'*32,'project','release','publication'))
+        with pytest.raises(sqlite3.IntegrityError):db.execute(insert,('b'*32,'project','release','publication'))
+        with pytest.raises(sqlite3.IntegrityError):db.execute("UPDATE content_bindings SET id=?",('b'*32,))
+        with pytest.raises(sqlite3.IntegrityError):db.execute('DELETE FROM content_bindings')
+        assert db.execute('SELECT id,release_id FROM content_bindings').fetchall()==[('a'*32,'release')]

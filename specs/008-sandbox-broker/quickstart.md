@@ -105,3 +105,5 @@ Pinned API image integration test_revision_routes.py now additionally imports ac
 Linux release-view integration now holds a real view while a second thread waits and is rejected by the three-second capacity bound. It also performs actual extraction then invokes real unpublish before yielding, asserting denial, cleanup and semaphore release.
 
 Content serving has no accepted production launch path yet. contracts/content-origin.md lists host-binding, private handoff, independent verifier, browser attack and multi-asset consistency tests. Local origins can support implementation; public DNS/TLS and private embedded-cookie behavior require separate staging acceptance.
+
+Disposable offline schema test: migrate(..., target_version=3) or --target-version 3. Migration tests cover all three source versions and source restore; real Linux test kills the migration after content DDL/journal replacement, observes v2 recovery and retries v3. No DNS, TLS or live host behavior is tested.

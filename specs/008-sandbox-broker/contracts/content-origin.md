@@ -49,3 +49,5 @@ Generated content cannot access console DOM/storage. Console framing allowances 
 7. Rehearse proxy/TLS, private top-level/embedded access, rollback and restore on staging before replacing live routes. No gate is satisfied by this document.
 
 Independent content DNS/TLS is an eventual deployment input still unresolved. Schema, capability transport, browser runner and HTTP serving can be developed against explicit local test origins meanwhile. This does not authorize purchasing domains or claim deployment readiness.
+
+Implementation progress: offline v3 now stores immutable scoped publication bindings with opaque hexadecimal route IDs and unique release identity. Migration/constraints/crash recovery are tested. Allocation/host parsing, private handoff/session and verifier environment schema are not implemented; no DNS or HTTP behavior is enabled.

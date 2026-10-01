@@ -148,3 +148,5 @@ T027 / feature008 T017: actual immutable release bytes and private cleanup now p
 T027 / feature008 T017: release-view capacity and post-extraction revocation now pass Linux tests. Real publication HTTP/browser serving remains open.
 
 T027 / feature008 T017/T018: audited browser origin assumptions and documented pinned content hosting/private access/verifier architecture against MDN semantics. No browser security or deployment gate closed.
+
+T027 / feature008 T015/T017: immutable content binding v3 migration and crash/restore component tests pass. Host routing, private capabilities and real browser isolation remain open.

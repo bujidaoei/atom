@@ -29,6 +29,7 @@ def test_actual_linux_migration_backup_restore_and_crash(tmp_path):
         "schema": schema,
         "revision_v1": (root / "backend/app/migrations/revision_v1.py").read_text(encoding="utf-8"),
         "release_v2": (root / "backend/app/migrations/release_v2.py").read_text(encoding="utf-8"),
+        "content_v3": (root / "backend/app/migrations/content_v3.py").read_text(encoding="utf-8"),
         "migration": (root / "backend/app/migrations/__init__.py").read_text(encoding="utf-8"),
     }).encode()
     script = '''
@@ -41,6 +42,8 @@ v=types.ModuleType('app.migrations.revision_v1');sys.modules[v.__name__]=v
 exec(compile(sources['revision_v1'],'revision_v1.py','exec'),v.__dict__)
 v2=types.ModuleType('app.migrations.release_v2');v2.__package__='app.migrations';sys.modules[v2.__name__]=v2
 exec(compile(sources['release_v2'],'release_v2.py','exec'),v2.__dict__)
+v3=types.ModuleType('app.migrations.content_v3');v3.__package__='app.migrations';sys.modules[v3.__name__]=v3
+exec(compile(sources['content_v3'],'content_v3.py','exec'),v3.__dict__)
 exec(compile(sources['migration'],'migration.py','exec'),m.__dict__)
 source=Path('/workspace/api.db'); backup=Path('/workspace/backup.db')
 with sqlite3.connect(source) as db:
@@ -82,6 +85,19 @@ assert m.migrate(source,Path('/workspace/retry-release.db'),target_version=2).ap
 assert m.verify(source)==2
 saved=m.backup_database(source,Path('/workspace/release-backup.db'))
 assert saved.version==2 and m.verify_backup(Path('/workspace/release-backup.db'),expected_version=2)==saved.sha256
+pid=os.fork()
+if pid==0:
+    original=v3.apply
+    def crash_content(db):
+        original(db)
+        os._exit(44)
+    v3.apply=crash_content
+    m.migrate(source,Path('/workspace/before-content.db'),target_version=3)
+    os._exit(1)
+assert os.waitpid(pid,0)[1]==44<<8
+assert m.verify(source)==2 and m.verify_backup(Path('/workspace/before-content.db'),expected_version=2)
+assert m.migrate(source,Path('/workspace/retry-content.db'),target_version=3).applied
+assert m.verify(source)==3
 restored=Path('/workspace/restored.db')
 with sqlite3.connect(backup) as src, sqlite3.connect(restored) as dst:
     src.backup(dst)

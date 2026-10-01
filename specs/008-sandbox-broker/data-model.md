@@ -90,3 +90,5 @@ PublishedArtifact contains project/release/revision identity and exact artifact 
 ReleaseView pairs an authorized PublishedArtifact with an ephemeral private extraction path. It does not change revision/publication records and is not a long-lived access capability. Reauthorization after IO pins the original release instead of switching to current head.
 
 Planned content extension: immutable host binding (opaque route identity, project, pinned revision/release, purpose), one-use audience/host-bound private handoff and separate content sessions. No schema or token implementation exists yet. Existing release IDs are not assumed DNS-safe.
+
+content_bindings v3: id (32 lowercase hex), project_id, unique release_id, purpose=publication and created_at. Composite release/project FK prevents cross-project mapping; UPDATE/DELETE triggers prevent retargeting/reuse. This records no DNS suffix, session or verifier environment identity; those remain separate configuration/schema work.

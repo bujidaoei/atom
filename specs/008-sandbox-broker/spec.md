@@ -131,3 +131,5 @@ Published materialization must verify actual immutable storage bytes against rec
 Published view materialization must bound concurrent in-memory snapshot reads and extraction. Current single-process profile permits one active view with a three-second admission wait; capacity is released after normal/error exits. Reauthorize the pinned release after extraction before returning it.
 
 T017 content isolation refinement: generated content must use a dedicated content site and durable per-version host binding. Root-relative resources must resolve within the same pinned artifact. Console credentials and direct DOM-based acceptance must not cross the content boundary. See contracts/content-origin.md; requirements remain unimplemented.
+
+Content origin binding uses an immutable opaque route identity scoped by project and release, unique per release; invalid route syntax and cross-project mapping must fail at the database boundary. Offline migration must preserve prior version definitions and journal history.

@@ -244,7 +244,7 @@ def test_versioned_backup_denies_busy_writer_and_drift(legacy, tmp_path):
     assert not destination.exists()
 
 
-@pytest.mark.parametrize('version', [True, None, -1, 3, '1'])
+@pytest.mark.parametrize('version', [True, None, -1, 4, '1'])
 def test_backup_expected_version_is_explicit(legacy, version):
     with pytest.raises(MigrationError, match='invalid_backup_version'):
         verify_backup(legacy[0], expected_version=version)
@@ -361,3 +361,34 @@ migrate(Path(sys.argv[1]),Path(sys.argv[2]),target_version=2)
     assert result.returncode == 42, result.stderr
     assert verify(path) == 1 and verify_backup(backup, expected_version=1)
     assert migrate(path,tmp_path/'after-release-crash.db',target_version=2).applied
+
+
+@pytest.mark.parametrize('source_version',[0,1,2])
+def test_content_migration_preserves_source_and_restores(legacy,tmp_path,source_version):
+    path,baseline=legacy
+    if source_version:migrate(path,baseline,target_version=source_version)
+    backup=tmp_path/'before-content.db'
+    assert migrate(path,backup,target_version=3).version==3
+    assert verify(path)==3 and verify_backup(backup,expected_version=source_version)
+    assert not migrate(path,backup,target_version=3).applied
+    with sqlite3.connect(path) as db:
+        assert db.execute('SELECT version FROM atom_schema_migrations ORDER BY version').fetchall()==[(1,),(2,),(3,)]
+        assert db.execute('SELECT count(*) FROM content_bindings').fetchone()==(0,)
+        assert db.execute('SELECT prompt FROM projects').fetchone()==('actual preserved input',)
+    restored=tmp_path/'restored-content.db'
+    with sqlite3.connect(backup) as src,sqlite3.connect(restored) as dst:src.backup(dst)
+    assert verify(restored)==source_version
+
+
+def test_content_migration_exception_rolls_back_journal(legacy,tmp_path,monkeypatch):
+    from app.migrations import content_v3
+    path,baseline=legacy
+    migrate(path,baseline,target_version=2)
+    original=content_v3.apply
+    def fail(db):
+        original(db)
+        raise sqlite3.OperationalError('injected content migration failure')
+    monkeypatch.setattr(content_v3,'apply',fail)
+    backup=tmp_path/'before-content.db'
+    with pytest.raises(MigrationError):migrate(path,backup,target_version=3)
+    assert verify(path)==2 and verify_backup(backup,expected_version=2)
