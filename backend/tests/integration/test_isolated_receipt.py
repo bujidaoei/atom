@@ -29,6 +29,9 @@ def test_real_linux_owner_wire_worker_and_receipt(planned,recovery,tmp_path,monk
     path,_ = planned
     migrate(path,tmp_path/'before-ten.db',target_version=10)
     if schema_version == 13:
+        from app.release_repository import ReleaseRepository
+        ReleaseRepository(path).unpublish(owner='user',project_id='project',command_id='prepare-v13',
+            expected_release='release',expected_generation=1)
         for version in (11, 12, 13):
             migrate(path,tmp_path/f'before-{version}.db',target_version=version)
     if scenario in ('pages','pages-hold'):
