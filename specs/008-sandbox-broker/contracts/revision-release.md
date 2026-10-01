@@ -1,6 +1,6 @@
 # Revision-bound acceptance and release
 
-Status: design with accepted offline v12 adoption-provenance migration and transaction repository components. HTTP/UI integration, trusted verification, pinned serving, production schema cutover and whole release acceptance remain open. Source baseline e7c4bd3, reviewed 2026-10-01 and updated 2026-10-02. Scope: committed static artifacts in broker mode. Executable deployment, database recovery and external effects require separate contracts.
+Status: design with accepted offline v12 adoption-provenance migration and transaction repository components; an offline v13 verifier-provenance migration is under validation. HTTP/UI integration, trusted verification, pinned serving, production schema cutover and whole release acceptance remain open. Source baseline e7c4bd3, reviewed 2026-10-01 and updated 2026-10-02. Scope: committed static artifacts in broker mode. Executable deployment, database recovery and external effects require separate contracts.
 
 ## Verified source gaps
 
@@ -19,6 +19,8 @@ These are source findings, not demonstrated production incidents.
 Capture separate immutable identities for artifact revision, requirement contract, verification execution and release. The versioned canonical contract includes ordered checks, setup and expected values. A changed contract invalidates current evidence even if artifact bytes are unchanged.
 
 A verification execution captures owner/project/workspace/revision, artifact digests, contract digest, runner/policy versions, initiator, environment and deadline before testing. A trusted isolated verifier reads the pinned artifact. Ordinary browser reports remain client-reported and cannot authorize enterprise publication. Only scoped verifier credentials may register trusted results for the captured execution; generated pass claims and ready status are insufficient.
+
+Offline schema v13 models one immutable dispatch per verification request and one immutable attestation per completed result. Dispatch binds the actual revision artifact key, manifest revision and size, opaque content route, verifier ID, environment digest, runner and original deadline; only the worker credential digest is stored. Dispatch must precede the result, so a pre-migration v12 report cannot acquire provenance retrospectively. Attestation is structurally tied to the same dispatch and result. New release inserts require an attested passing result matching the release revision, contract, policy and artifact. The database cannot prove browser execution or recompute SHA-256 in its trigger; authenticated result registration and report-digest validation in the promotion transaction are separate mandatory gates. Existing live v12 release pointers block v13 migration; old rows stay historical, not trusted. Serving rejects v13 until the consumer/worker and migration acceptance gates pass.
 
 A release records exact revision, trusted successful verification, contract/policy identity, audience, creator, previous release and serving descriptor. The public address points to a release ID. Insert release, advance pointer and record audit event in one transaction. Failed commits preserve the previous release. Live releases and retained rollback targets pin their artifacts against deletion.
 
