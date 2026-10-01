@@ -25,12 +25,13 @@ HEADERS = {
 class ContentLimits:
     active_responses: int = 1
     send_seconds: float = 10
+    drain_seconds: float = 15
 
     def __post_init__(self):
         if (type(self.active_responses) is not int or not 1 <= self.active_responses <= 32
-                or isinstance(self.send_seconds, bool)
-                or not isinstance(self.send_seconds, (int, float))
-                or not 0.01 <= self.send_seconds <= 60):
+                or any(isinstance(value, bool) or not isinstance(value, (int, float))
+                       or not 0.01 <= value <= 60
+                       for value in (self.send_seconds, self.drain_seconds))):
             raise ValueError('invalid_content_limits')
 
 
@@ -40,6 +41,8 @@ class ContentService:
         self.limits = limits
         self._responses = BoundedSemaphore(limits.active_responses)
         self._reads = set()
+        self._pending = set()
+        self._draining = False
 
     def _read(self,binding,path,navigation):
         parts = path.split('/')
@@ -77,24 +80,57 @@ class ContentService:
             response.body=b''
         return response
 
-    def _finish_cancelled_read(self, task):
+    def _release(self, token):
+        self._responses.release()
+        self._pending.remove(token)
+        token.set_result(None)
+
+    def _finish_cancelled_read(self, task, token):
         try:
             # Retrieve any error; disconnected callers have no response channel.
             if not task.cancelled():
                 task.exception()
         finally:
-            self._responses.release()
+            self._release(token)
+
+    async def _lifespan(self, receive, send):
+        while True:
+            message = await receive()
+            if message['type'] == 'lifespan.startup':
+                if self._draining:
+                    await send({'type': 'lifespan.startup.failed', 'message': 'content_draining'})
+                    return
+                await send({'type': 'lifespan.startup.complete'})
+            elif message['type'] == 'lifespan.shutdown':
+                self._draining = True
+                remaining = set()
+                if self._pending:
+                    # wait() does not cancel tokens on timeout. Their owners
+                    # retain responsibility for actual resource completion.
+                    _, remaining = await asyncio.wait(self._pending, timeout=self.limits.drain_seconds)
+                if remaining:
+                    await send({'type': 'lifespan.shutdown.failed', 'message': 'content_drain_timeout'})
+                else:
+                    await send({'type': 'lifespan.shutdown.complete'})
+                return
+            else:
+                raise RuntimeError('invalid_content_lifespan')
 
     async def _send(self, response, scope, receive, send):
         async with asyncio.timeout(self.limits.send_seconds):
             await response(scope, receive, send)
 
     async def __call__(self, scope, receive, send):
+        if scope['type'] == 'lifespan':
+            await self._lifespan(receive, send)
+            return
         if scope['type'] != 'http':
             raise RuntimeError('content_http_only')
-        if not self._responses.acquire(blocking=False):
+        if self._draining or not self._responses.acquire(blocking=False):
             await self._send(Response(status_code=503, headers=HEADERS), scope, receive, send)
             return
+        token = asyncio.get_running_loop().create_future()
+        self._pending.add(token)
         release_slot = True
         try:
             # Keep ownership independently of the caller: cancelling an asyncio
@@ -106,9 +142,9 @@ class ContentService:
                 response = await asyncio.shield(read)
             except asyncio.CancelledError:
                 release_slot = False
-                read.add_done_callback(self._finish_cancelled_read)
+                read.add_done_callback(lambda task: self._finish_cancelled_read(task, token))
                 raise
             await self._send(response, scope, receive, send)
         finally:
             if release_slot:
-                self._responses.release()
+                self._release(token)

@@ -277,6 +277,76 @@ async def content_test():
             assert not limited._reads
             assert (await bounded.get('/')).status_code==200
             assert not list(Path('/tmp').glob('atom-release-*'))
+        for expire in (False,True):
+            draining=ContentService(content,store,hosts,
+                limits=ContentLimits(active_responses=2,drain_seconds=0.05 if expire else 2))
+            entered=Event();finish=Event();shutdown_seen=asyncio.Event()
+            events=asyncio.Queue();messages=[]
+            async def life_receive():
+                message=await events.get()
+                if message['type']=='lifespan.shutdown':shutdown_seen.set()
+                return message
+            async def life_send(message):messages.append(message)
+            life=asyncio.create_task(draining({'type':'lifespan'},life_receive,life_send))
+            await events.put({'type':'lifespan.startup'})
+            real_read=store.read
+            def drain_read(key):
+                entered.set()
+                assert finish.wait(3),'fixture drain release not signalled'
+                return real_read(key)
+            store.read=drain_read
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=draining),base_url=hosts.url(binding.id)) as drain_client:
+                try:
+                    pending=asyncio.create_task(drain_client.get('/'))
+                    assert await asyncio.to_thread(entered.wait,2)
+                    owned=tuple(draining._reads)
+                    pending.cancel()
+                    try:await pending
+                    except asyncio.CancelledError:pass
+                    await events.put({'type':'lifespan.shutdown'})
+                    await asyncio.wait_for(shutdown_seen.wait(),1)
+                    assert draining._draining and not life.done()
+                    # A second capacity slot exists but shutdown forbids new IO.
+                    assert (await drain_client.get('/')).status_code==503
+                    if expire:
+                        done,_=await asyncio.wait({life},timeout=1)
+                        assert life in done
+                        assert messages[-1]=={'type':'lifespan.shutdown.failed','message':'content_drain_timeout'}
+                        assert draining._pending and all(not token.done() for token in draining._pending)
+                finally:
+                    finish.set();store.read=real_read
+                await asyncio.wait_for(asyncio.gather(*owned),2)
+                await asyncio.wait_for(life,2)
+                assert messages[0]=={'type':'lifespan.startup.complete'}
+                assert messages[-1]['type']==('lifespan.shutdown.failed' if expire else 'lifespan.shutdown.complete')
+                assert not draining._pending and not draining._reads
+                assert (await drain_client.get('/')).status_code==503
+        # Actual TCP HTTP parser/listener and ASGI lifespan, inside Linux.
+        import socket,uvicorn
+        listener=socket.socket();listener.bind(('127.0.0.1',0));listener.listen(16)
+        port=listener.getsockname()[1]
+        network_service=ContentService(content,store,hosts)
+        server=uvicorn.Server(uvicorn.Config(network_service,log_level='critical',access_log=False,
+            lifespan='on',proxy_headers=False,timeout_graceful_shutdown=2))
+        serving=asyncio.create_task(server.serve(sockets=[listener]))
+        try:
+            async with asyncio.timeout(2):
+                while not server.started:
+                    if serving.done():await serving;raise AssertionError('server stopped before startup')
+                    await asyncio.sleep(0.01)
+            async with httpx.AsyncClient(base_url='http://127.0.0.1:'+str(port),trust_env=False,timeout=2) as network:
+                valid={'host':hosts.hostname(binding.id)}
+                real_page=await network.get('/',headers=valid)
+                assert real_page.status_code==200 and real_page.content==page.content
+                assert (await network.head('/',headers=valid)).headers['content-length']==page.headers['content-length']
+                assert (await network.get('/style.css',headers=valid)).text=='body { color: blue; }'
+                assert (await network.get('/')).status_code==404
+                assert (await network.get('/',headers={'x-forwarded-host':hosts.hostname(binding.id)})).status_code==404
+        finally:
+            server.should_exit=True
+            await asyncio.wait_for(serving,4)
+            listener.close()
+        assert network_service._draining and not network_service._pending
         head=await client.head('/')
         assert head.status_code==200 and head.content==b''
         assert head.headers['content-length']==page.headers['content-length']

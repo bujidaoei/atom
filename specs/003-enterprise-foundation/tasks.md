@@ -160,3 +160,5 @@ Feature008 T017 progress: real Linux artifact-backed public content ASGI request
 Feature008 T017 evidence extended: two distinct real snapshot versions remain consistent through intervening release promotion; conditional/Range/HEAD requests obey current privacy. Linux ASGI coverage only, with explicit fixture lineage/reports. Enterprise T027 and browser/production gates remain open.
 
 Feature008 T017 progress: bounded content response admission/send lifetime and cancelled-read ownership now pass Linux real-artifact ASGI fault injection plus configuration/host/repository regressions (57 tests). Real network limits, process shutdown, browser/private access and trusted verification remain unaccepted; T027 stays open.
+
+Feature008 T017 progress: bounded truthful ASGI drain and actual Linux Uvicorn TCP serving/startup/shutdown verified (21 targeted tests). Cancelled callers do not erase active IO ownership, and failed drain does not reopen admission. Public TLS/browser/private access/verifier/supervisor deployment gates remain unaccepted; T027 stays open.
