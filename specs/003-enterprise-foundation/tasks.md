@@ -284,3 +284,9 @@ T027/008-T029/T030 refinement: refreshed official Atoms/GitHub/GitLab governance
 
 
 008-T031/T032 governed delivery increment: delivery repository and standalone exporter now support exact schema7 alongside5 (6 remains unsupported for export). Explicitly registered matching scopes are required; only active destinations enroll/claim, and claims capture generation. In-flight valid leases may still settle after suspend. Permanent failure persists a generation-fenced block receipt; stale failures return superseded and never overwrite newer administration. Restart preserves inactive state until explicit resume.115 focused tests pass. Main/business consumers still lack7 compatibility, registry-wide backlog reporting and full acceptance remain open; do not upgrade serving databases.
+
+
+008-T031/T032: Current schema7 compatibility (supersedes earlier not-yet-compatible notes): authentication, content capabilities, revision/verification/publication, audit reads and governed export now accept their explicit verified schema7. Main plus actual TLS verifies lost acknowledgement and permanent rejection across restart; explicit operator registration/resume remains required.28 main/TLS/service checks and529 business/HTTP/revision checks pass. Global historical backlog reporting, full browser/production/retention gates remain open; this is not rollout approval.
+
+
+Schema7 runtime follow-through:30 actual Linux main/own Node/broker cases pass across1/4/5/6/7 with export disabled; separately28 main/TLS and529 consumer tests pass. Source Pi remains locked. Full T031/T032 and enterprise rollout remain open for wider required acceptance and historical operational visibility.

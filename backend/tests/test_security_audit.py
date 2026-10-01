@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-pytestmark = pytest.mark.parametrize('audit_schema_version', [5, 6])
+pytestmark = pytest.mark.parametrize('audit_schema_version', [5, 6, 7])
 from app.access_repository import AccessRepository, AccessError
 from app.migrations import migrate
 from test_revision_migrations import legacy

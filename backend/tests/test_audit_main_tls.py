@@ -22,10 +22,11 @@ from test_audit_service import ENTRY
 from test_durable_auth_routes import durable_client, LOGIN, ORIGIN
 
 
+@pytest.mark.parametrize('schema_version', [5,7])
 @pytest.mark.parametrize('mode', ['lost-ack', 'denied'])
-def test_main_tls_export_recovery_and_revocation(durable_client, certificate, tmp_path, monkeypatch, capsys, mode):
+def test_main_tls_export_recovery_and_revocation(durable_client, certificate, tmp_path, monkeypatch, capsys, mode, schema_version):
     client, path = durable_client
-    migrate(path, tmp_path/'before-v5.db', target_version=5)
+    migrate(path, tmp_path/'before-v5.db', target_version=schema_version)
     user = client.post('/api/auth/register', json=LOGIN).json()['id']
     assert client.post('/api/auth/login', json=LOGIN).status_code == 200
     cookie = client.cookies.get(DURABLE_COOKIE)
@@ -39,6 +40,11 @@ def test_main_tls_export_recovery_and_revocation(durable_client, certificate, tm
     monkeypatch.setattr(config, 'audit_export_ca_file', cert)
     monkeypatch.setattr(app.state, 'audit_exports', None, raising=False)
     target = config.audit_destinations[0]
+    if schema_version == 7:
+        from app.audit_governance import AuditGovernanceRepository
+        governance = AuditGovernanceRepository(path)
+        governance.execute(command_id='register', operator_id='operator', destination_id=target.destination_id,
+            scope_kind='account', scope_id=user, action='register', expected_generation=0)
     repo = AuditDeliveryRepository(path, destination_id=target.destination_id,
                                    scope_kind='account', scope_id=user)
     received = Event()
@@ -115,7 +121,10 @@ def test_main_tls_export_recovery_and_revocation(durable_client, certificate, tm
                 wait_for(lambda: repo.status()['delivered'] == 2)
                 assert calls[0] == calls[1]
             else:
-                wait_for(lambda: app.state.audit_exports._exporters[0].last_error == 'audit_export_configuration')
+                if schema_version == 7:
+                    wait_for(lambda: repo.status()['registry_state'] == 'blocked')
+                else:
+                    wait_for(lambda: app.state.audit_exports._exporters[0].last_error == 'audit_export_configuration')
                 assert repo.status()['delivered'] == 0 and len(calls) == 1
             # Real logout must remain available even when the remote collector rejects export.
             response = running.post('/api/auth/logout-all', headers={
@@ -132,6 +141,11 @@ def test_main_tls_export_recovery_and_revocation(durable_client, certificate, tm
             wall_time = time.time
             monkeypatch.setattr('app.audit_delivery.time.time', lambda: wall_time()+61)
             with TestClient(app):
+                if schema_version == 7:
+                    wait_for(lambda: app.state.audit_exports._exporters[0].last_error == 'audit_export_destination_inactive')
+                    assert len(calls) == 1 and repo.status()['registry_state'] == 'blocked'
+                    governance.execute(command_id='resume', operator_id='operator', destination_id=target.destination_id,
+                        scope_kind='account', scope_id=user, action='resume', expected_generation=2)
                 wait_for(lambda: repo.status()['delivered'] == 3)
             assert app.state.audit_exports.pending_count == 0
         with sqlite3.connect(path) as db:

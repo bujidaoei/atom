@@ -58,10 +58,10 @@ def test_independent_credential_and_durable_cutover_required():
         settings(audit_export_ca_file='relative.pem')
 
 
-@pytest.mark.parametrize('version', [4, 5, 6])
+@pytest.mark.parametrize('version', [4, 5, 6, 7])
 def test_actual_main_startup_and_shutdown_owns_configured_export(durable_client, tmp_path, monkeypatch, version):
     client, path = durable_client
-    if version in (5,6): migrate(path, tmp_path/'before-audit.db', target_version=version)
+    if version in (5,6,7): migrate(path, tmp_path/'before-audit.db', target_version=version)
     user = client.post('/api/auth/register', json=LOGIN).json()['id']
     config = get_settings()
     monkeypatch.setattr(config, 'audit_export_config', json.dumps([ENTRY|{'scope_id': user}]))
