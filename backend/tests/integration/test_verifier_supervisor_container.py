@@ -1,7 +1,9 @@
 """Real Docker report enters v13 only through the trusted supervised path."""
 import json
+import multiprocessing
 import os
 from pathlib import Path
+import signal
 import sqlite3
 import subprocess
 import sys
@@ -63,6 +65,11 @@ def test_actual_isolated_browser_registers_one_v13_result(assignment):
     with pytest.raises(Exception):
         supervisor.verify_and_register(assignment=dispatched, store=store,
                                        authority=authority, budget_seconds=20)
+
+
+def test_cold_start_reaper_finds_no_live_worker(assignment):
+    _, supervisor, _, _, _ = assignment
+    assert supervisor.reap_orphans() == 0
 
 
 def test_tampered_stored_artifact_never_starts_or_registers(assignment):
@@ -136,6 +143,53 @@ def test_killed_browser_container_leaves_no_result_or_container(assignment):
     with sqlite3.connect(path) as db:
         assert db.execute('SELECT outcome FROM verification_results').fetchone() == ('cancelled',)
         assert db.execute('SELECT count(*) FROM verification_attestations').fetchone() == (0,)
+
+
+@pytest.mark.skipif(sys.platform != 'linux' or not os.environ.get('ATOM_VERIFIER_TEST_REAL_STORE'),
+                    reason='requires target Linux Docker daemon and process signals')
+@pytest.mark.parametrize('assignment', ['slow'], indirect=True)
+def test_coordinator_process_death_reaps_browser_and_recovers_ledger(assignment):
+    path, supervisor, authority, dispatched, store = assignment
+    assert supervisor.reap_orphans() == 0
+
+    def run_coordinator():
+        supervisor.verify_and_register(assignment=dispatched, store=store,
+                                       authority=authority, budget_seconds=20)
+
+    process = multiprocessing.get_context('fork').Process(target=run_coordinator)
+    process.start()
+    label = f'label=atom.verifier.owner={supervisor.verifier_id}'
+    try:
+        deadline = time.monotonic() + 12
+        browser_running = False
+        while time.monotonic() < deadline and process.is_alive():
+            inventory = subprocess.run(['docker', 'ps', '-q', '--filter', label],
+                                       capture_output=True, timeout=10, check=True)
+            identity = inventory.stdout.decode().strip()
+            if identity:
+                processes = subprocess.run(['docker', 'top', identity],
+                                           capture_output=True, timeout=10, check=False)
+                browser_running = processes.returncode == 0 and b'chrome-headless-shell' in processes.stdout
+                if browser_running:
+                    break
+            time.sleep(0.05)
+        assert browser_running, 'Chromium was never observed running'
+        os.kill(process.pid, signal.SIGKILL)
+        process.join(timeout=10)
+        assert process.exitcode == -signal.SIGKILL
+        assert supervisor.reap_orphans() >= 1
+    finally:
+        if process.is_alive():
+            process.kill()
+            process.join(timeout=10)
+        supervisor.reap_orphans()
+    assert supervisor.reap_orphans() == 0
+    with sqlite3.connect(path) as db:
+        assert db.execute('SELECT count(*) FROM verification_results').fetchone() == (0,)
+        assert db.execute('SELECT count(*) FROM verification_attestations').fetchone() == (0,)
+    closed = VerificationRepository(path).terminate(owner='user',
+        request_id=dispatched.request.id, outcome='cancelled')
+    assert closed.outcome == 'cancelled'
 
 
 def test_changed_contract_during_real_browser_execution_cannot_register(assignment):

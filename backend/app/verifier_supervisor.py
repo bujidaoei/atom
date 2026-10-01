@@ -23,6 +23,8 @@ from .verifier_authority import VerifierAssignment, VerifierAuthority
 
 _IMAGE = re.compile(r'sha256:[0-9a-f]{64}\Z')
 _VERIFIER = re.compile(r'[A-Za-z0-9_.-]{1,128}\Z')
+_CONTAINER = re.compile(r'[0-9a-f]{64}\Z')
+_OWN_NAME = re.compile(r'/atom-verifier-[0-9a-f]{32}\Z')
 _OUTPUT_LIMIT = MAX_BYTES + 2048
 _PROFILE = {'memoryBytes': 1 << 30, 'shmBytes': 256 << 20,
             'tmpBytes': 128 << 20, 'nanoCpus': 1_500_000_000,
@@ -129,6 +131,51 @@ class VerifierSupervisor:
         except DriverError:
             raise SupervisorError('verifier_termination_unknown') from None
 
+    def _owned_ids(self):
+        try:
+            status, raw, _ = run_bounded([self.executable, 'container', 'ls', '--all',
+                '--quiet', '--no-trunc', '--filter',
+                f'label=atom.verifier.owner={self.verifier_id}', '--filter',
+                'label=atom.verifier.protocol=v1'], timeout=10, output_limit=8192)
+            if status != 0:
+                raise SupervisorError('verifier_inventory_unknown')
+            rows = raw.decode('ascii').splitlines()
+            if len(rows) > 100 or any(_CONTAINER.fullmatch(row) is None for row in rows):
+                raise SupervisorError('verifier_inventory_unknown')
+            return rows
+        except (DriverError, UnicodeError):
+            raise SupervisorError('verifier_inventory_unknown') from None
+
+    def reap_orphans(self):
+        """Cold-start operation only: caller must exclude live coordinators first."""
+        identities = self._owned_ids()
+        for identity in identities:
+            try:
+                status, raw, _ = run_bounded([self.executable, 'container', 'inspect',
+                    '--format', '{{json .Config.Labels}}|{{.Name}}|{{.Image}}', identity],
+                    timeout=10, output_limit=8192)
+                if status != 0:
+                    raise SupervisorError('verifier_inventory_unknown')
+                fields = raw.decode('utf-8').strip().split('|')
+                if len(fields) != 3:
+                    raise ValueError
+                labels = json.loads(fields[0])
+                name, image = fields[1:]
+                if (type(labels) is not dict or _OWN_NAME.fullmatch(name) is None
+                        or _IMAGE.fullmatch(image) is None
+                        or labels.get('atom.verifier.protocol') != 'v1'
+                        or labels.get('atom.verifier.owner') != self.verifier_id
+                        or _VERIFIER.fullmatch(labels.get('atom.verifier.request', '')) is None
+                        or re.fullmatch(r'[0-9a-f]{32}', labels.get('atom.verifier.route', '')) is None
+                        or labels.get('atom.verifier.image') != image):
+                    raise ValueError
+            except (DriverError, UnicodeError, ValueError, TypeError):
+                raise SupervisorError('verifier_inventory_unknown') from None
+            self._cleanup(name[1:])
+        if self._owned_ids():
+            raise SupervisorError('verifier_termination_unknown')
+        return len(identities)
+
     def verify_and_register(self, *, assignment: VerifierAssignment, store,
                             authority: VerifierAuthority, budget_seconds: int = 30):
         if (type(assignment) is not VerifierAssignment or type(authority) is not VerifierAuthority
@@ -173,6 +220,9 @@ class VerifierSupervisor:
             '--cpus', '1.5', '--pids-limit', '128', '--cap-drop', 'ALL',
             '--cap-add', 'SYS_CHROOT', '--security-opt', 'no-new-privileges',
             '--security-opt', f'seccomp={self.seccomp_path}', '--user', '10001:10001',
+            '--label', 'atom.verifier.protocol=v1',
+            '--label', f'atom.verifier.owner={self.verifier_id}',
+            '--label', f'atom.verifier.image={self.image}',
             '--label', f'atom.verifier.request={assignment.request.id}',
             '--label', f'atom.verifier.route={assignment.route_id}', '-i', self.image]
         try:
