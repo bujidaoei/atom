@@ -1,7 +1,9 @@
 """Bounded verified export; no implicit storage or revision registration."""
 from dataclasses import dataclass, field
 import io
+import logging
 from pathlib import Path
+import re
 import time
 
 from ..snapshots import MAX_ARCHIVE_BYTES, verify_snapshot
@@ -9,6 +11,8 @@ from .docker_driver import DockerDriver, DriverError, run_bounded
 from .registry import Attempt
 
 _SOURCE = Path(__file__).parents[1].joinpath("snapshots.py").read_text(encoding="utf-8")
+_LOG = logging.getLogger('atom.sandbox.checkpoints')
+_REASON = re.compile(rb'checkpoint_failure:([a-z_]{1,64})\n?\Z')
 _ENTRY = r'''
 import fcntl,signal
 def _deadline(_signum,_frame):
@@ -24,7 +28,11 @@ try:
         sys.stdout.buffer.flush()
     finally:
         os.close(lock)
-except (SnapshotError,OSError):
+except SnapshotError as error:
+    print('checkpoint_failure:' + error.code, file=sys.stderr)
+    sys.exit(2)
+except OSError:
+    print('checkpoint_failure:io_error', file=sys.stderr)
     sys.exit(2)
 finally:
     signal.alarm(0)
@@ -49,10 +57,13 @@ class CheckpointOperations:
         state = self.driver.inspect(attempt)
         if state is None or not state.running or state.paused:
             raise DriverError("container_not_running")
-        status, out, _ = run_bounded(
+        status, out, diagnostic = run_bounded(
             [self.driver.executable, "container", "exec", state.id, "/usr/local/bin/python3", "-I", "-c", _SOURCE + _ENTRY],
             timeout=25, output_limit=MAX_ARCHIVE_BYTES)
         if status != 0:
+            reason = _REASON.fullmatch(diagnostic)
+            _LOG.warning('broker_checkpoint_helper_failed code=%s',
+                         reason.group(1).decode('ascii') if reason else 'unknown')
             raise DriverError("checkpoint_export_unknown")
         verified = verify_snapshot(io.BytesIO(out))
         return CheckpointExport(attempt.id, attempt.version, verified.revision, out)

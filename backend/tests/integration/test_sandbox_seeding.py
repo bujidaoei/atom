@@ -80,7 +80,7 @@ def test_bad_seed_never_admits_ready_and_retires_worker(environment, failure):
     assert not lifecycle.ready
 
 
-def test_nonempty_workspace_cannot_be_merged(environment):
+def test_nonempty_workspace_cannot_be_merged(environment, caplog):
     registry, driver, lifecycle, grant = environment
     payload, revision = archive({"a.txt": b"content"})
     grant = replace(grant, base_revision=revision)
@@ -91,6 +91,7 @@ def test_nonempty_workspace_cannot_be_merged(environment):
     assert status == 0
     with pytest.raises(LifecycleError, match="seed_outcome_unknown"):
         lifecycle.seed(grant, payload)
+    assert "broker_seed_helper_failed code=workspace_not_empty" in caplog.text
     assert registry.find(attempt.id).state == "terminated"
 
 

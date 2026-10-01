@@ -1,6 +1,8 @@
 """Trusted snapshot import into a provisioning container; no caller-selected source."""
 from pathlib import Path
 import json
+import logging
+import re
 import time
 
 from .docker_driver import DockerDriver, DriverError, run_bounded
@@ -8,6 +10,8 @@ from .registry import Attempt
 from ..snapshots import MAX_ARCHIVE_BYTES
 
 MAX_SEED_BYTES = MAX_ARCHIVE_BYTES
+_LOG = logging.getLogger('atom.sandbox.seeding')
+_REASON = re.compile(rb'seed_failure:([a-z_]{1,64})\n?\Z')
 _SNAPSHOT_SOURCE = Path(__file__).parents[1].joinpath("snapshots.py").read_text(encoding="utf-8")
 _ENTRY = r'''
 import fcntl, signal
@@ -34,7 +38,11 @@ try:
         print(json.dumps({"revision": received.revision}), flush=True)
     finally:
         os.close(lock)
-except (SnapshotError, OSError):
+except SnapshotError as error:
+    print('seed_failure:' + error.code, file=sys.stderr)
+    sys.exit(2)
+except OSError:
+    print('seed_failure:io_error', file=sys.stderr)
     sys.exit(2)
 finally:
     signal.alarm(0)
@@ -53,11 +61,14 @@ class SeedOperations:
         state = self.driver.inspect(attempt)
         if state is None or not state.running or state.paused:
             raise DriverError("container_not_running")
-        status, out, _ = run_bounded(
+        status, out, diagnostic = run_bounded(
             [self.driver.executable, "container", "exec", "--interactive", state.id,
              "/usr/local/bin/python3", "-I", "-c", _SNAPSHOT_SOURCE + _ENTRY, attempt.base_revision],
             input_data=payload, timeout=25, output_limit=4096)
         if status != 0:
+            reason = _REASON.fullmatch(diagnostic)
+            _LOG.warning('broker_seed_helper_failed code=%s',
+                         reason.group(1).decode('ascii') if reason else 'unknown')
             raise DriverError("seed_execution_unknown")
         try:
             response = json.loads(out)

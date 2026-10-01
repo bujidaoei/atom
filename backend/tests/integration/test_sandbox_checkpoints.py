@@ -93,7 +93,7 @@ def test_large_binary_export_exceeds_old_output_limit(tmp_path):
     assert not driver.owned_inventory()
 
 
-def test_unsafe_workspace_export_retires_without_result(environment):
+def test_unsafe_workspace_export_retires_without_result(environment, caplog):
     registry, driver, lifecycle, grant, attempt = environment
     state = driver.inspect(attempt)
     status, _, _ = run_bounded([driver.executable, "exec", state.id, "python3", "-I", "-c",
@@ -101,6 +101,7 @@ def test_unsafe_workspace_export_retires_without_result(environment):
     assert status == 0
     with pytest.raises(LifecycleError, match="checkpoint_outcome_unknown"):
         lifecycle.export_checkpoint(grant)
+    assert "broker_checkpoint_helper_failed code=unsafe_file_type" in caplog.text
     assert registry.find(attempt.id).state == "terminated"
     assert registry.find(attempt.id).checkpoint_revision is None
     assert driver.inspect(attempt) is None and not lifecycle.ready
