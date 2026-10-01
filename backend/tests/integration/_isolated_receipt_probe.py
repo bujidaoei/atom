@@ -180,8 +180,53 @@ def run_prune(recovered):
         original=db.execute('SELECT sequence,event_id,scope_kind,scope_id,event_kind FROM security_audit_events '
             "WHERE scope_kind='account' AND scope_id='user' AND event_kind='console.session.created' ORDER BY sequence").fetchall()
         unrelated=db.execute("SELECT * FROM security_audit_events WHERE NOT (scope_kind='account' AND scope_id='user' AND event_kind='console.session.created')").fetchall()
-    if scenario=='prune-happy':
-        result=service.prune(**request)
+    if scenario in ('prune-happy','prune-cli','prune-commit-before','prune-commit-after'):
+        if scenario=='prune-happy':
+            result=service.prune(**request)
+        else:
+            command=[sys.executable,'-B','-m','app.prune_admin','--database','/tmp/source.db',
+                '--store-id',store,'--store-root','/tmp/archive','--verifier-id','verifier',
+                '--expected-image',config['image'],'--expected-policy-digest',config['policy']]
+            for key,value in request.items():command.extend(['--'+key.replace('_','-'),str(value)])
+            if scenario.startswith('prune-commit-'):
+                script = """
+import os,sqlite3,sys,runpy
+original=sqlite3.connect
+class Connection(sqlite3.Connection):
+    receipt=False
+    def execute(self,sql,*args,**kwargs):
+        if sql.startswith('INSERT INTO security_audit_prune_receipts '):self.receipt=True
+        if sql=='COMMIT' and self.receipt and os.environ['CRASH_PHASE']=='prune-commit-before':os._exit(71)
+        result=super().execute(sql,*args,**kwargs)
+        if sql=='COMMIT' and self.receipt and os.environ['CRASH_PHASE']=='prune-commit-after':os._exit(72)
+        return result
+sqlite3.connect=lambda *args,**kwargs:original(*args,**dict(kwargs,factory=Connection))
+sys.argv=['app.prune_admin',*sys.argv[1:]]
+runpy.run_module('app.prune_admin',run_name='__main__')
+"""
+                crashed=subprocess.run([sys.executable,'-B','-c',script,*command[4:]],
+                    env=dict(os.environ,CRASH_PHASE=scenario),capture_output=True,timeout=10)
+                assert crashed.returncode==(71 if scenario=='prune-commit-before' else 72),crashed.stderr.decode()
+                assert not crashed.stdout and not crashed.stderr
+                with sqlite3.connect('/tmp/source.db') as db:
+                    if scenario=='prune-commit-before':assert list(db.iterdump())==before
+                    else:
+                        db.row_factory=sqlite3.Row
+                        committed=dict(db.execute('SELECT * FROM security_audit_prune_receipts').fetchone())
+                        assert db.execute('SELECT count(*) FROM security_audit_archived_events').fetchone()[0]==3
+                        assert db.execute('SELECT count(*) FROM security_audit_delivery').fetchone()[0]==0
+                        assert db.execute("SELECT count(*) FROM security_audit_events WHERE scope_kind='account' AND scope_id='user' AND event_kind='console.session.created'").fetchone()[0]==0
+            first=subprocess.run(command,capture_output=True,timeout=10)
+            assert first.returncode==0 and not first.stderr,first.stderr.decode()
+            result=json.loads(first.stdout)['receipt']
+            if scenario=='prune-commit-after':assert result==committed
+            replay=subprocess.run(command,capture_output=True,timeout=10)
+            assert replay.returncode==0 and replay.stdout==first.stdout and not replay.stderr
+            conflict=command.copy()
+            conflict[conflict.index('--operator-id')+1]='different'
+            denied=subprocess.run(conflict,capture_output=True,timeout=10)
+            assert denied.returncode==1 and not denied.stderr
+            assert json.loads(denied.stdout)==dict(ok=False,error='prune_identity_conflict')
         assert result['event_count']==len(original)==3
         assert service.prune(**request)==result
         try:service.prune(**dict(request,operator_id='different'))

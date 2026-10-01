@@ -337,3 +337,8 @@ Offline schema11 foundation regression: `backend/.venv/Scripts/python.exe -m pyt
 
 
 Prune owner regression on disposable copies only: with pinned API/sandbox images run `backend/.venv/Scripts/python.exe -m pytest backend/tests/integration/test_isolated_receipt.py -k "prune or happy" -q --junitxml=.logs/audit-pruning-owner.xml`. Seven cases pass. Owner requires explicit configured verifier identity/image/policy plus command/archive/recovery IDs and expected generation/context. No supported CLI or serving11 rollout exists yet.
+
+
+Prune CLI increment: `python -m app.prune_admin` requires --database, --store-root, --store-id, --verifier-id, --expected-image, --expected-policy-digest, --command-id, --operator-id, --archive-id, --recovery-id, --expected-generation and --expected-context. Only disposable offline schema11 copies are currently supported; serving11 is not accepted. Exit0 carries JSON ok/receipt, exit1 carries a domain error, missing required arguments exit2. Reuse the exact command identity and configuration after an uncertain process exit to obtain the durable historical outcome.
+
+Regression: set both pinned ATOM_TEST_API_IMAGE and ATOM_TEST_DOCKER_IMAGE, then run `backend/.venv/Scripts/python.exe -m pytest backend/tests/integration/test_isolated_receipt.py -k "prune or happy" -q --junitxml=.logs/audit-pruning-cli.xml`. Ten cases pass including actual CLI death around COMMIT. No production execution is part of this evidence.
