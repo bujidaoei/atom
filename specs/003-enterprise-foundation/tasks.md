@@ -174,3 +174,5 @@ Feature008 T016/T017 progress: new v3 release and fixed content address now comm
 Feature008 private-access design now identifies durable console-session/logout and browser-bound handoff prerequisites. Primary-source research and source audit are recorded in contracts/private-content-access.md; T020–T025 decompose implementation and composed browser/revocation gates. No private feature implemented or accepted; T027 remains unchecked.
 
 Feature008 T020 offline access schema/migration completed with real SQLite constraints/backups/rollback and Linux forced-exit recovery (56 tests). Source-session issuance/revocation integration, private exchange/serving and browser gates remain T021–T025; enterprise T027 stays open.
+
+Feature008 private-access prerequisite: persisted console-session repository lifecycle and concurrency/failure behavior now pass 45 actual SQLite/schema tests. Authentication/signature/HTTP integration and private credential paths remain unfinished under T021/T022; T027 remains open.

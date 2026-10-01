@@ -151,3 +151,5 @@ T016/T017 continuation: new v3 publication atomically allocates content binding 
 - [ ] T024 [T017/T018] Implement separately scoped embedded private transport and exact console framing policy with supported-browser cookie restrictions; no public or credential-sharing fallback. Depends on T023.
 - [ ] T025 [T019] Exercise actual artifact/browser private paths, copied handoff, wrong host/browser/source session, concurrent redemption/lost response, logout and publication revocation, fragments/referrers/logs, multi-tab and embedded restrictions; stage TLS/rollback before acceptance. Depends on T023/T024.
 These are decomposed obligations, not new completion claims. Current public-only service remains unchanged; T015–T019 and parent enterprise tasks stay open.
+
+T021/T022 prerequisite: AccessRepository now implements persistent console-session creation/validation/revocation with bounded per-user capacity. Real SQLite tests cover simultaneous create/revoke, collision, failed update, reopen, exact expiry, before-issuance clock, foreign scope and schema drift. No signed credential or login/logout route is wired; both tasks stay unchecked.

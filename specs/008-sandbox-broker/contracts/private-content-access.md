@@ -154,3 +154,5 @@ lifetime/terminal constraints and source/consumption insertion checks. Real SQLi
 and Linux crash/retry evidence is recorded under T020. No issuer, exchange,
 source-session authentication or per-request private authorization is enabled;
 this schema evidence does not accept the protocol or production cutover.
+
+Console-session repository methods now operate on v4, but source authentication remains external and mandatory. Call create_console_session only after real authentication; call console_session only after verifying the signed credential's user/session identity. The ID is not accepted as a bearer token. HTTP login/logout, account-wide revocation and private capability linkage remain unimplemented.
