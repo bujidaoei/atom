@@ -19,15 +19,37 @@ from app.audit_retention import RetentionError
 from app.audit_event_format import EVENT_FIELDS
 from app.sandbox.audit_recovery_client import AuditRecoveryClient
 from app.sandbox.client import BrokerClientError
+from app.migrations import backup_database, verify_backup
+from app.audit_archive_store import AuditArchiveStore
 
 config = json.load(sys.stdin)
-shutil.copyfile('/seed.db', '/tmp/source.db')
+if config['scenario']=='cold-read':
+    assert not Path('/seed.db').exists()
+    assert verify_backup(Path('/saved/source.db'),expected_version=10)==config['backup_sha256']
+    with sqlite3.connect('/saved/source.db') as saved, sqlite3.connect('/tmp/source.db') as restored:
+        saved.backup(restored)
+else:
+    shutil.copyfile('/seed.db', '/tmp/source.db')
 os.chmod('/tmp/source.db', 0o600)
 Path('/tmp/archive').mkdir(mode=0o700)
 with sqlite3.connect('/tmp/source.db') as db:
     store = db.execute('SELECT archive_store_id FROM security_audit_retention_policies').fetchone()[0]
 owner = AuditArchiving(Path('/tmp/source.db'),store_id=store,root=Path('/tmp/archive'))
-registered = owner.archive(archive_id='archive',operator_id='operator',policy_id='policy',expected_generation=1)
+if config['scenario']=='cold-read':
+    with sqlite3.connect('/tmp/source.db') as db:
+        db.row_factory=sqlite3.Row
+        registered=dict(db.execute("SELECT * FROM security_audit_archives WHERE archive_id='archive'").fetchone())
+    payload=AuditArchiveStore(Path('/saved/archive')).read(expected_sha256=registered['archive_sha256'])
+    owner.store.put(payload,expected_sha256=registered['archive_sha256'])
+else:
+    registered = owner.archive(archive_id='archive',operator_id='operator',policy_id='policy',expected_generation=1)
+if config['scenario']=='cold-write':
+    Path('/saved/archive').mkdir(mode=0o700)
+    payload=owner.store.read(expected_sha256=registered['archive_sha256'])
+    AuditArchiveStore(Path('/saved/archive')).put(payload,expected_sha256=registered['archive_sha256'])
+    backup=backup_database(Path('/tmp/source.db'),Path('/saved/source.db'))
+    print(json.dumps({'backup_sha256':backup.sha256,'version':backup.version}))
+    raise SystemExit(0)
 if config['scenario'] in ('missing','corrupt'):
     file = Path('/tmp/archive')/(registered['archive_sha256']+'.atomaudit')
     if config['scenario']=='missing':
@@ -85,6 +107,13 @@ async def run():
                 separators=(',',':'),ensure_ascii=True).encode()).hexdigest()
             assert await owner.recover_isolated(**request,client=client) == receipt
             assert len(seen) == 1
+            if scenario=='cold-read':
+                with sqlite3.connect('/tmp/source.db') as db:
+                    db.row_factory=sqlite3.Row
+                    original=[dict(row) for row in db.execute('SELECT '+','.join(EVENT_FIELDS)+
+                        " FROM security_audit_events WHERE scope_kind='account' AND scope_id='user' "
+                        "AND event_kind='console.session.created' ORDER BY sequence")]
+                assert seen[0]['result']['events']==original
             try: await owner.recover_isolated(**dict(request,verifier_id='different'),client=client)
             except ArchiveError as error: assert str(error) == 'recovery_identity_conflict'
             else: raise AssertionError('identity conflict accepted')

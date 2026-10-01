@@ -5,6 +5,7 @@ import socket
 import sqlite3
 import threading
 import time
+import uuid
 
 import pytest
 import uvicorn
@@ -18,7 +19,7 @@ pytestmark = pytest.mark.skipif(not IMAGE or not API_IMAGE,reason='requires pinn
 
 
 @pytest.mark.parametrize('scenario',['happy','auth','policy','lost-result','worker','cancelled','cli','commit-before','commit-after',
-    'pages','pages-hold','missing','corrupt'])
+    'pages','pages-hold','missing','corrupt','cold-read'])
 def test_real_linux_owner_wire_worker_and_receipt(planned,recovery,tmp_path,monkeypatch,scenario):
     path,_ = planned
     migrate(path,tmp_path/'before-ten.db',target_version=10)
@@ -44,6 +45,7 @@ def test_real_linux_owner_wire_worker_and_receipt(planned,recovery,tmp_path,monk
     server = uvicorn.Server(uvicorn.Config(app,log_level='error',access_log=False))
     thread = threading.Thread(target=server.run,kwargs={'sockets':[sock]},daemon=True)
     thread.start()
+    volume = None
     try:
         deadline = time.monotonic()+10
         while not server.started and thread.is_alive() and time.monotonic()<deadline:
@@ -57,9 +59,31 @@ def test_real_linux_owner_wire_worker_and_receipt(planned,recovery,tmp_path,monk
             '--workdir','/src','--env','PYTHONPATH=/src','--entrypoint','/app/backend/.venv/bin/python',API_IMAGE,
             '-B','/src/tests/integration/_isolated_receipt_probe.py']
         data = dict(port=port,token=config.admin_token,image=IMAGE,policy=app.state.lifecycle.driver.policy_digest,scenario=scenario)
+        if scenario=='cold-read':
+            volume='atom-audit-cold-'+uuid.uuid4().hex
+            status,_,err=run_bounded(['docker','volume','create','--label','atom.test=audit-cold',volume])
+            assert status==0,err.decode()
+            status,_,err=run_bounded(['docker','run','--rm','--network=none','--mount',f'type=volume,source={volume},target=/saved',
+                '--entrypoint','chown',API_IMAGE,'1000:1000','/saved'])
+            assert status==0,err.decode()
+            command[2:2]=['--mount',f'type=volume,source={volume},target=/saved']
+            writer=volume+'-writer'
+            status,out,err=run_bounded(command[:2]+['--name',writer]+command[2:],timeout=30,
+                input_data=json.dumps(dict(data,scenario='cold-write')).encode())
+            assert status==0,err.decode()
+            saved=json.loads(out)
+            assert saved['version']==10
+            data['backup_sha256']=saved['backup_sha256']
+            # The --rm writer is gone; the reader receives only saved volume and application code.
+            status,inventory,err=run_bounded(['docker','container','ls','--all','--filter',f'name=^/{writer}$','--format','{{.ID}}'])
+            assert status==0 and not inventory.strip(),err.decode()
+            saved_mount=command.index(f'type=volume,source={volume},target=/saved')
+            command[saved_mount]+=',readonly'
+            seed=command.index(f'type=bind,source={path},target=/seed.db,readonly')
+            del command[seed-1:seed+1]
         status,out,err = run_bounded(command,timeout=30,input_data=json.dumps(data).encode())
         assert status == 0,err.decode()
-        expected = 2 if scenario=='pages' else int(scenario in ('happy','cli','commit-before','commit-after','pages-hold'))
+        expected = 2 if scenario=='pages' else int(scenario in ('happy','cli','commit-before','commit-after','pages-hold','cold-read'))
         assert json.loads(out) == {'scenario':scenario,'receipts':expected}
         assert not app.state.lifecycle.driver.owned_inventory()
         if scenario in ('cli','commit-before','commit-after'):
@@ -70,3 +94,9 @@ def test_real_linux_owner_wire_worker_and_receipt(planned,recovery,tmp_path,monk
         thread.join(20)
         sock.close()
         assert not thread.is_alive()
+        if volume is not None:
+            status,metadata,err=run_bounded(['docker','volume','inspect',volume])
+            assert status==0,err.decode()
+            assert json.loads(metadata)[0]['Labels']['atom.test']=='audit-cold'
+            status,_,err=run_bounded(['docker','volume','rm',volume])
+            assert status==0,err.decode()

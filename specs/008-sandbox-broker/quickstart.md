@@ -325,3 +325,6 @@ T035 isolated recovery component is accepted with the completion matrix in evide
 
 
 Current isolated archive acceptance suite includes13 cases: run `backend/.venv/Scripts/python.exe -m pytest backend/tests/integration/test_isolated_receipt.py -q --junitxml=.logs/isolated-archive-pages.xml` with explicit pinned API/sandbox images. This adds actual102-event100+2 recovery, between-page legal hold, and missing/corrupt objects. Production capacity/backup and T034 remain separate.
+
+
+Cold recovery regression: with pinned API/sandbox images run `backend/.venv/Scripts/python.exe -m pytest backend/tests/integration/test_isolated_receipt.py -k "cold-read or happy" -q --junitxml=.logs/isolated-cold-recovery.xml`. Two cases pass. Dedicated test volume persists data only between writer/reader and is removed afterwards. Do not infer off-host recovery or production backup acceptance from this test.
