@@ -231,6 +231,10 @@ class Lifecycle:
                     raise LifecycleError("checkpoint_ownership_changed")
                 return exported
             except BaseException as error:
+                _LOG.warning("broker_checkpoint_failed type=%s code=%s",
+                             type(error).__name__,
+                             error.code if isinstance(error, (DriverError, RegistryError,
+                                                              LifecycleError, SnapshotError)) else 'unknown')
                 self._retire_operation(attempt)
                 if not isinstance(error, Exception):
                     raise

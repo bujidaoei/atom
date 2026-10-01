@@ -68,6 +68,14 @@ def test_actual_edits_export_reimport_and_quiescing_denies_writes(environment, t
     assert result["data"]["sha256"] == hashlib.sha256(content.encode()).hexdigest()
 
 
+def test_unmodified_workspace_exports_exact_empty_snapshot(environment):
+    registry, driver, lifecycle, grant, attempt = environment
+    payload, revision = archive({})
+    exported = lifecycle.export_checkpoint(grant)
+    assert exported.payload == payload and exported.revision == revision
+    assert registry.find(attempt.id).state == "quiescing"
+
+
 def test_large_binary_export_exceeds_old_output_limit(tmp_path):
     chunk = bytes(range(256)) * (8 * 1024 * 1024 // 256)
     payload, revision = archive({f"file-{i}": chunk for i in range(7)})
