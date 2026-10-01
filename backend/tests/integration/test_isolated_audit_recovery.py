@@ -19,6 +19,9 @@ pytestmark = pytest.mark.skipif(not IMAGE,reason='requires explicit pinned sandb
 
 @pytest.mark.parametrize('fault',[None,'exit','output','timeout'])
 def test_fixed_worker_full_restore_source_denial_and_confirmed_cleanup(planned,tmp_path,monkeypatch,fault):
+    # Synthetic broker-host credentials must never cross the approved worker environment boundary.
+    for name in ('ATOM_BROKER_ADMIN_TOKEN','ATOM_BROKER_GRANT_KEY','ATOM_LLM_API_KEY','ATOM_DB_PATH'):
+        monkeypatch.setenv(name,'synthetic-host-only-authority-probe')
     source, repo = planned
     plan = repo.plan(policy_id='policy',expected_generation=1)
     policy = plan['context']['policy']
@@ -40,12 +43,29 @@ def test_fixed_worker_full_restore_source_denial_and_confirmed_cleanup(planned,t
         # Actual worker: prove host source and control sockets are absent, root cannot be written,
         # and no inherited open descriptor points at source/store. Never mount the source for this test.
         script = '''
-import json,os
+import json,os,socket,errno
 from pathlib import Path
 assert not Path('/var/run/docker.sock').exists()
 assert not Path('/tmp/source.db').exists()
 assert not Path('/store').exists()
 assert not Path(SOURCE_PATH).exists()
+for name in ('ATOM_BROKER_ADMIN_TOKEN','ATOM_BROKER_GRANT_KEY','ATOM_LLM_API_KEY','ATOM_DB_PATH'):
+    assert name not in os.environ
+    assert (name+'=').encode() not in Path('/proc/1/environ').read_bytes()
+for target in ('/tmp/source.db','/store/archive.atomaudit','/var/run/docker.sock'):
+    try:
+        descriptor=os.open(target,os.O_RDWR)
+    except OSError as error:assert error.errno in (errno.ENOENT,errno.EACCES,errno.EROFS)
+    else:
+        os.close(descriptor)
+        raise AssertionError('source/store/socket accessible')
+try:
+    connection=socket.create_connection(('192.0.2.1',443),timeout=1)
+except OSError as error:
+    assert error.errno in (errno.ENETUNREACH,errno.EHOSTUNREACH)
+else:
+    connection.close()
+    raise AssertionError('external route available')
 try:
     Path('/source-authority-probe').write_text('denied')
 except PermissionError:pass

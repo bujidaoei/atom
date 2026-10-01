@@ -319,3 +319,6 @@ Schema10 component acceptance: ordinary serving consumers now accept exact10; th
 
 
 Browser schema10 acceptance: build frontend, set the approved ATOM_TEST_API_IMAGE, run `python scripts/content_artifact_browser.py --private-exchange --audit-schema 10`. The script verifies actual database version and audit counts, not only page rendering. Local test TLS and seeded verification metadata do not satisfy production PKI or trusted-verifier acceptance.
+
+
+T035 isolated recovery component is accepted with the completion matrix in evidence.md. Regression: `backend/.venv/Scripts/python.exe -m pytest backend/tests/integration/test_isolated_audit_recovery.py -q --junitxml=.logs/recovery-authority-denial.xml` using the pinned sandbox image. This includes real host-credential denial and network-unreachable checks. T033/T034 and production rollout remain unaccepted; schema9 recovery is historical only.
