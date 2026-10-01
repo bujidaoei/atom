@@ -20,8 +20,9 @@ pytestmark = pytest.mark.skipif(not IMAGE or not os.environ.get('ATOM_TEST_DOCKE
                                reason='requires explicit local API and sandbox image digests')
 
 
+@pytest.mark.parametrize('schema_version',[1,4])
 @pytest.mark.parametrize('valid,interrupt', [(True,None),(False,None),(None,None),(False,'cancel'),(False,'deadline'),(False,'deadline_checkpoint')])
-def test_actual_orchestrator_leases_and_validates_registered_output(tmp_path, valid, interrupt):
+def test_actual_orchestrator_leases_and_validates_registered_output(tmp_path, valid, interrupt, schema_version):
     assert re.fullmatch(r'sha256:[0-9a-f]{64}', IMAGE)
     root=Path(__file__).resolve().parents[3]
     archive=io.BytesIO()
@@ -72,6 +73,8 @@ os.environ.update(ATOM_ENVIRONMENT='production',ATOM_SANDBOX_MODE='broker',ATOM_
     ATOM_BROKER_ORIGIN='http://127.0.0.1:1',ATOM_BROKER_ADMIN_TOKEN=data['admin'],ATOM_BROKER_GRANT_KEY=data['key'],
     ATOM_COMPLETION_GRANT_KEY='c'*32,ATOM_LLM_API_KEY='synthetic-model-fixture-key',
     ATOM_LLM_BASE_URL='https://synthetic.invalid/v1',ATOM_RUNTIME_URL='http://127.0.0.1:1')
+if data['schema_version']==4:
+    os.environ.update(ATOM_SESSION_MODE='durable',ATOM_CONSOLE_ORIGIN='https://console.example.org',ATOM_COOKIE_SECURE='true')
 from app.main import app
 if data['interrupt']=='deadline_checkpoint':
     @app.middleware('http')
@@ -91,7 +94,11 @@ Base.metadata.create_all(engine)
 with session_scope() as s:
     s.add(User(id='owner',email='owner@example.invalid',name='Owner',password_hash='fixture'));s.flush()
     s.add(Project(id='p',user_id='owner',title='P',prompt='fixture'))
-settings=get_settings();migrate(settings.db_path,Path('/tmp/data/backup.db'));settings.db_path.chmod(0o600)
+settings=get_settings();migrate(settings.db_path,Path('/tmp/data/backup.db'),target_version=data['schema_version']);settings.db_path.chmod(0o600)
+if data['schema_version']==4:
+    from app.security import issue_session
+    from app.console_auth import credentials
+    console_token=issue_session('owner')
 if data['interrupt']:
     legacy=settings.projects_dir/'p'/'workspace';legacy.mkdir(parents=True)
     (legacy/'index.html').write_text('<h1>saved before interruption</h1>')
@@ -166,6 +173,11 @@ async def main():
                 assert db.execute('SELECT count(*) FROM revision_receipts').fetchone()[0]==int(registered)
                 assert db.execute('SELECT count(*) FROM revision_records').fetchone()[0]==1+int(registered)
         if data['valid']: assert [entry['path'] for entry in listing['files']]==['index.html','notes.txt']
+        if data['schema_version']==4:
+            codec=credentials();source=codec.authenticate(console_token)
+            assert source and source.user_id=='owner'
+            codec.repository.revoke_console_session(user_id='owner',session_id=source.id)
+            assert codec.authenticate(console_token) is None
         print(json.dumps({'status':observed_status,'revision':head.revision_id}))
     finally:
         server.should_exit=True;await asyncio.wait_for(serving,15)
@@ -173,7 +185,7 @@ async def main():
 asyncio.run(main())
 '''
         parameters={'code':base64.b64encode(archive.getvalue()).decode(),'admin':config.admin_token,
-            'key':config.grant_key,'broker':int(broker._origin.rsplit(':',1)[1]),'runtime':relay.server_port,'valid':valid,'interrupt':interrupt}
+            'key':config.grant_key,'broker':int(broker._origin.rsplit(':',1)[1]),'runtime':relay.server_port,'valid':valid,'interrupt':interrupt,'schema_version':schema_version}
         try:
             code,out,err=run_bounded(['docker','run','--name',name,'--network=bridge','--read-only',
                 '--user','1000:1000','--cap-drop=ALL','--security-opt=no-new-privileges','--memory=512m','--pids-limit=128',

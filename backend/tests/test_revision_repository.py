@@ -26,8 +26,8 @@ BASE = Artifact('a'*64, 'b'*64, 14)
 OUTPUT = Artifact('c'*64, 'd'*64, 15)
 
 
-@pytest.fixture
-def repository(tmp_path):
+@pytest.fixture(params=[1,4],ids=["schema-v1","schema-v4"])
+def repository(tmp_path,request):
     path = tmp_path / 'api.db'
     engine = create_engine('sqlite:///' + path.as_posix())
     Base.metadata.create_all(engine)
@@ -43,7 +43,7 @@ def repository(tmp_path):
         s.add(Run(id='heat-run', project_id='p', heat_id='heat', role='alex', model='fixture', status='running'))
         s.commit()
     engine.dispose()
-    migrate(path, tmp_path / 'backup.db')
+    migrate(path, tmp_path / 'backup.db',target_version=request.param)
     with sqlite3.connect(path) as db:
         main = db.execute('SELECT id FROM revision_workspaces WHERE heat_id IS NULL').fetchone()[0]
         heat = db.execute('SELECT id FROM revision_workspaces WHERE heat_id IS NOT NULL').fetchone()[0]
@@ -735,3 +735,23 @@ def test_runtime_broker_result_requires_matching_durable_success(repository, mod
     assert requests[0]['lease']=={'runId':'run','workspaceId':main,'attemptId':'a'*32,
         'executionId':'attempt','grantId':'grant-attempt','deadline':deadline,
         'grant':'sandbox.token.value','completionGrant':'completion.token.value'}
+
+
+@pytest.mark.parametrize('damage',['future','definition','journal'])
+def test_schema_drift_is_rejected_on_open_and_each_transaction(repository,damage):
+    repo,path,main,_=repository
+    with sqlite3.connect(path) as db:
+        if damage=='future':db.execute('PRAGMA user_version=99')
+        elif damage=='definition':db.execute('CREATE TABLE unexpected_runtime_table(id TEXT)')
+        else:db.execute("UPDATE atom_schema_migrations SET migration_hash=? WHERE version=1",('f'*64,))
+    with pytest.raises(RevisionError,match='revision_schema_required'):RevisionRepository(path)
+    with pytest.raises(RevisionError,match='revision_unavailable'):repo.current_revision('owner',main)
+
+
+@pytest.mark.parametrize('version',[2,3])
+def test_intermediate_offline_schema_is_not_a_runtime_target(tmp_path,version):
+    path=tmp_path/'intermediate.db'
+    engine=create_engine('sqlite:///'+path.as_posix())
+    Base.metadata.create_all(engine);engine.dispose()
+    migrate(path,tmp_path/'before.db',target_version=version)
+    with pytest.raises(RevisionError,match='revision_schema_required'):RevisionRepository(path)
