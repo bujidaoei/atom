@@ -5,6 +5,8 @@ from pathlib import Path
 import sqlite3
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor
+import time
 
 import pytest
 
@@ -84,6 +86,40 @@ def test_browser_deadline_leaves_no_result_or_container(assignment):
     inventory = subprocess.run(['docker', 'ps', '-aq', '--filter',
         f'label=atom.verifier.request={dispatched.request.id}'],
         capture_output=True, timeout=10, check=True)
+    assert not inventory.stdout.strip()
+
+
+@pytest.mark.parametrize('assignment', ['slow'], indirect=True)
+def test_killed_browser_container_leaves_no_result_or_container(assignment):
+    path, supervisor, authority, dispatched, store = assignment
+    label = f'label=atom.verifier.request={dispatched.request.id}'
+
+    def running_container():
+        probe = subprocess.run(['docker', 'ps', '-q', '--filter', label],
+                               capture_output=True, timeout=10, check=True)
+        return probe.stdout.decode().strip()
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        pending = pool.submit(supervisor.verify_and_register, assignment=dispatched,
+                              store=store, authority=authority, budget_seconds=20)
+        deadline = time.monotonic() + 12
+        identity = ''
+        while time.monotonic() < deadline and not pending.done():
+            identity = running_container()
+            if identity:
+                break
+            time.sleep(0.05)
+        assert identity, 'browser container was never observed running'
+        subprocess.run(['docker', 'kill', identity], capture_output=True,
+                       timeout=10, check=True)
+        with pytest.raises(SupervisorError, match='verifier_execution_failed'):
+            pending.result(timeout=15)
+    with sqlite3.connect(path) as db:
+        assert db.execute('SELECT count(*) FROM verification_results').fetchone() == (0,)
+        assert db.execute('SELECT count(*) FROM verification_attestations').fetchone() == (0,)
+    assert not running_container()
+    inventory = subprocess.run(['docker', 'ps', '-aq', '--filter', label],
+                               capture_output=True, timeout=10, check=True)
     assert not inventory.stdout.strip()
 
 
