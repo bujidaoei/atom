@@ -8,6 +8,7 @@ import sqlite3
 import time
 
 from .migrations import MigrationError, _schema, verify
+from .security_audit import record_console_transition
 
 
 class AccessError(RuntimeError):
@@ -31,7 +32,7 @@ class AccessRepository:
         self.path, self.timeout = Path(path), lock_timeout
         self.active_sessions_per_user = active_sessions_per_user
         try:
-            if verify(self.path)!=4:
+            if verify(self.path) not in (4,5):
                 raise AccessError('access_schema_required')
         except MigrationError:
             raise AccessError('access_schema_required') from None
@@ -44,7 +45,7 @@ class AccessRepository:
             db.execute('PRAGMA foreign_keys=ON')
             db.execute('PRAGMA synchronous=FULL')
             db.execute('BEGIN IMMEDIATE')
-            if _schema(db)!=4:
+            if _schema(db) not in (4,5):
                 raise AccessError('access_schema_required')
             db.row_factory=sqlite3.Row
             yield db
@@ -72,6 +73,11 @@ class AccessRepository:
     def _decode(row):
         return ConsoleSession(*(row[key] for key in ('id','user_id','created_at','expires_at','revoked_at')))
 
+    @staticmethod
+    def _audit(db, **event):
+        if db.execute('PRAGMA user_version').fetchone()[0] == 5:
+            record_console_transition(db, **event)
+
     def create_console_session(self, *, user_id: str, lifetime_seconds: int) -> ConsoleSession:
         """For a trusted authenticated caller; a session ID is not a bearer token."""
         self._user(user_id)
@@ -90,6 +96,8 @@ class AccessRepository:
             result=ConsoleSession(secrets.token_hex(16),user_id,now,now+lifetime_seconds,None)
             db.execute('INSERT INTO console_sessions VALUES (?,?,?,?,NULL)',
                        (result.id,user_id,result.created_at,result.expires_at))
+            self._audit(db,kind='console.session.created',user_id=user_id,
+                        source_session_id=result.id,occurred_at=now)
             return result
 
     def console_session(self, *, user_id: str, session_id: str) -> ConsoleSession:
@@ -114,6 +122,8 @@ class AccessRepository:
             if now<row['created_at']:
                 raise AccessError('invalid_access_clock')
             db.execute('UPDATE console_sessions SET revoked_at=? WHERE id=?',(now,session_id))
+            self._audit(db,kind='console.session.revoked',user_id=user_id,
+                        source_session_id=session_id,occurred_at=now)
             return self._decode(db.execute('SELECT * FROM console_sessions WHERE id=?',(session_id,)).fetchone())
 
     def revoke_console_sessions(self, *, user_id: str, source_session_id: str) -> int:
@@ -134,4 +144,6 @@ class AccessRepository:
                 raise AccessError('invalid_access_clock')
             db.executemany('UPDATE console_sessions SET revoked_at=? WHERE id=?',
                            [(now,row['id']) for row in rows])
+            self._audit(db,kind='console.account_sessions.revoked',user_id=user_id,
+                        source_session_id=source_session_id,occurred_at=now,affected_count=len(rows))
             return len(rows)

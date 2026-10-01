@@ -10,10 +10,10 @@ from app.migrations import migrate
 from test_revision_migrations import legacy
 
 
-@pytest.fixture
-def access(legacy,monkeypatch):
+@pytest.fixture(params=[4,5])
+def access(legacy,monkeypatch,request):
     path,backup=legacy
-    migrate(path,backup,target_version=4)
+    migrate(path,backup,target_version=request.param)
     monkeypatch.setattr('app.access_repository.time.time',lambda:100)
     return path,AccessRepository(path)
 

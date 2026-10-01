@@ -208,3 +208,6 @@ Research increment: official Cursor/GitHub/GitLab sources and local code audit e
 
 
 T026 increment: explicit offline audit v5 schema and migration now implemented; source0-v4 backup/restore/replay, late-DDL rollback, actual subprocess exit/retry and event/delivery constraints tested. Existing v1-v4 definitions unchanged. T026 remains open because exact-schema application/runtime compatibility and full integration have not been implemented; no event emission/export acceptance follows from empty tables.
+
+
+T026/T027 increment: AccessRepository4/5 compatibility and transactional console create/revoke/account-revoke audit are implemented. Real SQLite tests cover before/after-audit rollback, event identity collision and concurrent replay count; actual password API flow on5 emits redacted events. Remaining content/release writers, runtime compatibility, denial observations/export/retention and whole-system audit acceptance remain open. Neither task is closed.

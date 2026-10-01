@@ -202,3 +202,6 @@ Implement contracts/security-audit.md through a new explicit offline version whi
 
 
 Audit v5 migration implemented as an additive offline target with typed columns rather than arbitrary metadata JSON: stable event id/storage sequence, fixed kind/version, actor/scope, bounded internal references/counts. Event update/delete/replacement rejected. Separate destination/event delivery row validates lease/state/nullability, attempts, terminal acknowledgement and prevents scope change/replacement/deletion. No export credentials/URL/body stored. Future retention needs an explicit authorized maintenance design; ordinary delete is intentionally unavailable. Main consumers stay on verified v1/v4 while v5 business integration is pending.
+
+
+AccessRepository now accepts fully verified4/5 at construction and each writer entry. Inside5, fixed record_console_transition writes event id/kind/time/user/scope/internal source/count on that same connection, before commit. Version4 remains unchanged; no runtime fallback from failed5 audit insert. Helper requires an active5 transaction and only three console event kinds. No free-form metadata/credentials are accepted. Content/release event writers and other exact-version consumers remain unported; no full main-runtime5 selection claim.

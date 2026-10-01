@@ -216,3 +216,6 @@ Follow contracts/security-audit.md: committed security transitions need atomic, 
 
 
 Audit storage increment: explicit offline v5 defines immutable, typed event records and separate delivery ownership/state. Replacing an existing row must be rejected as well as ordinary mutation; exported state cannot silently regress or disappear. This schema is not enabled for application serving until all exact-version consumers, transactional event writers and their acceptance gates are implemented.
+
+
+Console audit implementation increment: v5 session creation, single revoke and account-wide revoke must co-commit their typed event in the owning transaction. Single-revoke replay emits no duplicate event. v4 remains the explicit existing non-audited schema; accepting a broken v5 audit insert without rollback is prohibited.

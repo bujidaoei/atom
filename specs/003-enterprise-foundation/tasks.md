@@ -225,3 +225,6 @@ T027 audit refinement: primary-source comparison and local code inspection now d
 
 
 T027/008-T026 increment: offline audit v5 schema foundation implemented and migration/constraint tests executed. Audit writers, all runtime consumer compatibility and enterprise export/retention remain open. No live database migration or audit feature closure.
+
+
+T027/008-T026-T027 increment: console-session security transitions now persist actual audit events atomically on5, including real password API evidence. Content/publication auditing, all runtime consumers and enterprise audit acceptance remain unfinished.

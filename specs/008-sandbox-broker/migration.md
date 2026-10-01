@@ -33,3 +33,6 @@ Current runtime compatibility update: RevisionRepository/main broker execution n
 
 ### Audit v5 offline foundation
 Explicit --target-version 5 now supports source0-v4 with verified backup and journal/hash checks; default remains1. Prior v1-v4 definitions/hashes are unchanged. Migration creates empty audit and delivery tables without historical backfill or credentials. Do not apply to a serving database: current AccessRepository requires4 and RevisionRepository supports1/4, so v5 is intentionally not yet a runtime target. Consumer/writer compatibility, Linux production-runtime matrix, operator restore rehearsal and audit capacity/retention gates must pass before selection. Current subprocess crash evidence is Windows local SQLite, not Linux host power-loss recovery.
+
+
+Console audit compatibility update: AccessRepository now supports verified4/5 and writes atomic console transition events on5. Its ContentAccessRepository subclass inherits the schema acceptance, but content-event writes are not yet implemented; release/revision and main runtime compatibility is still incomplete. Do not select5 for production on the strength of auth-only tests. No migration is automatically performed.

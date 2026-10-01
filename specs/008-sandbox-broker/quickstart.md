@@ -181,3 +181,6 @@ Account UI browser check: private-exchange harness retains single-session logout
 
 
 Audit schema checks: run test_audit_migration.py with test_access_migration.py and test_revision_migrations.py. Upgrade cases span0-v4 and verify source backups/restores/journal/replay. Test-only insertion proves append-only/replacement protection, foreign event refusal, delivery lease/terminal consistency and retained delivery rows. Subprocess exits after DDL before commit, reopens source4 and retries to5. These tests do not enable main application on5 or write real business audit events.
+
+
+Console audit tests: run test_security_audit.py, test_access_repository.py, test_durable_credentials.py and test_durable_auth_routes.py. Complete access repository suite runs on4/5. Actual v5 auth route test migrates disposable4 database then registers/logs in/revokes all, checks exact typed event kinds/counts and scans event rows for actual password/email/JWT sentinels. Main orchestrator lifespan is not entered. Fault injection denies audit insert or fails after audit before commit, asserting unchanged source sessions and event ledger; collision/replay/concurrent revoke are independently checked.
