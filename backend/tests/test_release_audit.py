@@ -5,7 +5,7 @@ from threading import Barrier
 
 import pytest
 
-pytestmark = pytest.mark.parametrize('audit_schema_version', [5, 6, 7])
+pytestmark = pytest.mark.parametrize('audit_schema_version', [5, 6, 7, 9])
 from app.migrations import migrate
 from app.release_repository import ReleaseRepository
 from app.verification_repository import VerificationError

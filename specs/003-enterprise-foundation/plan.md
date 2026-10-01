@@ -81,3 +81,6 @@ Governance sequencing refinement: persistent destination obligations and adminis
 
 
 008 T033 operator workflow: explicit archive/inspect/recover CLI and source-fenced continuation implemented;11 actual Linux integration cases pass, including102 real business events over100+2 pages and hold-after-first-page rejection. See ../008-sandbox-broker/evidence.md. Ordinary runtime9 and enterprise production acceptance remain open; T033/T034 unchecked.
+
+
+008 schema9 compatibility increment:377 business/governance/main-TLS,64 revision9 and11 actual Linux archive tests pass. Ordinary consumer exact allowlists now include9; new destination/archive race uses real governance commands. Full runtime/browser/production9 acceptance and T033/T034 remain open. Detailed evidence: ../008-sandbox-broker/evidence.md.

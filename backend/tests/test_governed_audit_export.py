@@ -12,11 +12,11 @@ from test_audit_destination import destination
 from test_audit_repository import reader, audited_release, release, ledger, legacy
 
 
-@pytest.fixture
-def governed(reader, tmp_path):
+@pytest.fixture(params=[7,9])
+def governed(reader, tmp_path, request):
     path, *_ = reader
     target = destination()
-    migrate(path, tmp_path/'before-seven.db', target_version=7)
+    migrate(path, tmp_path/'before-seven.db', target_version=request.param)
     governance = AuditGovernanceRepository(path)
     def change(action, generation, command_id, **extra):
         return governance.execute(command_id=command_id, operator_id='operator', destination_id=target.destination_id,

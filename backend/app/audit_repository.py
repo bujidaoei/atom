@@ -28,7 +28,7 @@ class AuditRepository:
     def __init__(self, path: Path):
         self.path = Path(path)
         try:
-            if verify(self.path) not in (5,6,7):
+            if verify(self.path) not in (5,6,7,9):
                 raise AuditReadError('audit_schema_required')
         except MigrationError:
             raise AuditReadError('audit_schema_required') from None
@@ -52,7 +52,7 @@ class AuditRepository:
             deadline = time.monotonic()+5
             db.set_progress_handler(lambda: int(time.monotonic() >= deadline), 1000)
             db.execute('BEGIN')
-            if _schema(db) not in (5,6,7):
+            if _schema(db) not in (5,6,7,9):
                 raise AuditReadError('audit_schema_required')
             now = int(time.time())
             source = db.execute('SELECT 1 FROM console_sessions WHERE id=? AND user_id=? '

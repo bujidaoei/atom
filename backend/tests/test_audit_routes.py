@@ -4,7 +4,7 @@ import threading
 
 import pytest
 
-pytestmark = [pytest.mark.parametrize('audit_schema_version', [5, 6, 7]), pytest.mark.usefixtures('audit_schema_version')]
+pytestmark = [pytest.mark.parametrize('audit_schema_version', [5, 6, 7, 9]), pytest.mark.usefixtures('audit_schema_version')]
 
 from app.bounded_operations import BoundedOperations
 from app.console_auth import DURABLE_COOKIE

@@ -11,6 +11,7 @@ from unittest.mock import patch
 from app.audit_archiving import AuditArchiving
 from app.audit_archive import ArchiveError
 from app.audit_retention import RetentionError
+from app.audit_governance import AuditGovernanceRepository
 
 shutil.copyfile('/seed.db', '/tmp/source.db')
 os.chmod('/tmp/source.db', 0o600)
@@ -70,9 +71,8 @@ elif scenario in ('hold','receiver'):
             service.repository.execute(command_id='new-hold',policy_id='policy',operator_id='operator',
                 action='place_hold',expected_generation=1,hold_id='hold',hold_kind='legal')
         else:
-            # Registry9 operator integration is separate; this probes constrained SQL context change.
-            with sqlite3.connect('/tmp/source.db') as db:
-                db.execute("INSERT INTO security_audit_destinations(destination_id,scope_kind,scope_id,generation,state,created_at,updated_at) VALUES ('new','account','user',1,'unconfigured',100,100)")
+            AuditGovernanceRepository(Path('/tmp/source.db')).execute(command_id='new-receiver',operator_id='operator',
+                destination_id='new',scope_kind='account',scope_id='user',action='register',expected_generation=0)
         return result
     with patch.object(service.store, 'put', change):
         try: service.archive(**request)

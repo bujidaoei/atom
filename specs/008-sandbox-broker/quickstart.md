@@ -283,3 +283,6 @@ python -m app.archive_admin --database "$DATABASE" --store-id "$STORE_ID" --stor
 python -m app.archive_admin --database "$DATABASE" --store-id "$STORE_ID" --store-root "$STORE_ROOT" recover --archive-id "$ARCHIVE_ID" --recovery-id "$RECOVERY_ID" --verifier-id "$VERIFIER_ID"
 ```
 Provision the dedicated private store directory per the storage contract first. For non-null continuation, the next archive command uses a new archive ID and exactly the returned policy_id, expected_generation, after, upper and expected_context. Repeat an uncertain command using its original archive ID. A conflict requires fresh review/planning; never discard fences automatically. CLI output contains metadata, not raw events. Recovery is an explicit operation; neither archive nor inspect creates a recovery receipt. These operations do not authorize deletion or a serving9 migration.
+
+
+Current9 component compatibility now covers ordinary business repositories, governance, configured export and main TLS tests; this supersedes prior blanket serving-rejects9 notes. Full runtime/browser/production9 gates are still open, so this component evidence is not rollout approval. Ordinary consumers intentionally still reject8. No startup migration occurs, and destination registration plus explicit archive policy/store configuration remain required.

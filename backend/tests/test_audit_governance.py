@@ -12,10 +12,10 @@ from app.audit_governance import AuditGovernanceRepository, AuditGovernanceError
 from test_revision_migrations import legacy
 
 
-@pytest.fixture
-def registry(legacy, monkeypatch):
+@pytest.fixture(params=[7,9])
+def registry(legacy, monkeypatch, request):
     path, backup = legacy
-    migrate(path, backup, target_version=7)
+    migrate(path, backup, target_version=request.param)
     monkeypatch.setattr('app.audit_governance.time.time', lambda: 100)
     return path, AuditGovernanceRepository(path)
 
