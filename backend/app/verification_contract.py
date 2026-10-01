@@ -157,3 +157,27 @@ def capture_report(contract: VerificationContract, results) -> VerificationRepor
     ordered = [collected[identity] for identity in contract.checks]
     return VerificationReport(_encode({'format': 'atom-verification-report-v1',
         'contractDigest': contract.digest, 'results': ordered}), len(ordered), sum(item['passed'] for item in ordered))
+
+
+def load_report(contract: VerificationContract, raw: bytes) -> VerificationReport:
+    """Reject noncanonical, incomplete or identity-swapped stored evidence."""
+    if type(raw) is not bytes or len(raw) > MAX_BYTES:
+        _fail()
+    def unique(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                _fail()
+            result[key] = value
+        return result
+    try:
+        document = json.loads(raw.decode('utf-8'), object_pairs_hook=unique)
+    except (UnicodeError, ValueError, RecursionError):
+        _fail()
+    _object(document, ('format', 'contractDigest', 'results'))
+    if document['format'] != 'atom-verification-report-v1' or document['contractDigest'] != contract.digest:
+        _fail()
+    report = capture_report(contract, document['results'])
+    if report.canonical != raw:
+        _fail()
+    return report

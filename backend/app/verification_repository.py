@@ -11,6 +11,9 @@ from .migrations import MigrationError, _schema, verify
 from .verification_contract import ContractError, VerificationContract, capture_contract, capture_report, load_contract
 
 
+_SUPPORTED_SCHEMAS = (2, 3, 4, 5, 6, 7, 9, 10, 12, 13)
+
+
 class VerificationError(RuntimeError):
     pass
 
@@ -47,7 +50,7 @@ class VerificationRepository:
             raise VerificationError('invalid_verification_configuration')
         self.path, self.timeout = Path(path), lock_timeout
         try:
-            if verify(self.path) not in (2, 3, 4, 5, 6, 7, 9, 10, 12):
+            if verify(self.path) not in _SUPPORTED_SCHEMAS:
                 raise VerificationError('verification_schema_required')
         except MigrationError:
             raise VerificationError('verification_schema_required') from None
@@ -60,7 +63,7 @@ class VerificationRepository:
             db.execute('PRAGMA foreign_keys=ON')
             db.execute('PRAGMA synchronous=FULL')
             db.execute('BEGIN IMMEDIATE')
-            if _schema(db) not in (2, 3, 4, 5, 6, 7, 9, 10, 12):
+            if _schema(db) not in _SUPPORTED_SCHEMAS:
                 raise VerificationError('verification_schema_required')
             db.row_factory = sqlite3.Row
             yield db
@@ -136,6 +139,8 @@ class VerificationRepository:
                for value in (owner, request_id)):
             raise VerificationError('invalid_verification_request')
         with self._transaction() as db:
+            if db.execute('PRAGMA user_version').fetchone()[0] == 13:
+                raise VerificationError('verified_registration_required')
             row = db.execute('''SELECT v.* FROM verification_requests v
                 JOIN projects p ON p.id=v.project_id WHERE v.id=? AND p.user_id=?''',
                 (request_id, owner)).fetchone()

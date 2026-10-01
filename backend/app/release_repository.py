@@ -2,13 +2,14 @@
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import hashlib
+import hmac
 import io
 import json
 import re
 import time
 from threading import BoundedSemaphore
 
-from .verification_contract import capture_contract, ContractError
+from .verification_contract import capture_contract, load_report, ContractError
 from .verification_repository import VerificationRepository, VerificationError
 from .artifacts import Artifact, ArtifactError, ArtifactStore
 from .content_policy import validate_content_manifest
@@ -129,6 +130,9 @@ class ReleaseRepository:
         digest = hashlib.sha256(json.dumps(intent,sort_keys=True,separators=(',',':')).encode()).hexdigest()
         key = 'release:' + release_id
         with self._ledger._transaction() as db:
+            schema_version = db.execute('PRAGMA user_version').fetchone()[0]
+            if schema_version == 13 and not (_preflight or _expected_artifact is not None):
+                raise VerificationError('verified_release_required')
             project = db.execute('SELECT * FROM projects WHERE id=? AND user_id=?',(project_id,owner)).fetchone()
             if project is None:
                 raise VerificationError('release_not_found')
@@ -166,6 +170,30 @@ class ReleaseRepository:
                 raise VerificationError('invalid_stored_contract') from None
             if contract.digest != evidence['contract_digest']:
                 raise VerificationError('release_stale_evidence')
+            if schema_version == 13:
+                attestation = db.execute('''SELECT d.project_id,d.workspace_id,d.revision_id,
+                    d.contract_digest,d.policy_digest,d.runner_version,d.artifact_key,
+                    d.snapshot_revision,d.artifact_size,t.verifier_id,t.environment_digest,
+                    t.report_digest,t.observed_at
+                    FROM verification_dispatches d JOIN verification_attestations t
+                      ON t.request_id=d.request_id AND t.verifier_id=d.verifier_id
+                     AND t.environment_digest=d.environment_digest
+                     AND t.artifact_key=d.artifact_key AND t.snapshot_revision=d.snapshot_revision
+                    WHERE d.request_id=?''',(verification_id,)).fetchone()
+                try:
+                    canonical = evidence['report_json'].encode('utf-8')
+                    report = load_report(contract,canonical)
+                except (ContractError, UnicodeError):
+                    raise VerificationError('release_corrupt_evidence') from None
+                if (attestation is None or (attestation['project_id'],attestation['workspace_id'],
+                    attestation['revision_id'],attestation['contract_digest'],attestation['policy_digest'],
+                    attestation['runner_version']) != (project_id,workspace['id'],expected_revision,
+                    contract.digest,policy_digest,runner_version)
+                    or evidence['completed_at'] != attestation['observed_at']
+                    or report.total != evidence['total'] or report.passed != evidence['passed']
+                    or not hmac.compare_digest(hashlib.sha256(canonical).hexdigest(),
+                                               attestation['report_digest'])):
+                    raise VerificationError('release_untrusted_evidence')
             if _preflight or _expected_artifact is not None:
                 row = db.execute('''SELECT a.key,a.revision,a.size FROM revision_records r
                     JOIN revision_artifacts a ON a.key=r.artifact_key AND a.revision=r.snapshot_revision
@@ -174,6 +202,9 @@ class ReleaseRepository:
                 if row is None:
                     raise VerificationError('release_artifact_required')
                 artifact = Artifact(row['key'],row['revision'],row['size'])
+                if schema_version == 13 and (artifact.key,artifact.revision,artifact.size) != (
+                        attestation['artifact_key'],attestation['snapshot_revision'],attestation['artifact_size']):
+                    raise VerificationError('release_untrusted_evidence')
                 if _preflight:
                     return artifact
                 if artifact != _expected_artifact:
@@ -182,7 +213,7 @@ class ReleaseRepository:
                 (id,project_id,workspace_id,revision_id,verification_id,contract_digest,policy_digest,audience,creator_id,previous_release_id,created_at)
                 VALUES (?,?,?,?,?,?,?,?,?,?,?)''',(release_id,project_id,workspace['id'],expected_revision,verification_id,
                 contract.digest,policy_digest,audience,owner,pointer['release_id'] if pointer else None,int(time.time())))
-            if db.execute('PRAGMA user_version').fetchone()[0] in (3, 4, 5, 6, 7, 9, 10, 12):
+            if schema_version in (3, 4, 5, 6, 7, 9, 10, 12, 13):
                 # The verified v3 schema supports serving identity. Allocate it
                 # before promotion so binding, release, pointer and receipt are
                 # committed together or all rolled back on any failure.
@@ -194,7 +225,7 @@ class ReleaseRepository:
             receipt = ReleaseReceipt(release_id,expected_revision,generation,slug)
             db.execute('INSERT INTO command_receipts(project_id,key,digest,response_json,created_at) VALUES (?,?,?,?,?)',
                 (project_id,key,digest,json.dumps(receipt.__dict__,sort_keys=True,separators=(',',':')),datetime.now(timezone.utc).isoformat()))
-            if db.execute('PRAGMA user_version').fetchone()[0] in (5,6,7,9,10,12):
+            if schema_version in (5,6,7,9,10,12,13):
                 record_release_transition(db,kind='release.published',user_id=owner,project_id=project_id,
                     release_id=release_id,operation_id=release_id,generation=generation,occurred_at=int(time.time()))
             return receipt
@@ -232,7 +263,7 @@ class ReleaseRepository:
                        (receipt.generation,project_id))
             db.execute('INSERT INTO command_receipts(project_id,key,digest,response_json,created_at) VALUES (?,?,?,?,?)',
                 (project_id,key,digest,json.dumps(receipt.__dict__,sort_keys=True,separators=(',',':')),datetime.now(timezone.utc).isoformat()))
-            if db.execute('PRAGMA user_version').fetchone()[0] in (5,6,7,9,10,12):
+            if db.execute('PRAGMA user_version').fetchone()[0] in (5,6,7,9,10,12,13):
                 record_release_transition(db,kind='release.unpublished',user_id=owner,project_id=project_id,
                     release_id=expected_release,operation_id=command_id,generation=receipt.generation,occurred_at=int(time.time()))
             return receipt

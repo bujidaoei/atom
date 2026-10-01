@@ -31,7 +31,7 @@ def record_content_transition(db, *, kind, user_id, source_session_id, binding_i
 def record_release_transition(db, *, kind, user_id, project_id, release_id, operation_id, generation, occurred_at):
     if kind not in ('release.published', 'release.unpublished'):
         raise ValueError('invalid_release_audit_kind')
-    if not db.in_transaction or db.execute('PRAGMA user_version').fetchone()[0] not in (5,6,7,9,10,12):
+    if not db.in_transaction or db.execute('PRAGMA user_version').fetchone()[0] not in (5,6,7,9,10,12,13):
         raise ValueError('audit_transaction_required')
     inserted = db.execute('''INSERT INTO security_audit_events
         (event_id,schema_version,event_kind,occurred_at,actor_kind,actor_id,scope_kind,scope_id,

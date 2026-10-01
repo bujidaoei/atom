@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from app.verification_contract import ContractError, capture_contract, capture_report, load_contract
+from app.verification_contract import ContractError, capture_contract, capture_report, load_contract, load_report
 
 
 def requirements():
@@ -91,3 +91,17 @@ def test_report_requires_exact_coverage_and_strict_boolean():
                     [results[0], {**results[1], 'checkIndex': True}],
                     [results[0], {**results[1], 'key': 'foreign'}]]:
         with pytest.raises(ContractError): capture_report(contract, invalid)
+
+
+def test_stored_report_requires_canonical_exact_contract_and_unique_keys():
+    contract = capture_contract(requirements())
+    report = capture_report(contract, [
+        {'key': 'submit', 'checkIndex': 0, 'passed': True, 'note': 'found'},
+        {'key': 'submit', 'checkIndex': 1, 'passed': True, 'note': 'visible'}])
+    assert load_report(contract, report.canonical) == report
+    for raw in (report.canonical + b' ',
+                report.canonical.replace(b'"passed":true', b'"passed":1', 1),
+                report.canonical.replace(contract.digest.encode(), b'f' * 64),
+                b'{"format":"atom-verification-report-v1","format":"duplicate"}'):
+        with pytest.raises(ContractError):
+            load_report(contract, raw)
