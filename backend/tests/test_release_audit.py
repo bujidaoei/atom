@@ -4,6 +4,8 @@ from concurrent.futures import ThreadPoolExecutor
 from threading import Barrier
 
 import pytest
+
+pytestmark = pytest.mark.parametrize('audit_schema_version', [5, 6])
 from app.migrations import migrate
 from app.release_repository import ReleaseRepository
 from app.verification_repository import VerificationError
@@ -11,9 +13,9 @@ from test_release_repository import release, ledger, legacy
 
 
 @pytest.fixture
-def audited_release(release,tmp_path):
+def audited_release(release,tmp_path,audit_schema_version):
     path,_,args=release
-    migrate(path,tmp_path/'before-release-audit.db',target_version=5)
+    migrate(path,tmp_path/'before-release-audit.db',target_version=audit_schema_version)
     return path,ReleaseRepository(path),args
 
 
@@ -74,3 +76,17 @@ def test_competing_publications_emit_only_winning_transition(audited_release):
     with sqlite3.connect(path) as db:
         assert db.execute('SELECT release_id FROM security_audit_events').fetchall()==[(winner.release_id,)]
         assert db.execute('SELECT release_id FROM release_publications').fetchone()==(winner.release_id,)
+
+
+def test_bound_content_resolves_with_current_visibility(audited_release):
+    from app.content_repository import ContentRepository
+    path,releases,args=audited_release
+    releases.publish(**args)
+    content=ContentRepository(path)
+    binding=content.bind(owner='user',project_id='project',release_id='release')
+    assert content.resolve(binding_id=binding.id,viewer='user').revision_id=='root'
+    with pytest.raises(VerificationError):
+        content.resolve(binding_id=binding.id)
+    releases.unpublish(owner='user',project_id='project',command_id='stop',expected_release='release',expected_generation=1)
+    with pytest.raises(VerificationError):
+        content.resolve(binding_id=binding.id,viewer='user')

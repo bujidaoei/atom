@@ -4,6 +4,8 @@ import threading
 
 import pytest
 
+pytestmark = [pytest.mark.parametrize('audit_schema_version', [5, 6]), pytest.mark.usefixtures('audit_schema_version')]
+
 from app.bounded_operations import BoundedOperations
 from app.console_auth import DURABLE_COOKIE
 from app.main import app
@@ -15,9 +17,9 @@ HEADERS = {'X-Atom-Intent': 'inspect-audit-events'}
 
 
 @pytest.fixture
-def reader(durable_client, monkeypatch, tmp_path):
+def reader(durable_client, monkeypatch, tmp_path, audit_schema_version):
     client, path = durable_client
-    migrate(path, tmp_path/'before-v5.db', target_version=5)
+    migrate(path, tmp_path/'before-v5.db', target_version=audit_schema_version)
     monkeypatch.setattr(app.state, 'audit_reads', BoundedOperations(capacity=1, send_timeout=.05))
     monkeypatch.setattr(app.state, 'content_issuer', BoundedOperations())
     assert client.post('/api/auth/register', json=LOGIN).status_code == 200

@@ -6,6 +6,8 @@ import subprocess
 import sys
 
 import pytest
+
+pytestmark = pytest.mark.parametrize('audit_schema_version', [5, 6])
 from app.access_repository import AccessRepository
 from app.content_access import ContentAccessRepository
 from app.migrations import migrate, verify
@@ -53,9 +55,9 @@ raise AssertionError('exit hook not reached')
 
 @pytest.mark.parametrize('operation',['create','single','account','issue','exchange','publish','unpublish'])
 @pytest.mark.parametrize('phase',['before','after'])
-def test_process_crash_keeps_business_and_audit_atomic(release,tmp_path,operation,phase):
+def test_process_crash_keeps_business_and_audit_atomic(release,tmp_path,operation,phase,audit_schema_version):
     path,_,args=release
-    migrate(path,tmp_path/'before-audit.db',target_version=5)
+    migrate(path,tmp_path/'before-audit.db',target_version=audit_schema_version)
     releases=ReleaseRepository(path)
     releases.publish(**args)
     access=ContentAccessRepository(path)
@@ -72,7 +74,7 @@ def test_process_crash_keeps_business_and_audit_atomic(release,tmp_path,operatio
         cwd=Path(__file__).resolve().parents[1],timeout=15)
     assert result.returncode==(71 if phase=='before' else 72)
     assert not result.stdout and not result.stderr
-    assert verify(path)==5
+    assert verify(path)==audit_schema_version
     after=snapshot(path)
     if phase=='before':
         assert after==before

@@ -4,6 +4,8 @@ from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 
 import pytest
+
+pytestmark = pytest.mark.parametrize('audit_schema_version', [5, 6])
 from app.access_repository import AccessRepository, AccessError
 from app.migrations import migrate
 from test_revision_migrations import legacy
@@ -11,9 +13,9 @@ from test_durable_auth_routes import durable_client, LOGIN
 
 
 @pytest.fixture
-def audited(legacy):
+def audited(legacy,audit_schema_version):
     path,backup=legacy
-    migrate(path,backup,target_version=5)
+    migrate(path,backup,target_version=audit_schema_version)
     return path,AccessRepository(path)
 
 
@@ -74,9 +76,9 @@ def test_event_identity_collision_cannot_overwrite_or_commit_business_change(aud
     with sqlite3.connect(path) as db:assert db.execute('SELECT count(*) FROM console_sessions').fetchone()==(1,)
 
 
-def test_real_auth_api_commits_redacted_events(durable_client,tmp_path):
+def test_real_auth_api_commits_redacted_events(durable_client,tmp_path,audit_schema_version):
     client,path=durable_client
-    migrate(path,tmp_path/'before-audited-auth.db',target_version=5)
+    migrate(path,tmp_path/'before-audited-auth.db',target_version=audit_schema_version)
     assert client.post('/api/auth/register',json=LOGIN).status_code==200
     from app.console_auth import DURABLE_COOKIE
     first=client.cookies.get(DURABLE_COOKIE)

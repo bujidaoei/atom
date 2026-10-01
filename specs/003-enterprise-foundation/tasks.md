@@ -275,3 +275,6 @@ T027/008-T029/T030 refinement: refreshed official Atoms/GitHub/GitLab governance
 
 
 008-T031 partial increment: explicit offline schema6 registry migration preserves historical destination scopes, rejects mixed scope, and adds generation/state and active-scope delivery guards. 99 focused migration/delivery/configuration tests pass. Runtime consumers are not yet compatible with6; do not migrate serving databases. Administration/retention and complete T031-T034 acceptance remain open.
+
+
+008-T031 partial compatibility increment accepted at component scope:105 business/migration,67 HTTP/delivery,272 revision/publication,18 main-preflight and24 actual Linux main/runtime cases pass (overlap between suites). Pi1905 files verified. Business consumers support exact6 and preserve audit writes; configured exports still reject6. T031-T034 remain unchecked pending registry-aware exporter/administration and complete acceptance; no production upgrade.

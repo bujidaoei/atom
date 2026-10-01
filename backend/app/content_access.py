@@ -135,7 +135,7 @@ class ContentAccessRepository(AccessRepository):
             secret=secrets.token_hex(32)
             db.execute('INSERT INTO content_handoffs VALUES (?,?,?,?,?,?,?,?,NULL)',
                 (_hash('handoff',secret),challenge,binding_id,viewer_id,source_session_id,generation,now,expires))
-            if db.execute('PRAGMA user_version').fetchone()[0] == 5:
+            if db.execute('PRAGMA user_version').fetchone()[0] in (5,6):
                 record_content_transition(db,kind='content.handoff.issued',user_id=viewer_id,
                     source_session_id=source_session_id,binding_id=binding_id,generation=generation,occurred_at=now)
             return AccessCredential(secret,expires)
@@ -162,7 +162,7 @@ class ContentAccessRepository(AccessRepository):
             db.execute('UPDATE content_handoffs SET consumed_at=? WHERE token_hash=?',(now,handoff_hash))
             db.execute('INSERT INTO content_sessions VALUES (?,?,?,?,?,?,?,?,NULL)',
                 (_hash('session',secret),handoff_hash,binding_id,row['viewer_id'],row['source_session_id'],row['publication_generation'],now,expires))
-            if db.execute('PRAGMA user_version').fetchone()[0] == 5:
+            if db.execute('PRAGMA user_version').fetchone()[0] in (5,6):
                 record_content_transition(db,kind='content.session.created',user_id=row['viewer_id'],
                     source_session_id=row['source_session_id'],binding_id=binding_id,
                     generation=row['publication_generation'],occurred_at=now)

@@ -26,7 +26,7 @@ BASE = Artifact('a'*64, 'b'*64, 14)
 OUTPUT = Artifact('c'*64, 'd'*64, 15)
 
 
-@pytest.fixture(params=[1,4,5],ids=["schema-v1","schema-v4","schema-v5"])
+@pytest.fixture(params=[1,4,5,6],ids=["schema-v1","schema-v4","schema-v5","schema-v6"])
 def repository(tmp_path,request):
     path = tmp_path / 'api.db'
     engine = create_engine('sqlite:///' + path.as_posix())

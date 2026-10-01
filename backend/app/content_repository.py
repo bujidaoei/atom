@@ -21,7 +21,7 @@ class ContentRepository:
         db.row_factory = None
         version = _schema(db)
         db.row_factory = sqlite3.Row
-        if version not in (3, 4, 5):
+        if version not in (3, 4, 5, 6):
             raise VerificationError('content_schema_required')
 
     def bind(self, *, owner: str, project_id: str, release_id: str) -> ContentBinding:

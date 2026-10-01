@@ -45,3 +45,9 @@ def signed_in(client: TestClient) -> TestClient:
     )
     assert response.status_code == 200, response.text
     return client
+
+
+@pytest.fixture
+def audit_schema_version():
+    """Default for shared fixtures; audit consumer suites explicitly cover5/6."""
+    return 5

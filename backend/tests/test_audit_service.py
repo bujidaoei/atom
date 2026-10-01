@@ -58,10 +58,10 @@ def test_independent_credential_and_durable_cutover_required():
         settings(audit_export_ca_file='relative.pem')
 
 
-@pytest.mark.parametrize('version', [4, 5])
+@pytest.mark.parametrize('version', [4, 5, 6])
 def test_actual_main_startup_and_shutdown_owns_configured_export(durable_client, tmp_path, monkeypatch, version):
     client, path = durable_client
-    if version == 5: migrate(path, tmp_path/'before-v5.db', target_version=5)
+    if version in (5,6): migrate(path, tmp_path/'before-audit.db', target_version=version)
     user = client.post('/api/auth/register', json=LOGIN).json()['id']
     config = get_settings()
     monkeypatch.setattr(config, 'audit_export_config', json.dumps([ENTRY|{'scope_id': user}]))
@@ -70,12 +70,12 @@ def test_actual_main_startup_and_shutdown_owns_configured_export(durable_client,
     async def sender(*args, **kwargs):
         called.set()  # Outcome injection; actual main/SQLite ownership remains real.
     monkeypatch.setattr('app.audit_exporter.send_audit_events', sender)
-    if version == 4:
+    if version != 5:
         with pytest.raises(AuditExporterError, match='storage_unavailable'):
             with TestClient(app): pass
         assert not called.is_set()
         assert app.state.audit_exports.pending_count == 0
-        with sqlite3.connect(path) as db: assert db.execute('PRAGMA user_version').fetchone() == (4,)
+        with sqlite3.connect(path) as db: assert db.execute('PRAGMA user_version').fetchone() == (version,)
     else:
         with TestClient(app):
             assert called.wait(3)

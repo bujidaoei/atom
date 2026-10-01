@@ -879,3 +879,25 @@ Baseline9438acd. Added explicit schema6 registry migration retaining every histo
 Command: backend/.venv/Scripts/python.exe -m pytest backend/tests/test_audit_governance_migration.py backend/tests/test_audit_migration.py backend/tests/test_revision_migrations.py backend/tests/test_access_migration.py backend/tests/test_audit_delivery.py backend/tests/test_audit_configuration_lifecycle.py -q --tb=short --junitxml=.logs/audit-governance-migration.xml.
 Result:99 tests,0 failures,0 errors,0 skips,20.855s. Source0-5 migration/backup/replay/actual restore, populated removed-config history, mixed-scope complete rollback, late DDL failure and actual child os._exit(73) before commit with complete source dump equality/retry pass. Unknown/wrong-scope destination enrollment and inactive claims rejected; already leased ack after pause succeeds. Existing delivery consumer explicitly rejects6 without changing dump. Existing Starlette/httpx deprecation warning only.
 Offline Windows component evidence only. Runtime compatibility, administrative APIs/receipts, aftercommit process-loss case, production migration/restore and complete T031 acceptance remain open. No production migration, cleanup, remote push/deployment or Pi modification performed.
+
+
+## T031 schema6 business/runtime consumer compatibility — 2026-10-01
+Baseline45fe970. Access, content capabilities, revision/verification/publication/content repositories and audit reader now explicitly accept exact schema6. Every previously audited business transition writes in5 and6 within its owning transaction. Schema hashes/DDL remain exact checked; no >= version bypass. Before implementation the new schema6 test failed at AccessRepository constructor with access_schema_required, confirming the compatibility gap.
+backend/.venv/Scripts/python.exe -m pytest backend/tests/test_security_audit.py backend/tests/test_content_audit.py backend/tests/test_release_audit.py backend/tests/test_audit_repository.py backend/tests/test_audit_crash.py backend/tests/test_audit_governance_migration.py -q --tb=short --junitxml=.logs/audit-v6-consumers.xml
+Result: 105 tests,0 failures,0 errors,0 skips,38.940s.
+
+backend/.venv/Scripts/python.exe -m pytest backend/tests/test_audit_routes.py backend/tests/test_audit_delivery.py backend/tests/test_audit_configuration_lifecycle.py -q --tb=short --junitxml=.logs/audit-v6-http.xml
+Result: 67 tests,0 failures,0 errors,0 skips,27.694s.
+
+backend/.venv/Scripts/python.exe -m pytest backend/tests/test_revision_repository.py backend/tests/test_release_audit.py -q --tb=short --junitxml=.logs/audit-v6-revisions.xml
+Result: 272 tests,0 failures,0 errors,0 skips,109.722s.
+
+backend/.venv/Scripts/python.exe -m pytest backend/tests/test_audit_service.py -q --tb=short --junitxml=.logs/audit-v6-preflight.xml
+Result: 18 tests,0 failures,0 errors,0 skips,1.924s.
+
+backend/.venv/Scripts/python.exe -m pytest backend/tests/integration/test_orchestrated_execution.py -q --tb=short --junitxml=.logs/audit-v6-runtime.xml
+Result: 24 tests,0 failures,0 errors,0 skips,267.784s.
+Business suites cover real SQLite scope/replay/concurrent winners, rollback and28 actual subprocess exits (7 operations x before/after commit x schemas5/6). HTTP suites use real signed sessions and query/authority checks. Revision suite now covers1/4/5/6; additional5/6 content-binding resolution obeys current visibility. Configured main export preflight rejects6 before scheduling; successful export remains5 only. Some cases overlap across commands; results are execution counts, not a unique-test total.
+Linux runtime command used explicit API image sha256:6ac559f089eca4b1a846bb3a57eec1cb24f23a0dde93b849b34e9cc7de3ce2bb and sandbox image sha256:392307d22300de8b5986851a12d9176dfc0fc073e65bf6523ebd7dcbeb23564e.24 actual main/own Node/broker/container cases cover schemas1/4/5/6 and valid/invalid/disconnect/cancel/deadline/checkpoint-deadline outcomes. Model stream is synthetic and export is disabled; this does not prove schema6 export or live model/production acceptance.
+Pi verified from runtime directory using node scripts/verify-pi-source.mjs: locked f07218c4d4bbc12bef056a7058c3dd49dfe41abe,1905 files. An initial invocation from repo root failed due to wrong working directory; corrected invocation passed. Existing Starlette/httpx deprecation warning only. No Pi edits or production migrations performed.
+T031 remains open: registry-aware delivery/export and administrative lifecycle are not implemented; full content/browser/production rollout acceptance remains separate. Do not migrate serving databases yet. T032-T034 and enterprise goal remain open.

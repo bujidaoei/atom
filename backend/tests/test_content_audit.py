@@ -2,6 +2,8 @@ import sqlite3
 from contextlib import contextmanager
 
 import pytest
+
+pytestmark = pytest.mark.parametrize('audit_schema_version', [5, 6])
 from app.access_repository import AccessError
 from app.content_access import ContentAccessRepository, _hash
 from app.migrations import migrate
@@ -9,10 +11,10 @@ from test_content_repository import content, release, ledger, legacy
 
 
 @pytest.fixture
-def audited_content(content,tmp_path,monkeypatch):
+def audited_content(content,tmp_path,monkeypatch,audit_schema_version):
     path,repository,*_=content
     binding=repository.bind(owner='user',project_id='project',release_id='release')
-    migrate(path,tmp_path/'before-audit.db',target_version=5)
+    migrate(path,tmp_path/'before-audit.db',target_version=audit_schema_version)
     monkeypatch.setattr('app.content_access.time.time',lambda:100)
     access=ContentAccessRepository(path)
     source=access.create_console_session(user_id='user',lifetime_seconds=1000)
