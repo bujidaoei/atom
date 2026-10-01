@@ -318,7 +318,7 @@ function ProjectWorkspace({ id }: { id: string | undefined }) {
       {["error", "cancelled", "timed_out", "interrupted"].includes(project.status) ? (
         <div role="status" className="flex shrink-0 items-center gap-m border-b border-neutral-12 px-l py-s text-sm">
           <div className="flex-1">{project.latestRun?.error || "本轮未完成。"} {hasFiles ? "可预览已有文件，尚未完成验收。" : "可以重新尝试。"}</div>
-          <Button size="sm" variant="secondary" loading={starting} onClick={() => void resume()}>继续生成</Button>
+          <Button size="sm" variant="secondary" loading={starting} onClick={() => void resume()}>{hasFiles ? "继续生成" : "重新生成"}</Button>
         </div>
       ) : running ? <div role="status" className="px-l py-xs text-xs text-neutral-60">{project.status === "planning" ? "正在规划需求，完成后请确认契约" : project.race?.status === "running" ? "正在竞速，按所选时间上限运行" : `正在生成，本轮构建上限 ${project.buildBudgetSeconds} 秒`}；完成前可随时停止。</div> : null}
 

@@ -604,9 +604,12 @@ class Orchestrator:
         lease = None
         completed_revision = None
         execution_args = {}
+        broker_mode = get_settings().sandbox_mode == 'broker'
+        unfinished_files = ('本轮未完成的文件未保存，已提交版本不受影响'
+                            if broker_mode else '已有文件已保留')
         try:
             async with asyncio.timeout(budget):
-                if get_settings().sandbox_mode == 'broker':
+                if broker_mode:
                     if self.execution is None:
                         raise RuntimeError('执行服务尚未就绪')
                     lease = await self.execution.prepare_run(owner=user_id, project_id=project_id,
@@ -679,7 +682,7 @@ class Orchestrator:
                                     completed_revision = line.payload['revisionReceipt']['revision_id']
                             break
                 if not terminal:
-                    raise RuntimeError("运行时未返回完成结果，已有文件已保留")
+                    raise RuntimeError(f"运行时未返回完成结果，{unfinished_files}")
                 if status == "done" and role == "alex":
                     if lease is None:
                         await validate_artifacts(workspace)
@@ -691,10 +694,10 @@ class Orchestrator:
         except TimeoutError:
             status, error = (
                 "timed_out",
-                f"已达到 {budget:g} 秒生成上限，已有文件已保留，可继续生成",
+                f"已达到 {budget:g} 秒生成上限，{unfinished_files}",
             )
         except asyncio.CancelledError:
-            status, error, cancelled = "cancelled", "任务已取消，已有文件已保留", True
+            status, error, cancelled = "cancelled", f"任务已取消，{unfinished_files}", True
         except Exception as exc:
             status, error = "failed", str(exc) or type(exc).__name__
         if status != "done":

@@ -1,4 +1,5 @@
 import asyncio
+from types import SimpleNamespace
 import pytest
 
 from sqlalchemy import select
@@ -8,7 +9,7 @@ from app.db import session_scope
 from app.events import EventBus
 from app.models import Project, Run, User
 from app.services.orchestrator import Orchestrator
-from app.services.runtime_client import RuntimeLine
+from app.services.runtime_client import GatewayConfig, RuntimeLine
 
 
 class ScriptedRuntime:
@@ -57,6 +58,38 @@ def test_silent_deadline_is_terminal(signed_in, monkeypatch):
         run = session.scalar(select(Run).where(Run.project_id == project_id))
         assert run.status == "timed_out" and run.finished_at
     assert len(runtime.cancelled) == 1
+
+
+def test_broker_deadline_does_not_claim_uncommitted_files_survived(signed_in, monkeypatch):
+    monkeypatch.setattr(get_settings(), 'sandbox_mode', 'broker')
+    project_id, user_id = seed()
+    runtime = ScriptedRuntime('silent')
+    interruptions = []
+
+    class FakeCoordinator:
+        async def interrupt(self, owner, attempt_id, outcome):
+            interruptions.append((owner, attempt_id, outcome))
+
+    class FakeExecution:
+        coordinator = FakeCoordinator()
+        repository = object()
+
+        async def prepare_run(self, **_kwargs):
+            return SimpleNamespace(execution_id='execution', workspace_id='workspace')
+
+    async def scenario():
+        orchestration = Orchestrator(runtime)
+        orchestration.execution = FakeExecution()
+        return await orchestration._turn(project_id, user_id, role='alex', phase='race',
+            gateway=GatewayConfig('https://gateway.invalid/v1', 'sk-testtesttesttest12', 'test-model'),
+            prompt='build a page', record_message=False, budget_seconds=0.05)
+
+    result = asyncio.run(scenario())
+    assert result.status == 'timed_out'
+    assert '未完成的文件未保存' in result.error
+    assert '已有文件已保留' not in result.error
+    assert len(runtime.cancelled) == 1
+    assert interruptions == [(user_id, 'execution', 'timed_out')]
 
 
 @pytest.mark.parametrize('reported,expected', [('cancelled','cancelled'),('timed_out','timed_out'),

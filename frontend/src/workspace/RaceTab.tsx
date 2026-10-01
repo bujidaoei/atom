@@ -347,7 +347,7 @@ function HeatCard({
       ) : null}
 
       {heat.error && !["running", "queued", "done"].includes(heat.status) ? (
-        <p className="border-t border-neutral-8 px-m py-s text-xs text-neutral-60">{heat.error}。可在上方调整时间上限，再继续此赛道。</p>
+        <p className="border-t border-neutral-8 px-m py-s text-xs text-neutral-60">{heat.error}。可在上方调整时间上限，再{heat.fileCount > 0 ? "继续" : "重新生成"}此赛道。</p>
       ) : null}
 
       <footer className="mt-auto flex items-center gap-s border-t border-neutral-8 px-m py-s">
@@ -358,7 +358,7 @@ function HeatCard({
               api.retryHeat(projectId, heat.id, budget).then(onRetried)
                 .catch((err: unknown) => setAdoptError(errorMessage(err)))
                 .finally(() => setAdopting(false));
-            }}>继续此赛道</Button>
+            }}>{heat.fileCount > 0 ? "继续此赛道" : "重新生成此赛道"}</Button>
         ) : null}
         <Button
           size="sm"
