@@ -10,10 +10,15 @@ from app.migrations import migrate
 from test_revision_migrations import legacy
 
 
-@pytest.fixture(params=[4,5])
+@pytest.fixture(params=[4,5,13])
 def access(legacy,monkeypatch,request):
     path,backup=legacy
-    migrate(path,backup,target_version=request.param)
+    if request.param == 13:
+        migrate(path,backup,target_version=11)
+        migrate(path,backup.with_name('before-v12.db'),target_version=12)
+        migrate(path,backup.with_name('before-v13.db'),target_version=13)
+    else:
+        migrate(path,backup,target_version=request.param)
     monkeypatch.setattr('app.access_repository.time.time',lambda:100)
     return path,AccessRepository(path)
 
@@ -38,6 +43,28 @@ def test_concurrent_revocation_is_idempotent_and_scoped(access):
         results=list(pool.map(lambda _:repository.revoke_console_session(user_id='user',session_id=session.id),range(2)))
     assert results[0]==results[1] and results[0].revoked_at==100
     with pytest.raises(AccessError):AccessRepository(path).console_session(user_id='user',session_id=session.id)
+
+
+def test_v13_session_transitions_write_scoped_audit_rows(legacy,monkeypatch):
+    path, backup = legacy
+    migrate(path,backup,target_version=11)
+    migrate(path,backup.with_name('before-v12.db'),target_version=12)
+    migrate(path,backup.with_name('before-v13.db'),target_version=13)
+    monkeypatch.setattr('app.access_repository.time.time',lambda:100)
+    repository = AccessRepository(path)
+    first = repository.create_console_session(user_id='user', lifetime_seconds=60)
+    second = repository.create_console_session(user_id='user', lifetime_seconds=60)
+    repository.revoke_console_session(user_id='user', session_id=first.id)
+    assert repository.revoke_console_sessions(user_id='user', source_session_id=second.id) == 1
+    with sqlite3.connect(path) as db:
+        events = db.execute('''SELECT event_kind,actor_id,scope_id,source_session_id,affected_count
+            FROM security_audit_events ORDER BY rowid''').fetchall()
+    assert events == [
+        ('console.session.created','user','user',first.id,1),
+        ('console.session.created','user','user',second.id,1),
+        ('console.session.revoked','user','user',first.id,1),
+        ('console.account_sessions.revoked','user','user',second.id,1),
+    ]
 
 
 def test_capacity_is_atomic_and_revocation_frees_slot(access):
