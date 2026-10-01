@@ -102,7 +102,7 @@ class VerifierAuthority:
                 JOIN projects p ON p.id=r.project_id
                 WHERE r.id=? AND r.workspace_id=? AND r.project_id=?
                   AND w.current_revision_id=r.id AND w.active_attempt_id IS NULL
-                  AND p.active_run_id IS NULL''',
+                  AND p.active_run_id IS NULL AND p.status='ready' ''',
                 (request.revision_id, request.workspace_id, request.project_id)).fetchone()
             if descriptor is None:
                 raise VerificationError('verification_stale_artifact')
@@ -165,7 +165,7 @@ class VerifierAuthority:
                     or request.runner_version != dispatch['runner_version']
                     or _contract(db, request.project_id).digest != request.contract.digest):
                 raise VerificationError('verification_stale_evidence')
-            scope = db.execute('''SELECT w.current_revision_id,w.active_attempt_id,p.active_run_id,
+            scope = db.execute('''SELECT w.current_revision_id,w.active_attempt_id,p.active_run_id,p.status,
                 r.artifact_key,r.snapshot_revision,a.size FROM revision_workspaces w
                 JOIN projects p ON p.id=w.project_id
                 JOIN revision_records r ON r.id=? AND r.workspace_id=w.id
@@ -174,6 +174,7 @@ class VerifierAuthority:
                 (request.revision_id,request.workspace_id,request.project_id)).fetchone()
             if (scope is None or scope['current_revision_id'] != request.revision_id
                     or scope['active_attempt_id'] is not None or scope['active_run_id'] is not None
+                    or scope['status'] != 'ready'
                     or (scope['artifact_key'],scope['snapshot_revision'],scope['size']) !=
                        (artifact.key,artifact.revision,artifact.size)):
                 raise VerificationError('verification_stale_evidence')

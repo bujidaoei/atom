@@ -150,7 +150,8 @@ class ReleaseRepository:
                 return receipt
             workspace = db.execute('SELECT * FROM revision_workspaces WHERE project_id=? AND heat_id IS NULL',(project_id,)).fetchone()
             if (workspace is None or workspace['current_revision_id'] != expected_revision
-                or workspace['active_attempt_id'] is not None or project['active_run_id'] is not None):
+                or workspace['active_attempt_id'] is not None or project['active_run_id'] is not None
+                or (schema_version == 13 and project['status'] != 'ready')):
                 raise VerificationError('release_conflict')
             pointer = db.execute('SELECT * FROM release_publications WHERE project_id=?',(project_id,)).fetchone()
             if (pointer['generation'] if pointer else 0) != expected_generation or (pointer and pointer['slug'] != slug):

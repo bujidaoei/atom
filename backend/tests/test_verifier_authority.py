@@ -140,6 +140,50 @@ def test_owner_scoped_current_scope_and_durable_result_reconciliation(authorized
     assert settled.result == observed and settled.dispatched
 
 
+@pytest.mark.parametrize('stage', ['reserve','dispatch','register','publish'])
+def test_v13_incomplete_project_cannot_be_verified_or_published(adopted, tmp_path, stage):
+    path, receipt, intent = adopted
+    migrate(path, tmp_path / 'before-v13.db', target_version=13)
+    repository = VerificationRepository(path)
+    if stage == 'reserve':
+        with sqlite3.connect(path) as db:
+            db.execute("UPDATE projects SET status='cancelled' WHERE id='project'")
+        with pytest.raises(VerificationError, match='verification_conflict'):
+            repository.current_scope(owner='user', project_id='project')
+        with pytest.raises(VerificationError, match='verification_conflict'):
+            repository.reserve(**intent)
+        return
+    request = repository.reserve(**intent)
+    authority = VerifierAuthority(path)
+    args = dict(owner='user', request_id=request.id, route_id='a' * 32,
+                verifier_id='worker-1', environment_digest='e' * 64)
+    if stage == 'dispatch':
+        with sqlite3.connect(path) as db:
+            db.execute("UPDATE projects SET status='cancelled' WHERE id='project'")
+        with pytest.raises(VerificationError, match='verification_stale_artifact'):
+            authority.dispatch_current(**args)
+        return
+    assignment = authority.dispatch_current(**args)
+    results = [{'key':'page','checkIndex':0,'passed':True,'note':'observed'}]
+    if stage == 'register':
+        with sqlite3.connect(path) as db:
+            db.execute("UPDATE projects SET status='cancelled' WHERE id='project'")
+        with pytest.raises(VerificationError, match='verification_stale_evidence'):
+            _register(authority, assignment, results)
+        with sqlite3.connect(path) as db:
+            assert db.execute('SELECT count(*) FROM verification_results').fetchone() == (0,)
+        return
+    _register(authority, assignment, results)
+    with sqlite3.connect(path) as db:
+        db.execute("UPDATE projects SET status='cancelled' WHERE id='project'")
+    payload, artifact = snapshot(b'<html>heat</html>')
+    assert artifact == receipt.artifact
+    with pytest.raises(VerificationError, match='release_conflict'):
+        ReleaseRepository(path).publish_verified(Store(artifact.key, payload), **_intent(request))
+    with sqlite3.connect(path) as db:
+        assert db.execute('SELECT count(*) FROM release_records').fetchone() == (0,)
+
+
 def test_legacy_report_path_and_unverified_publish_denied(authorized):
     path, receipt, request, authority, assignment, results = authorized
     with pytest.raises(VerificationError, match='verified_registration_required'):

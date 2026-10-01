@@ -111,13 +111,14 @@ class VerificationRepository:
         with self._transaction() as db:
             if db.execute('PRAGMA user_version').fetchone()[0] != 13:
                 raise VerificationError('verifier_schema_required')
-            row = db.execute('''SELECT w.id,w.current_revision_id,w.active_attempt_id,p.active_run_id
+            row = db.execute('''SELECT w.id,w.current_revision_id,w.active_attempt_id,p.active_run_id,p.status
                 FROM revision_workspaces w JOIN projects p ON p.id=w.project_id
                 WHERE p.id=? AND p.user_id=? AND w.heat_id IS NULL''',
                 (project_id, owner)).fetchone()
             if row is None:
                 raise VerificationError('verification_not_found')
             if (row['current_revision_id'] is None or row['active_attempt_id'] is not None
+                    or row['status'] != 'ready'
                     or row['active_run_id'] is not None):
                 raise VerificationError('verification_conflict')
             rows = db.execute('''SELECT key,title,detail,checks_json FROM requirements
@@ -166,7 +167,7 @@ class VerificationRepository:
         if type(budget_seconds) is not int or not 1 <= budget_seconds <= 900:
             raise VerificationError('invalid_verification_request')
         with self._transaction() as db:
-            scope = db.execute('''SELECT w.*,p.active_run_id FROM revision_workspaces w
+            scope = db.execute('''SELECT w.*,p.active_run_id,p.status FROM revision_workspaces w
                 JOIN projects p ON p.id=w.project_id WHERE w.id=? AND p.user_id=?''', (workspace_id, owner)).fetchone()
             if scope is None:
                 raise VerificationError('verification_not_found')
@@ -177,7 +178,10 @@ class VerificationRepository:
                 if expected != actual:
                     raise VerificationError('verification_conflict')
                 return self._decode(previous)
-            if scope['current_revision_id'] != expected_revision or scope['active_attempt_id'] is not None or scope['active_run_id'] is not None:
+            if (scope['current_revision_id'] != expected_revision
+                    or scope['active_attempt_id'] is not None or scope['active_run_id'] is not None
+                    or (db.execute('PRAGMA user_version').fetchone()[0] == 13
+                        and scope['status'] != 'ready')):
                 raise VerificationError('verification_conflict')
             rows = db.execute('SELECT key,title,detail,checks_json FROM requirements WHERE project_id=? ORDER BY position,id LIMIT 129', (scope['project_id'],)).fetchall()
             try:
