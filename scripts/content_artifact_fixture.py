@@ -12,7 +12,7 @@ os.environ.update(ATOM_ENVIRONMENT='test', ATOM_SANDBOX_MODE='local',
 
 private_exchange=os.environ.get('ATOM_FIXTURE_PRIVATE_EXCHANGE')=='1'
 audit_schema=int(os.environ.get('ATOM_FIXTURE_AUDIT_SCHEMA','0'))
-if audit_schema not in (0,5,6,7):raise ValueError('invalid_fixture_audit_schema')
+if audit_schema not in (0,5,6,7,9):raise ValueError('invalid_fixture_audit_schema')
 if private_exchange:
     os.environ.update(ATOM_SESSION_MODE='durable',ATOM_CONSOLE_ORIGIN='https://console.atom-console.test',
         ATOM_CONTENT_HOST_SUFFIX='atom-content.test',ATOM_COOKIE_SECURE='true')

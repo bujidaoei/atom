@@ -286,3 +286,6 @@ Provision the dedicated private store directory per the storage contract first. 
 
 
 Current9 component compatibility now covers ordinary business repositories, governance, configured export and main TLS tests; this supersedes prior blanket serving-rejects9 notes. Full runtime/browser/production9 gates are still open, so this component evidence is not rollout approval. Ordinary consumers intentionally still reject8. No startup migration occurs, and destination registration plus explicit archive policy/store configuration remain required.
+
+
+Schema9 targeted runtime regression: with explicit pinned API/sandbox test image environment, run `backend/.venv/Scripts/python.exe -m pytest backend/tests/integration/test_orchestrated_execution.py -k schema-v9 -q`. Six cases must execute without skips. The runtime matrix now supports1/4/5/6/7/9 with named schema IDs. Browser harness now accepts explicit --audit-schema9 (CLI spelling: `--audit-schema 9`); run `python scripts/content_artifact_browser.py --private-exchange --audit-schema 9` with ATOM_TEST_API_IMAGE. These tests do not enable audit export in the runtime matrix or supply live-model/trusted-verifier production evidence.
