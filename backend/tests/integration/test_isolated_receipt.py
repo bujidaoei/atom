@@ -17,10 +17,24 @@ API_IMAGE = os.environ.get('ATOM_TEST_API_IMAGE')
 pytestmark = pytest.mark.skipif(not IMAGE or not API_IMAGE,reason='requires pinned API and sandbox images')
 
 
-@pytest.mark.parametrize('scenario',['happy','auth','policy','lost-result','worker','cancelled','cli','commit-before','commit-after'])
+@pytest.mark.parametrize('scenario',['happy','auth','policy','lost-result','worker','cancelled','cli','commit-before','commit-after',
+    'pages','pages-hold','missing','corrupt'])
 def test_real_linux_owner_wire_worker_and_receipt(planned,recovery,tmp_path,monkeypatch,scenario):
     path,_ = planned
     migrate(path,tmp_path/'before-ten.db',target_version=10)
+    if scenario in ('pages','pages-hold'):
+        from app.access_repository import AccessRepository
+        from app.audit_delivery import AuditDeliveryRepository
+        access = AccessRepository(path)
+        with monkeypatch.context() as clock:
+            for index in range(99):
+                clock.setattr(time,'time',lambda index=index:200+index*61)
+                access.create_console_session(user_id='user',lifetime_seconds=60)
+        delivery = AuditDeliveryRepository(path,destination_id='sink',scope_kind='account',scope_id='user')
+        delivery.enroll()
+        lease = delivery.claim()
+        assert len(lease.events)==99
+        delivery.acknowledge(event_ids=[row['event_id'] for row in lease.events],lease_owner=lease.owner)
     app,config,_,_,_ = recovery
     if scenario == 'worker':
         monkeypatch.setattr('app.sandbox.audit_recovery._PROGRAM','raise SystemExit(2)')
@@ -45,7 +59,8 @@ def test_real_linux_owner_wire_worker_and_receipt(planned,recovery,tmp_path,monk
         data = dict(port=port,token=config.admin_token,image=IMAGE,policy=app.state.lifecycle.driver.policy_digest,scenario=scenario)
         status,out,err = run_bounded(command,timeout=30,input_data=json.dumps(data).encode())
         assert status == 0,err.decode()
-        assert json.loads(out) == {'scenario':scenario,'receipts':1 if scenario in ('happy','cli','commit-before','commit-after') else 0}
+        expected = 2 if scenario=='pages' else int(scenario in ('happy','cli','commit-before','commit-after','pages-hold'))
+        assert json.loads(out) == {'scenario':scenario,'receipts':expected}
         assert not app.state.lifecycle.driver.owned_inventory()
         if scenario in ('cli','commit-before','commit-after'):
             with sqlite3.connect(config.registry_path) as db:

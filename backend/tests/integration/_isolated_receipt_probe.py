@@ -15,6 +15,8 @@ import threading
 
 from app.audit_archiving import AuditArchiving
 from app.audit_archive import ArchiveError
+from app.audit_retention import RetentionError
+from app.audit_event_format import EVENT_FIELDS
 from app.sandbox.audit_recovery_client import AuditRecoveryClient
 from app.sandbox.client import BrokerClientError
 
@@ -25,7 +27,14 @@ Path('/tmp/archive').mkdir(mode=0o700)
 with sqlite3.connect('/tmp/source.db') as db:
     store = db.execute('SELECT archive_store_id FROM security_audit_retention_policies').fetchone()[0]
 owner = AuditArchiving(Path('/tmp/source.db'),store_id=store,root=Path('/tmp/archive'))
-owner.archive(archive_id='archive',operator_id='operator',policy_id='policy',expected_generation=1)
+registered = owner.archive(archive_id='archive',operator_id='operator',policy_id='policy',expected_generation=1)
+if config['scenario'] in ('missing','corrupt'):
+    file = Path('/tmp/archive')/(registered['archive_sha256']+'.atomaudit')
+    if config['scenario']=='missing':
+        file.unlink()
+    else:
+        file.chmod(0o600)
+        file.write_bytes(b'corrupt')
 request = dict(archive_id='archive',recovery_id='receipt',verifier_id='verifier')
 
 
@@ -64,9 +73,9 @@ async def run():
                 raise asyncio.CancelledError()
             return result
         client.recover = observe
-        if scenario in ('auth','policy','lost-result','worker','cancelled'):
+        if scenario in ('auth','policy','lost-result','worker','cancelled','missing','corrupt'):
             try: await owner.recover_isolated(**request,client=client)
-            except (BrokerClientError, asyncio.CancelledError): pass
+            except (BrokerClientError, asyncio.CancelledError, ArchiveError): pass
             else: raise AssertionError('failed verification issued receipt')
             expected = 0
         else:
@@ -80,15 +89,41 @@ async def run():
             except ArchiveError as error: assert str(error) == 'recovery_identity_conflict'
             else: raise AssertionError('identity conflict accepted')
             expected = 1
+            if scenario in ('pages','pages-hold'):
+                first = owner.inspect(archive_id='archive')
+                assert first['archive']['event_count']==100 and first['continuation']
+                continuation = dict(first['continuation'],archive_id='second',operator_id='operator')
+                if scenario=='pages-hold':
+                    owner.repository.execute(command_id='hold',policy_id='policy',operator_id='operator',action='place_hold',
+                        expected_generation=1,hold_id='legal-hold',hold_kind='legal')
+                    try: owner.archive(**continuation)
+                    except RetentionError: pass
+                    else: raise AssertionError('held continuation accepted')
+                    with sqlite3.connect('/tmp/source.db') as db:
+                        assert db.execute('SELECT count(*) FROM security_audit_archives').fetchone()==(1,)
+                else:
+                    second = owner.archive(**continuation)
+                    assert second['event_count']==2
+                    await owner.recover_isolated(archive_id='second',recovery_id='second',verifier_id='verifier',client=client)
+                    assert len(seen)==2 and owner.inspect(archive_id='second')['continuation'] is None
+                    with sqlite3.connect('/tmp/source.db') as db:
+                        db.row_factory=sqlite3.Row
+                        source = [dict(row) for row in db.execute('SELECT '+','.join(EVENT_FIELDS)+
+                            " FROM security_audit_events WHERE scope_kind='account' AND scope_id='user' "
+                            "AND event_kind='console.session.created' ORDER BY sequence")]
+                    restored = seen[0]['result']['events']+seen[1]['result']['events']
+                    assert len(source)==102 and restored==source
+                    expected=2
         try: owner.recover(**request)
         except ArchiveError as error: assert str(error) == 'isolated_recovery_required'
         else: raise AssertionError('legacy receipt accepted on schema10')
         with sqlite3.connect('/tmp/source.db') as db:
             assert db.execute('SELECT count(*) FROM security_audit_isolated_recoveries').fetchone() == (expected,)
             assert db.execute('SELECT count(*) FROM security_audit_archive_recoveries').fetchone() == (0,)
-        inspection = owner.inspect(archive_id='archive')
-        assert inspection['isolated_recovery_receipts'] == expected
-        assert inspection['recovery_receipts'] == 0 and not inspection['deletion_authorized']
+        if scenario not in ('missing','corrupt'):
+            inspection = owner.inspect(archive_id='archive')
+            assert inspection['isolated_recovery_receipts'] == min(expected,1)
+            assert inspection['recovery_receipts'] == 0 and not inspection['deletion_authorized']
     return expected
 
 

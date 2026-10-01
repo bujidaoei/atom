@@ -322,3 +322,6 @@ Browser schema10 acceptance: build frontend, set the approved ATOM_TEST_API_IMAG
 
 
 T035 isolated recovery component is accepted with the completion matrix in evidence.md. Regression: `backend/.venv/Scripts/python.exe -m pytest backend/tests/integration/test_isolated_audit_recovery.py -q --junitxml=.logs/recovery-authority-denial.xml` using the pinned sandbox image. This includes real host-credential denial and network-unreachable checks. T033/T034 and production rollout remain unaccepted; schema9 recovery is historical only.
+
+
+Current isolated archive acceptance suite includes13 cases: run `backend/.venv/Scripts/python.exe -m pytest backend/tests/integration/test_isolated_receipt.py -q --junitxml=.logs/isolated-archive-pages.xml` with explicit pinned API/sandbox images. This adds actual102-event100+2 recovery, between-page legal hold, and missing/corrupt objects. Production capacity/backup and T034 remain separate.
