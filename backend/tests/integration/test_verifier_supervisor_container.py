@@ -1,4 +1,5 @@
 """Real Docker report enters v13 only through the trusted supervised path."""
+import asyncio
 import json
 import multiprocessing
 import os
@@ -11,10 +12,12 @@ from concurrent.futures import ThreadPoolExecutor
 import time
 
 import pytest
+import httpx
 
 from app.migrations import migrate
 from app.artifacts import ArtifactStore
 from app.content_repository import ContentRepository
+from app.content_entry import ContentProcessConfig, create_app as create_content_app
 from app.release_repository import ReleaseRepository
 from app.release_view import materialized_content
 from app.verification_contract import capture_contract
@@ -99,9 +102,30 @@ def test_actual_browser_attestation_publishes_exact_pinned_store_bytes(assignmen
         assert view.publication.revision_id == request.revision_id
         assert view.publication.artifact == dispatched.artifact
         assert (view.path / 'index.html').read_bytes() == b'<html>heat</html>'
+    service = create_content_app(ContentProcessConfig(path, root,
+        'content.example.test', 'https://console.example.org'))
+
+    async def serve(available):
+        origin = service.hosts.url(binding.id)
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=service),
+                                     base_url=origin) as client:
+            page = await client.get('/')
+            shared = await client.get(service.hosts.sharing_url(release.slug),
+                                      follow_redirects=False)
+            if available:
+                assert page.status_code == 200 and page.content == b'<html>heat</html>'
+                assert page.headers['x-atom-release'] == release.release_id
+                assert page.headers['x-atom-revision'] == request.revision_id
+                assert shared.status_code == 307 and shared.headers['location'] == origin
+            else:
+                assert page.status_code == 404 and shared.status_code == 404
+            assert page.headers['cache-control'] == 'no-store'
+
+    asyncio.run(serve(True))
     ReleaseRepository(path).unpublish(owner='user', project_id='project',
         command_id='browser-release-off', expected_release=release.release_id,
         expected_generation=release.generation)
+    asyncio.run(serve(False))
     with pytest.raises(VerificationError, match='content_not_found'):
         content.sharing_binding(slug=release.slug)
     with pytest.raises(VerificationError, match='release_not_found'):
