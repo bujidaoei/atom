@@ -39,8 +39,8 @@ class Store:
         return self.payload
 
 
-@pytest.fixture
-def prepared(legacy, tmp_path):
+@pytest.fixture(params=[12, 13], ids=['schema-v12', 'schema-v13'])
+def prepared(legacy, tmp_path, request):
     path, baseline = legacy
     migrate(path, baseline, target_version=11)
     _, main_artifact = snapshot(b'<html>main</html>')
@@ -61,6 +61,8 @@ def prepared(legacy, tmp_path):
         db.execute("UPDATE races SET status='done' WHERE id='race'")
         db.execute("UPDATE race_heats SET status='done' WHERE id='heat'")
     migrate(path, tmp_path / 'before-v12.db', target_version=12)
+    if request.param == 13:
+        migrate(path, tmp_path / 'before-v13.db', target_version=13)
     return path, main, heat, heat_payload, heat_artifact
 
 
@@ -132,14 +134,14 @@ def test_late_unique_failure_rolls_back_revision_head_and_winner(prepared, monke
     path, main, _, payload, artifact = prepared
     with sqlite3.connect(path) as db:
         db.execute("INSERT INTO revision_outbox VALUES ('collision',?,'main-root','revision.registered',1,NULL)", (main,))
-    before = state(path)
+    before, version = state(path), verify(path)
     class Fixed:
         hex = 'collision'
     monkeypatch.setattr('app.adoption_repository.uuid.uuid4', lambda: Fixed())
     with pytest.raises(AdoptionError, match='adoption_conflict'):
         adopt(AdoptionRepository(path), Store(artifact.key, payload))
     assert state(path) == before
-    assert verify(path) == 12
+    assert verify(path) == version
 
 
 def test_two_competing_adoptions_commit_only_one(prepared):
@@ -190,7 +192,7 @@ def test_busy_writer_is_bounded_and_has_no_effect(prepared):
 
 def test_process_death_after_evidence_and_revision_insert_rolls_back(prepared):
     path, _, _, payload, artifact = prepared
-    before = state(path)
+    before, version = state(path), verify(path)
     script = '''import base64,os,sys
 from pathlib import Path
 import app.adoption_repository as module
@@ -211,13 +213,13 @@ AdoptionRepository(Path(sys.argv[1])).adopt(owner='user',project_id='project',he
     result = subprocess.run([sys.executable, '-c', script, str(path),
         base64.b64encode(payload).decode()], env=env, capture_output=True, timeout=30)
     assert result.returncode == 49, result.stderr
-    assert state(path) == before and verify(path) == 12
+    assert state(path) == before and verify(path) == version
     assert adopt(AdoptionRepository(path), Store(artifact.key, payload)).revision_id
 
 
 def test_process_death_after_winner_update_rolls_back_all(prepared):
     path, _, _, payload, _ = prepared
-    before = state(path)
+    before, version = state(path), verify(path)
     script = '''import base64,os,sqlite3,sys
 from pathlib import Path
 import app.adoption_repository as module
@@ -239,16 +241,13 @@ module.AdoptionRepository(Path(sys.argv[1])).adopt(owner='user',project_id='proj
     result = subprocess.run([sys.executable, '-c', script, str(path),
         base64.b64encode(payload).decode()], env=env, capture_output=True, timeout=30)
     assert result.returncode == 50, result.stderr
-    assert state(path) == before and verify(path) == 12
+    assert state(path) == before and verify(path) == version
 
 
-@pytest.mark.parametrize('revision_schema', [12, 13])
-def test_execution_continues_from_adopted_main_revision(prepared, tmp_path, revision_schema):
+def test_execution_continues_from_adopted_main_revision(prepared):
     from app.revisions import RevisionRepository
     path, main, _, payload, artifact = prepared
     adopted = adopt(AdoptionRepository(path), Store(artifact.key, payload))
-    if revision_schema == 13:
-        migrate(path, tmp_path / 'before-v13.db', target_version=13)
     with sqlite3.connect(path) as db:
         db.execute("UPDATE projects SET active_run_id='run' WHERE id='project'")
     revisions = RevisionRepository(path)
