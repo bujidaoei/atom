@@ -153,6 +153,46 @@ def test_second_coordinator_cannot_reap_live_browser_then_recovers_after_death(a
         request_id=dispatched.request.id, outcome='cancelled').outcome == 'cancelled'
 
 
+@pytest.mark.parametrize('assignment', ['slow'], indirect=True)
+def test_lost_coordinator_lease_cannot_register_and_successor_reaps(assignment):
+    path, supervisor, authority, dispatched, store = assignment
+    first = VerifierCoordinator(supervisor)
+    second = VerifierCoordinator(supervisor)
+    label = f'label=atom.verifier.request={dispatched.request.id}'
+    try:
+        assert first.start() == 0
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            pending = pool.submit(first.verify_and_register, assignment=dispatched,
+                                  store=store, authority=authority, budget_seconds=20)
+            deadline = time.monotonic() + 12
+            identity = ''
+            while time.monotonic() < deadline and not pending.done():
+                inventory = subprocess.run(['docker', 'ps', '-q', '--filter', label],
+                                           capture_output=True, timeout=10, check=True)
+                identity = inventory.stdout.decode().strip()
+                if identity:
+                    break
+                time.sleep(0.05)
+            assert identity, 'browser container was never observed running'
+            subprocess.run(['docker', 'container', 'rm', '--force', first.lease.name],
+                           capture_output=True, timeout=10, check=True)
+            deadline = time.monotonic() + 5
+            while time.monotonic() < deadline and first.lease.alive:
+                time.sleep(0.05)
+            assert not first.lease.alive
+            assert second.start() >= 1
+            with pytest.raises(SupervisorError, match='verifier_coordinator_lease_lost'):
+                pending.result(timeout=15)
+    finally:
+        second.close()
+        first.close()
+    with sqlite3.connect(path) as db:
+        assert db.execute('SELECT count(*) FROM verification_attestations').fetchone() == (0,)
+        assert db.execute('SELECT count(*) FROM verification_results').fetchone() == (0,)
+    assert subprocess.run(['docker', 'ps', '-aq', '--filter', label],
+                          capture_output=True, timeout=10, check=True).stdout.strip() == b''
+
+
 def test_tampered_stored_artifact_never_starts_or_registers(assignment):
     path, supervisor, authority, dispatched, store = assignment
     store.payload = store.payload[:-1] + b'X'
