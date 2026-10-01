@@ -99,3 +99,6 @@ Governance sequencing refinement: persistent destination obligations and adminis
 
 
 008 T035 bounded client:42 client/transport checks pass including actual socket broker plus isolated Docker restore and strict provenance/full-payload rejection tests. No grant-signing key required by recovery client. Versioned receipt/owner wiring still open; T035/T033/T034 unchecked. See ../008-sandbox-broker/evidence.md.
+
+
+T035 abrupt broker-death evidence (2026-10-01): real child processes exit with os._exit(73) after provisioning before restore, after full restore before cleanup, and after actual container removal before durable termination confirmation. Fresh Lifecycle startup reopens the same registry/lease, reconciles each interrupted attempt to terminated before readiness, and leaves no owned containers. A subsequent explicit call performs a fresh full-field restore with a distinct attempt; interrupted calls produce no successful return. Seven actual-container tests pass (40.482s, zero failures/errors/skips), including existing source/mount/socket denial and exit/output/timeout cases. This closes the previously untested internal recovery crash/restart boundary only. Versioned source receipts and archive owner/CLI integration remain open; schema9 historical receipts are unchanged. T035/T033/T034 remain unchecked.

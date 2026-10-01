@@ -301,3 +301,6 @@ Broker isolated-recovery endpoint is POST /v1/admin/audit/recover with protected
 
 
 Recovery client component regression: `backend/.venv/Scripts/python.exe -m pytest backend/tests/integration/test_audit_recovery_client.py backend/tests/test_broker_client.py -q` with explicit pinned sandbox image. AuditRecoveryClient needs origin/admin bearer/expected pinned image/policy digest, not a grant-signing key. It validates full returned bytes/metadata but is not yet wired into archive_admin or new persistent verification receipts.
+
+
+Recovery crash regression: set ATOM_TEST_DOCKER_IMAGE to the approved pinned sandbox image, then run `backend/.venv/Scripts/python.exe -m pytest backend/tests/integration/test_isolated_audit_recovery.py -q --junitxml=.logs/audit-recovery-crash.xml`. Includes three real abrupt broker exits and four actual worker success/fault cases; seven passed. No source migration or deployment is performed.
