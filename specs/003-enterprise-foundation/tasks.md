@@ -176,3 +176,5 @@ Feature008 private-access design now identifies durable console-session/logout a
 Feature008 T020 offline access schema/migration completed with real SQLite constraints/backups/rollback and Linux forced-exit recovery (56 tests). Source-session issuance/revocation integration, private exchange/serving and browser gates remain T021–T025; enterprise T027 stays open.
 
 Feature008 private-access prerequisite: persisted console-session repository lifecycle and concurrency/failure behavior now pass 45 actual SQLite/schema tests. Authentication/signature/HTTP integration and private credential paths remain unfinished under T021/T022; T027 remains open.
+
+Feature008 T021 progress: hash-only browser-bound capability repository and atomic single-use exchange pass actual SQLite concurrency/failure/process-exit tests (64 combined tests). HTTP authentication/cookies, rate/retention, browser composition and v4 serving remain incomplete; enterprise T027 stays open.

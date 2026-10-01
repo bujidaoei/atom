@@ -156,3 +156,5 @@ source-session authentication or per-request private authorization is enabled;
 this schema evidence does not accept the protocol or production cutover.
 
 Console-session repository methods now operate on v4, but source authentication remains external and mandatory. Call create_console_session only after real authentication; call console_session only after verifying the signed credential's user/session identity. The ID is not accepted as a bearer token. HTTP login/logout, account-wide revocation and private capability linkage remain unimplemented.
+
+Repository implementation now supports the proposed bootstrap/handoff/session lifecycle with purpose-separated hashes and explicit scope. Raw secrets exist in returned credential objects and must be transported safely by future HTTP code; repr suppresses them but does not make arbitrary serialization/logging safe. Console authentication and Origin/CSRF enforcement are still caller prerequisites. No cookie/exchange endpoint or private artifact serving is enabled; repository evidence does not establish browser binding transport.
