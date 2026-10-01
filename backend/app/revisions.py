@@ -206,6 +206,21 @@ class RevisionRepository:
             return WorkspaceRevision(workspace_id, row['id'],
                                      Artifact(row['artifact_key'], row['snapshot_revision'], row['size']), row['created_at'])
 
+    def incomplete_revision(self, owner: str, workspace_id: str, revision_id: str) -> str | None:
+        """Identify a current, confirmed non-success receipt for owner-visible labelling."""
+        _identifiers(owner, workspace_id, revision_id)
+        with self._transaction() as db:
+            workspace = self._workspace(db, owner, workspace_id)
+            if workspace['current_revision_id'] != revision_id:
+                raise RevisionError('revision_conflict')
+            row = db.execute('''SELECT r.id FROM revision_records r
+                JOIN revision_attempts a ON a.id=r.producing_attempt_id AND a.workspace_id=r.workspace_id
+                JOIN revision_receipts c ON c.attempt_id=a.id AND c.revision_id=r.id
+                WHERE r.id=? AND r.workspace_id=? AND a.state='closed'
+                  AND a.termination_state='confirmed' AND a.outcome IN ('cancelled','timed_out')''',
+                (revision_id,workspace_id)).fetchone()
+            return row['id'] if row else None
+
     def pending_executions(self, *, limit: int = 100) -> tuple[PendingExecution, ...]:
         """Trusted startup inventory, never a tenant-facing query or dispatch grant."""
         if type(limit) is not int or not 1 <= limit <= 1000:

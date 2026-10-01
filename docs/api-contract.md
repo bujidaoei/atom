@@ -144,6 +144,8 @@ type ProjectDetail = ProjectSummary & {
   messages: Message[];
   requirements: Requirement[];
   files: FileEntry[];          // 工作区文件树（懒读，只有元信息）
+  revisionId: string | null;
+  incompleteSavedRevisionId: string | null; // 当前修订有已确认的非成功终态收据时才有值
   acceptance: AcceptanceRun | null;
   activeRunId: string | null;
   race: RaceSummary | null;
@@ -318,8 +320,10 @@ type RaceSummary = {
 type RaceHeat = {
   id: string;
   model: string;
-  status: 'queued' | 'running' | 'done' | 'failed';
+  status: 'queued' | 'running' | 'done' | 'failed' | 'cancelled' | 'timed_out' | 'interrupted' | 'error';
   runId: string | null;
+  revisionId: string | null;
+  incompleteSavedRevisionId: string | null;
   previewUrl: string | null;   // /preview/{projectId}/race/{heatId}/
   elapsedMs: number | null;
   inputTokens: number;

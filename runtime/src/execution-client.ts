@@ -55,12 +55,14 @@ export class ExecutionClient {
     this.#timeout = timeout;
   }
 
-  async #request(action: 'complete' | 'cancel'): Promise<ExecutionResult> {
+  async #request(action: 'complete' | 'cancel' | 'partial', outcome?: 'cancelled' | 'timed_out'): Promise<ExecutionResult> {
     const signal = AbortSignal.timeout(this.#timeout);
     try {
       const response = await fetch(`${this.#origin}/v1/executions/${action}`, {
         method: 'POST', redirect: 'error', credentials: 'omit', signal,
-        headers: { authorization: `Bearer ${this.#lease.completionGrant}`, 'accept-encoding': 'identity' },
+        headers: { authorization: `Bearer ${this.#lease.completionGrant}`, 'accept-encoding': 'identity',
+          ...(outcome ? { 'content-type': 'application/json' } : {}) },
+        ...(outcome ? { body: JSON.stringify({ outcome }) } : {}),
       });
       if (response.status !== 200 || response.headers.has('content-encoding')
           || response.headers.get('content-type')?.split(';')[0].trim().toLowerCase() !== 'application/json') {
@@ -95,6 +97,7 @@ export class ExecutionClient {
         || typeof receipt.revision_id !== 'string' || !/^[a-f0-9]{32}$/.test(receipt.revision_id)
         || !hash(receipt.artifact_key) || !hash(receipt.snapshot_revision))) throw new Error();
       if (value.outcome === 'succeeded' && receipt === null) throw new Error();
+      if (outcome && value.outcome !== outcome) throw new Error();
       return Object.freeze({ outcome: value.outcome as ExecutionResult['outcome'],
         receipt: receipt === null ? null : Object.freeze({ ...receipt }) as unknown as ExecutionReceipt });
     } catch { throw new Error('Execution response failed or outcome is unknown'); }
@@ -107,4 +110,9 @@ export class ExecutionClient {
   }
 
   async cancel(): Promise<ExecutionResult> { return this.#request('cancel'); }
+
+  async partial(outcome: 'cancelled' | 'timed_out'): Promise<ExecutionResult> {
+    if (outcome !== 'cancelled' && outcome !== 'timed_out') throw new Error('Invalid partial outcome');
+    return this.#request('partial', outcome);
+  }
 }

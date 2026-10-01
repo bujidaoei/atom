@@ -46,3 +46,42 @@ test('real protocol failures never become completion and are not replayed', asyn
     }
   }
 });
+
+test('partial transport sends one scoped outcome and accepts only matching confirmed closure', async () => {
+  for (const mode of ['saved', 'unchanged', 'wrong_outcome', 'wrong_receipt', 'timeout']) {
+    const binding = lease();
+    let calls = 0;
+    const server = createServer(async (req, res) => {
+      calls++;
+      assert.equal(req.url, '/v1/executions/partial');
+      assert.equal(req.headers.authorization, `Bearer ${binding.completionGrant}`);
+      assert.equal(req.headers['content-type'], 'application/json');
+      const chunks: Buffer[] = [];
+      for await (const chunk of req) chunks.push(chunk);
+      assert.deepEqual(JSON.parse(Buffer.concat(chunks).toString()), { outcome: 'timed_out' });
+      if (mode === 'timeout') return;
+      res.setHeader('content-type', 'application/json');
+      res.end(JSON.stringify({ attempt_id: binding.executionId, workspace_id: binding.workspaceId,
+        grant_id: binding.grantId, broker_attempt_id: binding.attemptId, deadline: binding.deadline,
+        state: 'closed', termination_state: 'confirmed',
+        outcome: mode === 'wrong_outcome' ? 'succeeded' : 'timed_out',
+        receipt: mode === 'unchanged' ? null : { attempt_id: binding.executionId,
+          workspace_id: mode === 'wrong_receipt' ? 'other' : binding.workspaceId,
+          revision_id: 'b'.repeat(32), artifact_key: 'c'.repeat(64), snapshot_revision: 'd'.repeat(64) } }));
+    });
+    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+    try {
+      const client = new ExecutionClient({ baseUrl: `http://127.0.0.1:${(server.address() as any).port}`,
+        lease: binding, timeoutMs: mode === 'timeout' ? 50 : 3000 });
+      if (mode === 'saved' || mode === 'unchanged') {
+        const result = await client.partial('timed_out');
+        assert.equal(result.outcome, 'timed_out');
+        assert.equal(result.receipt !== null, mode === 'saved');
+      } else await assert.rejects(client.partial('timed_out'), /Execution/);
+      assert.equal(calls, 1);
+    } finally {
+      server.closeAllConnections();
+      await new Promise<void>(resolve => server.close(() => resolve()));
+    }
+  }
+});

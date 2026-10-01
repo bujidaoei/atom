@@ -680,6 +680,9 @@ class Orchestrator:
                                 reported = line.payload.get('status')
                                 status = reported if reported in ('cancelled','timed_out') else 'failed'
                                 error = str(line.payload.get("message") or "运行时错误")
+                                if lease is not None and line.payload.get('revisionReceipt'):
+                                    completed_revision = line.payload['revisionReceipt']['revision_id']
+                                    error = '生成中断；已保存未完成版本，可从已保存版本继续生成'
                             else:
                                 text_parts = [str(line.payload.get("resultText") or "")]
                                 if lease is not None:
@@ -708,7 +711,23 @@ class Orchestrator:
             await self._cancel_remote(run_id)
             if lease is not None:
                 try:
-                    await self.execution.coordinator.interrupt(user_id, lease.execution_id, status)
+                    if status in ('cancelled', 'timed_out'):
+                        try:
+                            async with asyncio.timeout(50):
+                                stopped = await self.execution.coordinator.checkpoint_incomplete(
+                                    user_id, lease.execution_id, self.execution.store, status)
+                        except Exception:
+                            stopped = await self.execution.coordinator.interrupt(
+                                user_id, lease.execution_id, status)
+                        if (stopped.state == 'closed' and stopped.termination_state == 'confirmed'
+                                and stopped.outcome == status and stopped.receipt is not None):
+                            await asyncio.to_thread(self.execution.coordinator._base,
+                                self.execution.store, stopped.receipt.artifact_key,
+                                stopped.receipt.snapshot_revision)
+                            completed_revision = stopped.receipt.revision_id
+                            error = '生成中断；已保存未完成版本，可从已保存版本继续生成'
+                    else:
+                        await self.execution.coordinator.interrupt(user_id, lease.execution_id, status)
                 except Exception:
                     error = (error or '执行失败') + '；沙箱终止尚未确认，占用已保留'
         failed = status != "done"

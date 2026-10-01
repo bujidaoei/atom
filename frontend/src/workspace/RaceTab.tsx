@@ -288,6 +288,9 @@ function HeatCard({
   const [adopting, setAdopting] = useState(false);
   const [adoptError, setAdoptError] = useState<string | null>(null);
   const status = HEAT_STATUS[heat.status];
+  const incompleteSaved = Boolean(heat.incompleteSavedRevisionId);
+  const retryLabel = incompleteSaved ? '从已保存版本继续生成'
+    : heat.revisionId ? '基于已有版本重新生成' : '重新生成此赛道';
 
   return (
     <article
@@ -301,6 +304,7 @@ function HeatCard({
           {heat.model}
         </span>
         {isWinner ? <Badge tone="bg-brand-alpha-strong text-brand-text">已采用</Badge> : null}
+        {incompleteSaved && heat.status !== 'running' ? <Badge tone="bg-brand-alpha-strong text-brand-text">已保存未完成版本</Badge> : null}
         <Badge tone={status.tone}>
           {heat.status === "running" ? <Spinner size={10} /> : null}
           {status.label}
@@ -347,7 +351,7 @@ function HeatCard({
       ) : null}
 
       {heat.error && !["running", "queued", "done"].includes(heat.status) ? (
-        <p className="border-t border-neutral-8 px-m py-s text-xs text-neutral-60">{heat.error}。可在上方调整时间上限，再{heat.fileCount > 0 ? "继续" : "重新生成"}此赛道。</p>
+        <p className="border-t border-neutral-8 px-m py-s text-xs text-neutral-60">{heat.error}。可在上方调整时间上限后{retryLabel}；未完成版本尚未通过验收，不能采用或发布。</p>
       ) : null}
 
       <footer className="mt-auto flex items-center gap-s border-t border-neutral-8 px-m py-s">
@@ -358,7 +362,7 @@ function HeatCard({
               api.retryHeat(projectId, heat.id, budget).then(onRetried)
                 .catch((err: unknown) => setAdoptError(errorMessage(err)))
                 .finally(() => setAdopting(false));
-            }}>{heat.fileCount > 0 ? "继续此赛道" : "重新生成此赛道"}</Button>
+            }}>{retryLabel}</Button>
         ) : null}
         <Button
           size="sm"

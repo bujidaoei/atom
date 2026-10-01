@@ -46,13 +46,14 @@ def committed_catalog(repository, store, *, owner, project_id, heat_id=None):
     except RevisionError as error:
         if error.code != 'revision_not_found':
             raise
-        return {'revisionId':None, 'files':[]}
+        return {'revisionId':None, 'incompleteSavedRevisionId':None, 'files':[]}
     revision = repository.current_revision(owner, workspace)
     if revision is None:
-        return {'revisionId':None, 'files':[]}
+        return {'revisionId':None, 'incompleteSavedRevisionId':None, 'files':[]}
     _, verified = verified_revision_payload(store, revision)
     timestamp = datetime.fromtimestamp(revision.created_at, timezone.utc).isoformat()
     files = [{'path':entry.path,'bytes':entry.size,'sha256':entry.sha256,
               'updatedAt':timestamp,'timestampSource':'revision'} for entry in verified.files]
     files.sort(key=lambda item: (item['path'] != 'index.html', item['path']))
-    return {'revisionId':revision.revision_id, 'files':files}
+    incomplete = repository.incomplete_revision(owner, workspace, revision.revision_id)
+    return {'revisionId':revision.revision_id, 'incompleteSavedRevisionId':incomplete, 'files':files}

@@ -68,7 +68,7 @@ async def lifespan(_app: FastAPI):
 app = FastAPI(title="Atoms Demo API", version="1.0.0", lifespan=lifespan)
 app.state.content_issuer = BoundedOperations()
 app.state.audit_reads = BoundedOperations(capacity=4)
-for action in ('complete', 'cancel'):
+for action in ('complete', 'cancel', 'partial'):
     app.router.routes.append(Route('/v1/executions/' + action, ExecutionGateway(), methods=['POST']))
 
 

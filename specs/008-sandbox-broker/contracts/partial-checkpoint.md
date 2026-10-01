@@ -1,4 +1,4 @@
-# Partial checkpoint contract (design; not implemented)
+# Partial checkpoint contract (implementation in progress)
 
 ## User-visible boundary
 
@@ -69,11 +69,11 @@ override an unclosed success decision. A ledger correction now preserves
 the first terminal decision across all supported schema versions. The existing
 ledger/broker/coordinator paths passed 481 real Linux tests with locked
 development dependencies and exit code 0; the corrected ledger is deployed in
-the healthy 6386e47 API/broker pair. The new partial-checkpoint paths remain
-open. Current API timeout still
-eagerly revokes the worker and must be corrected before partial checkpoints
-can work. The broker's grant window and cleanup grace must be long enough to
-permit the bounded checkpoint while still finite.
+the healthy 6386e47 API/broker pair. The scoped partial HTTP/coordinator path
+has now passed changed/unchanged broker tests and four fault-injection tests
+on Linux. Runtime abort, API orchestration and browser visibility are under
+implementation and have not passed the release gates below. The production
+pair still serves 6386e47, which does not contain partial checkpointing.
 
 ## Acceptance gates
 
@@ -91,5 +91,5 @@ permit the bounded checkpoint while still finite.
    must agree. A second live run with no writes must show “重新生成”. Browser
    preview and publication must not claim acceptance of an incomplete output.
 
-This contract is a design artifact. T039.2/3 remain open until implementation,
-fault injection and live browser acceptance satisfy these gates.
+This contract governs work in progress. T039.2/3 remain open until the runtime,
+API orchestration, fault matrix and live browser acceptance satisfy these gates.

@@ -141,14 +141,18 @@ class RuntimeClient:
                     async for line in response.aiter_lines():
                         parsed = _parse_line(line)
                         if parsed is not None:
-                            if execution_lease is not None and parsed.kind == 'result':
+                            if execution_lease is not None and (parsed.kind == 'result'
+                                    or (parsed.kind == 'error' and 'revisionReceipt' in parsed.payload)):
                                 try:
                                     terminal = await asyncio.to_thread(execution_repository.recovery,
                                         execution_owner,execution_lease.execution_id)
                                 except RevisionError:
                                     raise RuntimeUnavailable('无法确认执行结果') from None
+                                expected_outcome = ('succeeded' if parsed.kind == 'result'
+                                    else parsed.payload.get('status'))
                                 if (terminal.state != 'closed' or terminal.termination_state != 'confirmed'
-                                        or terminal.outcome != 'succeeded' or terminal.receipt is None
+                                        or expected_outcome not in ('succeeded','cancelled','timed_out')
+                                        or terminal.outcome != expected_outcome or terminal.receipt is None
                                         or terminal.broker_attempt_id != execution_lease.attempt_id
                                         or terminal.grant_id != execution_lease.grant_id
                                         or terminal.workspace_id != execution_lease.workspace_id

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { withExecution } from './execution-lifecycle.ts';
+import { ExecutionInterrupted, withExecution } from './execution-lifecycle.ts';
 import { runWithRecovery } from './run-recovery.ts';
 
 test('model recovery remains inside one acquisition and one final checkpoint', async () => {
@@ -60,4 +60,44 @@ test('failed acquisition cancels the reserved execution without inventing a sand
     runId: 'run', workspaceId: 'workspace',
   }, async () => assert.fail('unacquired work')), error => error === original);
   assert.equal(cancelled, true);
+});
+
+test('abort checkpoints once before release and preserves an incomplete receipt', async () => {
+  for (const reason of [new DOMException('stop', 'AbortError'), new DOMException('budget', 'TimeoutError')]) {
+    const controller = new AbortController();
+    const calls: string[] = [];
+    const expected = reason.name === 'TimeoutError' ? 'timed_out' : 'cancelled';
+    await assert.rejects(withExecution({
+      sandbox: { async create() { calls.push('create'); return 'owned'; },
+        async destroy() { calls.push('release'); } },
+      completion: { async complete() { assert.fail('complete after abort'); },
+        async cancel() { assert.fail('cancel after confirmed partial'); },
+        async partial(outcome) { calls.push(`partial:${outcome}`); return { outcome, receipt: 'saved' }; } },
+      signal: controller.signal, runId: 'run', workspaceId: 'workspace',
+    }, async () => { controller.abort(reason); controller.signal.throwIfAborted(); return 'impossible'; }), error => {
+      assert.ok(error instanceof ExecutionInterrupted);
+      assert.equal(error.outcome, expected);
+      assert.equal(error.receipt, 'saved');
+      return true;
+    });
+    assert.deepEqual(calls, ['create', `partial:${expected}`, 'release']);
+  }
+});
+
+test('provider error uses cancel and an unknown partial response is never replayed', async () => {
+  const controller = new AbortController();
+  let partialCalls = 0;
+  let cancels = 0;
+  const completion = { async complete() { assert.fail('complete after failure'); },
+    async cancel() { cancels++; }, async partial() { partialCalls++; throw new Error('unknown'); } };
+  await assert.rejects(withExecution({ sandbox: { async create() { return 'owned'; }, async destroy() {} },
+    completion, signal: controller.signal, runId: 'run', workspaceId: 'workspace',
+  }, async () => { throw new Error('provider'); }), /provider/);
+  assert.equal(partialCalls, 0);
+  controller.abort(new DOMException('budget', 'TimeoutError'));
+  await assert.rejects(withExecution({ sandbox: { async create() { return 'owned'; }, async destroy() {} },
+    completion, signal: controller.signal, runId: 'run', workspaceId: 'workspace',
+  }, async () => { controller.signal.throwIfAborted(); return 'impossible'; }), AggregateError);
+  assert.equal(partialCalls, 1);
+  assert.equal(cancels, 2);
 });

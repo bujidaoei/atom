@@ -754,6 +754,70 @@ def test_runtime_broker_result_requires_matching_durable_success(repository, mod
         'grant':'sandbox.token.value','completionGrant':'completion.token.value'}
 
 
+@pytest.mark.parametrize('mode',['saved','wrong_receipt','wrong_outcome','uncommitted'])
+def test_runtime_partial_error_requires_matching_durable_terminal_receipt(repository, mode):
+    from dataclasses import asdict
+    from app.execution import ExecutionLease
+    from app.services.runtime_client import RuntimeClient, GatewayConfig
+    from app.errors import RuntimeUnavailable
+    repo, _, main, _ = repository
+    repo.bootstrap('owner', main, BASE)
+    repo.reserve('owner', main, 'run', 'attempt', 'grant-attempt', int(time.time())+120)
+    repo.bind('owner', 'attempt', 'a'*32)
+    deadline = repo.execution('owner', 'attempt').deadline
+    lease = ExecutionLease('run', main, 'a'*32, deadline, 'attempt', 'grant-attempt',
+                           'sandbox.token.value', 'completion.token.value')
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *args): pass
+        def do_POST(self):
+            self.rfile.read(int(self.headers['Content-Length']))
+            receipt = {'attempt_id':'attempt','workspace_id':main,'revision_id':'c'*32,
+                       'artifact_key':'c'*64,'snapshot_revision':'d'*64}
+            if mode != 'uncommitted':
+                receipt = asdict(repo.register('owner','attempt','a'*32,'grant-attempt',OUTPUT))
+                repo.observe_termination('owner','attempt',confirmed=True,outcome='timed_out')
+            if mode == 'wrong_receipt': receipt['workspace_id'] = 'other'
+            line = {'kind':'error','status':'cancelled' if mode == 'wrong_outcome' else 'timed_out',
+                    'message':'interrupted','revisionReceipt':receipt}
+            self.send_response(200);self.send_header('Content-Type','application/x-ndjson');self.end_headers()
+            self.wfile.write((json.dumps(line)+'\n').encode())
+    server = ThreadingHTTPServer(('127.0.0.1',0),Handler)
+    thread = threading.Thread(target=server.serve_forever,daemon=True);thread.start()
+    async def scenario():
+        client = RuntimeClient();client._base_url = f'http://127.0.0.1:{server.server_port}'
+        return [line async for line in client.run(run_id='run',role='alex',prompt='test',
+            workspace_path=Path('.'),session_path=Path('session'),agent_dir=Path('.'),
+            gateway=GatewayConfig('https://invalid','test','model'),execution_lease=lease,
+            execution_repository=repo,execution_owner='owner')]
+    try:
+        if mode == 'saved':
+            lines = asyncio.run(scenario())
+            assert len(lines) == 1 and lines[0].kind == 'error'
+        else:
+            with pytest.raises(RuntimeUnavailable,match='已登记版本'):
+                asyncio.run(scenario())
+    finally:
+        server.shutdown();server.server_close();thread.join(timeout=3)
+
+
+@pytest.mark.parametrize('outcome,visible', [
+    ('cancelled',True),('timed_out',True),('succeeded',False),
+])
+def test_incomplete_catalogue_provenance_requires_confirmed_current_receipt(repository, outcome, visible):
+    repo, _, main, _ = repository
+    repo.bootstrap('owner',main,BASE)
+    repo.reserve('owner',main,'run','attempt','grant-attempt',int(time.time())+120)
+    repo.bind('owner','attempt','a'*32)
+    receipt = repo.register('owner','attempt','a'*32,'grant-attempt',OUTPUT)
+    assert repo.incomplete_revision('owner',main,receipt.revision_id) is None
+    repo.observe_termination('owner','attempt',confirmed=True,outcome=outcome)
+    assert repo.incomplete_revision('owner',main,receipt.revision_id) == (receipt.revision_id if visible else None)
+    with pytest.raises(RevisionError,match='revision_not_found'):
+        repo.incomplete_revision('stranger',main,receipt.revision_id)
+    with pytest.raises(RevisionError,match='revision_conflict'):
+        repo.incomplete_revision('owner',main,'f'*32)
+
+
 @pytest.mark.parametrize('damage',['future','definition','journal'])
 def test_schema_drift_is_rejected_on_open_and_each_transaction(repository,damage):
     repo,path,main,_=repository

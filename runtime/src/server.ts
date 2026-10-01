@@ -16,7 +16,7 @@ import type { RunEventType } from '../packages/product-contracts/src/index.ts';
 import { LocalSandboxClient } from './local-sandbox.ts';
 import { BrokerSandboxClient, type BrokerLease } from './broker-sandbox.ts';
 import { ExecutionClient, type ExecutionBinding } from './execution-client.ts';
-import { withExecution } from './execution-lifecycle.ts';
+import { ExecutionInterrupted, withExecution } from './execution-lifecycle.ts';
 import type { ExternalSandboxScope } from '../packages/agent-runtime/src/sandbox-lifecycle.ts';
 import { allRoles, roleDefinition } from './squad.ts';
 import { runWithRecovery } from './run-recovery.ts';
@@ -89,7 +89,8 @@ async function startRun(request: IncomingMessage, response: ServerResponse): Pro
     if (config.sandboxMode === 'broker') {
       if (!body.lease || body.lease.runId !== body.runId) throw new Error('Missing or mismatched execution lease');
       sandbox = new BrokerSandboxClient({ baseUrl: config.brokerOrigin!, lease: body.lease });
-      completion = new ExecutionClient({ baseUrl: config.executionOrigin!, lease: body.lease });
+      completion = new ExecutionClient({ baseUrl: config.executionOrigin!, lease: body.lease,
+        timeoutMs: 45_000 });
     } else {
       if (body.lease) throw new Error('Execution lease requires broker mode');
       sandbox = new LocalSandboxClient({ resolveWorkspace: () => body.workspacePath });
@@ -168,13 +169,13 @@ async function startRun(request: IncomingMessage, response: ServerResponse): Pro
         }),
       });
     };
-    const finished = completion ? await withExecution({ sandbox, completion,
+    const finished = completion ? await withExecution({ sandbox, completion, signal: controller.signal,
       runId: body.runId, workspaceId: body.lease!.workspaceId }, async sandboxId => {
         const result = await execute({ runId: body.runId, workspaceId: body.lease!.workspaceId, sandboxId });
         controller.signal.throwIfAborted();
         return result;
       }) : { value: await execute(), receipt: undefined };
-    controller.signal.throwIfAborted();
+    if (!completion) controller.signal.throwIfAborted();
     const result = finished.value;
 
     write({
@@ -187,13 +188,17 @@ async function startRun(request: IncomingMessage, response: ServerResponse): Pro
       ...(finished.receipt ? { revisionReceipt: finished.receipt } : {}),
     });
   } catch (error) {
+    const interruption = error instanceof ExecutionInterrupted ? error
+      : error instanceof AggregateError && error.errors[0] instanceof ExecutionInterrupted
+        ? error.errors[0] as ExecutionInterrupted<unknown> : undefined;
     write({
       kind: 'error',
       role: role.id,
       cancelled: controller.signal.aborted,
-      status: controller.signal.aborted
-        ? (controller.signal.reason?.name === 'TimeoutError' ? 'timed_out' : 'cancelled') : 'failed',
+      status: interruption?.outcome ?? (controller.signal.aborted
+        ? (controller.signal.reason?.name === 'TimeoutError' ? 'timed_out' : 'cancelled') : 'failed'),
       message: describe(error),
+      ...(interruption?.receipt ? { revisionReceipt: interruption.receipt } : {}),
     });
   } finally {
     clearTimeout(deadline);

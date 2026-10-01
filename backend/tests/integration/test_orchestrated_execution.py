@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import re
+import subprocess
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import uuid
@@ -51,13 +52,13 @@ def test_actual_orchestrator_leases_and_validates_registered_output(tmp_path, va
                     'executionOrigin':'http://'+port.decode().strip(), 'outputFile':'notes.txt' if len(observed)>1 else 'index.html',
                     'outputText':'<h1>actual orchestrated output</h1>' if valid or interrupt else '', 'interrupt':interrupt}
                 code,out,err=run_bounded(['node','--import',(runtime/'node_modules/tsx/dist/loader.mjs').as_uri(),
-                    str(runtime/'scripts/test-server-execution.ts')],input_data=json.dumps(parameters).encode(),timeout=25)
+                    str(runtime/'scripts/test-server-execution.ts')],input_data=json.dumps(parameters).encode(),timeout=30)
                 assert code==0,err.decode()
                 response=json.loads(out)
                 payload=''.join(json.dumps(line)+'\n' for line in response['lines']).encode()
                 self.send_response(200);self.send_header('Content-Type','application/x-ndjson')
                 self.send_header('Content-Length',str(len(payload)));self.end_headers();self.wfile.write(payload)
-        relay=ThreadingHTTPServer(('127.0.0.1',0),Relay)
+        relay=ThreadingHTTPServer((os.environ.get('ATOM_TEST_BROKER_BIND_HOST','127.0.0.1'),0),Relay)
         worker=threading.Thread(target=relay.serve_forever,daemon=True);worker.start()
         script=r'''
 import asyncio,base64,io,json,os,sys,zipfile,sqlite3
@@ -80,7 +81,7 @@ if data['interrupt']=='deadline_checkpoint':
     @app.middleware('http')
     async def delayed_confirmation(request,call_next):
         response=await call_next(request)
-        if request.url.path=='/v1/executions/complete':await asyncio.sleep(4.5)
+        if request.url.path=='/v1/executions/complete':await asyncio.sleep(12.5)
         return response
 from app.config import get_settings
 from app.db import engine,session_scope
@@ -131,11 +132,11 @@ async def main():
         expected='cancelled' if data['interrupt']=='cancel' else 'timed_out' if data['interrupt'] else 'done' if data['valid'] else 'failed'
         if data['interrupt']:
             await orchestrator.start_build('p','owner',None)
-            await asyncio.wait_for(orchestrator._jobs['p'],20)
+            await asyncio.wait_for(orchestrator._jobs['p'],40)
             with session_scope() as s:
                 recorded=s.scalar(select(Run).where(Run.project_id=='p'))
                 observed_status=recorded.status
-                assert s.get(Project,'p').status==expected
+                assert s.get(Project,'p').status==('ready' if expected=='done' else expected)
                 assert not orchestrator.active('p')
         else:
             outcome=await orchestrator._turn('p','owner',role='alex',phase='build',
@@ -165,11 +166,12 @@ async def main():
         else: assert listing['files'][0]['path']=='index.html'
         if data['interrupt']:
             from app.revision_view import materialized_revision
-            registered=data['interrupt']=='deadline_checkpoint'
+            registered=True
             with materialized_revision(resources.repository,resources.store,owner='owner',workspace_id=workspace) as view:
                 assert view.path.joinpath('index.html').read_text()==('<h1>actual orchestrated output</h1>' if registered else '<h1>saved before interruption</h1>')
             with sqlite3.connect(settings.db_path) as db:
-                assert db.execute('SELECT state,termination_state,outcome FROM revision_attempts').fetchall()==[('closed','confirmed','succeeded' if registered else 'cancelled')]
+                expected_ledger='cancelled' if data['interrupt']=='cancel' else 'timed_out' if data['interrupt']=='deadline' else 'succeeded'
+                assert db.execute('SELECT state,termination_state,outcome FROM revision_attempts').fetchall()==[('closed','confirmed',expected_ledger)]
                 assert db.execute('SELECT count(*) FROM revision_receipts').fetchone()[0]==int(registered)
                 assert db.execute('SELECT count(*) FROM revision_records').fetchone()[0]==1+int(registered)
         if data['valid']: assert [entry['path'] for entry in listing['files']]==['index.html','notes.txt']
@@ -190,13 +192,15 @@ asyncio.run(main())
         parameters={'code':base64.b64encode(archive.getvalue()).decode(),'admin':config.admin_token,
             'key':config.grant_key,'broker':int(broker._origin.rsplit(':',1)[1]),'runtime':relay.server_port,'valid':valid,'interrupt':interrupt,'schema_version':schema_version}
         try:
-            code,out,err=run_bounded(['docker','run','--name',name,'--network=bridge','--read-only',
+            process=subprocess.run(['docker','run','--name',name,'--network=bridge',
+                '--add-host','host.docker.internal:host-gateway','--read-only',
                 '--user','1000:1000','--cap-drop=ALL','--security-opt=no-new-privileges','--memory=512m','--pids-limit=128',
                 '--tmpfs','/tmp:rw,nosuid,nodev,size=256m,mode=1777','--publish','127.0.0.1::8767',
                 '--workdir','/tmp','-i',IMAGE,'/app/backend/.venv/bin/python','-I','-c',script],
-                input_data=json.dumps(parameters).encode(),timeout=30)
-            assert code==0,err.decode()
-            assert json.loads(out)['status']==('cancelled' if interrupt=='cancel' else 'timed_out' if interrupt else 'done' if valid else 'failed')
+                input=json.dumps(parameters).encode(),capture_output=True,timeout=55,check=False)
+            assert len(process.stdout)+len(process.stderr)<=256*1024
+            assert process.returncode==0,process.stderr.decode()
+            assert json.loads(process.stdout)['status']==('cancelled' if interrupt=='cancel' else 'timed_out' if interrupt else 'done' if valid else 'failed')
             assert len(observed)==(2 if valid else 1)
         finally:
             relay.shutdown();relay.server_close();worker.join(timeout=3)

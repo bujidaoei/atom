@@ -21,15 +21,18 @@ import select
 import socketserver
 from dataclasses import replace
 
+import httpx
 import pytest
 import uvicorn
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from app.models import Base, User, Project, Run
-from app.revisions import Receipt, RevisionRepository
-from app.artifacts import Artifact
+from app.revisions import Receipt, RevisionError, RevisionRepository
+from app.revision_view import committed_catalog
+from app.artifacts import Artifact, ArtifactError, ArtifactStore
 from app.execution import ExecutionCoordinator
+from app.execution_http import ExecutionAPI
 from app.migrations import migrate
 from app.sandbox.client import BrokerClient, BrokerClientError
 from app.sandbox.config import BrokerConfig
@@ -38,6 +41,7 @@ from app.sandbox.grants import Grant, GrantCodec, CompletionGrantCodec
 from app.sandbox.lifecycle import LifecycleError
 from app.sandbox.registry import Registry, RegistryError
 from app.sandbox.service import create_app
+from app.snapshots import export_snapshot, verify_snapshot
 
 IMAGE = os.environ.get('ATOM_TEST_DOCKER_IMAGE')
 pytestmark = pytest.mark.skipif(not IMAGE, reason='requires explicit pinned local Docker test image')
@@ -119,6 +123,160 @@ def create_api_database(path):
         s.add(Run(id='run',project_id='p',role='alex',model='fixture',status='running'))
         s.commit()
     engine.dispose()
+
+
+@pytest.mark.parametrize('outcome,changed', [
+    ('cancelled',False),('timed_out',False),('cancelled',True),('timed_out',True),
+])
+def test_incomplete_checkpoint_with_real_broker_and_store(tmp_path, outcome, changed):
+    path = tmp_path / 'api.db'
+    create_api_database(path)
+    migrate(path,tmp_path / 'backup.db')
+    repository = RevisionRepository(path)
+    with sqlite3.connect(path) as db:
+        workspace = db.execute('SELECT id FROM revision_workspaces').fetchone()[0]
+    source = tmp_path / 'source'
+    source.mkdir(mode=0o700)
+    (source / 'initial.txt').write_text('original',encoding='utf-8')
+    archive = io.BytesIO()
+    export_snapshot(source,archive)
+    storage_root = tmp_path / 'artifacts'
+    storage_root.mkdir(mode=0o700)
+    store = ArtifactStore(storage_root)
+    base = store.put(archive.getvalue())
+    base_revision = repository.bootstrap('owner',workspace,base)
+    intent = repository.reserve('owner',workspace,'run','attempt','grant',int(time.time())+120)
+    grant = Grant(intent.grant_id,'owner',intent.project_id,intent.run_id,intent.id,
+                  intent.generation,intent.base_revision,intent.issued_at,intent.deadline)
+    registry = Registry(tmp_path / 'broker.db')
+    driver = DockerDriver(registry.broker_id,IMAGE)
+    with running_broker(registry.path) as (_,broker,runner,_):
+        observed = runner.run(broker.provision(grant))
+        worker = registry.find(observed.attempt_id)
+        repository.bind('owner','attempt',worker.id)
+        runner.run(broker.seed(grant,worker.id,archive.getvalue()))
+        if changed:
+            container = driver.inspect(worker)
+            assert container is not None and container.running
+            status,_,error = run_bounded(['docker','exec',container.id,'python3','-c',
+                "from pathlib import Path; Path('/workspace/result.txt').write_text('partial output')"],timeout=20)
+            assert status == 0,error.decode()
+        completion_codec = CompletionGrantCodec(b'c'*32)
+        coordinator = ExecutionCoordinator(repository,broker,completion_codec=completion_codec)
+        api = ExecutionAPI(coordinator,store,completion_codec)
+        async def request(value, capability):
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=api),
+                                         base_url='http://127.0.0.1') as transport:
+                return await transport.post('/v1/executions/partial',json=value,
+                    headers={'authorization':'Bearer '+capability})
+        token = completion_codec.issue(grant)
+        denied = runner.run(request({'outcome':'failed'},token))
+        assert denied.status_code == 400
+        assert repository.recovery('owner','attempt').outcome is None
+        async def duplicate_outcome():
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=api),
+                                         base_url='http://127.0.0.1') as transport:
+                return await transport.post('/v1/executions/partial',
+                    content=b'{"outcome":"failed","outcome":"cancelled"}',
+                    headers={'authorization':'Bearer '+token,'content-type':'application/json'})
+        assert runner.run(duplicate_outcome()).status_code == 400
+        assert repository.recovery('owner','attempt').outcome is None
+        denied = runner.run(request({'outcome':outcome},'invalid'))
+        assert denied.status_code == 403
+        assert repository.recovery('owner','attempt').outcome is None
+        denied = runner.run(request({'outcome':outcome},completion_codec.issue(replace(grant,org='foreign'))))
+        assert denied.status_code == 403
+        assert repository.recovery('owner','attempt').outcome is None
+        response = runner.run(request({'outcome':outcome},token))
+        assert response.status_code == 200,response.text
+        closed = repository.recovery('owner','attempt')
+        assert response.json()['outcome'] == closed.outcome
+        assert closed.state == 'closed' and closed.termination_state == 'confirmed'
+        assert closed.outcome == outcome
+        current = repository.current_revision('owner',workspace)
+        catalogue = committed_catalog(repository,store,owner='owner',project_id='p')
+        if changed:
+            assert closed.receipt is not None
+            assert current.revision_id == closed.receipt.revision_id != base_revision
+            assert catalogue['incompleteSavedRevisionId'] == closed.receipt.revision_id
+            saved = store.read(closed.receipt.artifact_key)
+            assert {entry.path for entry in verify_snapshot(io.BytesIO(saved)).files} == {'initial.txt','result.txt'}
+        else:
+            assert closed.receipt is None and current.revision_id == base_revision
+            assert catalogue['incompleteSavedRevisionId'] is None
+        assert registry.find(worker.id).state == 'terminated'
+        assert driver.inspect(worker) is None
+    assert not driver.owned_inventory()
+
+
+@pytest.mark.parametrize('fault', ['artifact_put','registration','confirmation','revocation'])
+def test_partial_checkpoint_faults_preserve_only_registered_bytes(tmp_path, monkeypatch, fault):
+    path = tmp_path / 'api.db'
+    create_api_database(path)
+    migrate(path,tmp_path / 'backup.db')
+    repository = RevisionRepository(path)
+    with sqlite3.connect(path) as db:
+        workspace = db.execute('SELECT id FROM revision_workspaces').fetchone()[0]
+    source = tmp_path / 'source'
+    source.mkdir(mode=0o700)
+    (source / 'initial.txt').write_text('original',encoding='utf-8')
+    archive = io.BytesIO()
+    export_snapshot(source,archive)
+    storage_root = tmp_path / 'artifacts'
+    storage_root.mkdir(mode=0o700)
+    store = ArtifactStore(storage_root)
+    base = store.put(archive.getvalue())
+    base_revision = repository.bootstrap('owner',workspace,base)
+    intent = repository.reserve('owner',workspace,'run','attempt','grant',int(time.time())+120)
+    grant = Grant(intent.grant_id,'owner',intent.project_id,intent.run_id,intent.id,
+                  intent.generation,intent.base_revision,intent.issued_at,intent.deadline)
+    registry = Registry(tmp_path / 'broker.db')
+    driver = DockerDriver(registry.broker_id,IMAGE)
+    with running_broker(registry.path) as (_,broker,runner,_):
+        observed = runner.run(broker.provision(grant))
+        worker = registry.find(observed.attempt_id)
+        repository.bind('owner','attempt',worker.id)
+        runner.run(broker.seed(grant,worker.id,archive.getvalue()))
+        container = driver.inspect(worker)
+        assert container is not None and container.running
+        status,_,error = run_bounded(['docker','exec',container.id,'python3','-c',
+            "from pathlib import Path; Path('/workspace/result.txt').write_text('partial output')"],timeout=20)
+        assert status == 0,error.decode()
+        target = {'artifact_put':(store,'put',ArtifactError('artifact_io_error')),
+                  'registration':(repository,'register',RevisionError('revision_unavailable')),
+                  'confirmation':(broker,'confirm',BrokerClientError('broker_outcome_unknown')),
+                  'revocation':(broker,'revoke',BrokerClientError('broker_outcome_unknown'))}[fault]
+        original = getattr(target[0],target[1])
+        def fail_once(*_args, **_kwargs):
+            raise target[2]
+        if fault in ('confirmation','revocation'):
+            async def fail_async(*_args, **_kwargs):
+                raise target[2]
+            replacement = fail_async
+        else:
+            replacement = fail_once
+        monkeypatch.setattr(target[0],target[1],replacement)
+        coordinator = ExecutionCoordinator(repository,broker,completion_codec=CompletionGrantCodec(b'c'*32))
+        with pytest.raises((ArtifactError,RevisionError,BrokerClientError)):
+            runner.run(coordinator.checkpoint_incomplete('owner','attempt',store,'timed_out'))
+        monkeypatch.setattr(target[0],target[1],original)
+        if fault == 'revocation':
+            pending = repository.recovery('owner','attempt')
+            assert pending.state != 'closed' and pending.outcome == 'timed_out'
+            runner.run(coordinator.reconcile())
+        closed = repository.recovery('owner','attempt')
+        assert closed.state == 'closed' and closed.termination_state == 'confirmed'
+        assert closed.outcome == 'timed_out'
+        current = repository.current_revision('owner',workspace)
+        if fault in ('artifact_put','registration'):
+            assert closed.receipt is None and current.revision_id == base_revision
+        else:
+            assert closed.receipt is not None and current.revision_id == closed.receipt.revision_id
+            saved = store.read(closed.receipt.artifact_key)
+            assert {entry.path for entry in verify_snapshot(io.BytesIO(saved)).files} == {'initial.txt','result.txt'}
+        assert registry.find(worker.id).state == 'terminated'
+        assert driver.inspect(worker) is None
+    assert not driver.owned_inventory()
 
 
 @pytest.mark.parametrize('state', ['unbound','bound','registered'])

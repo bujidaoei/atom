@@ -89,6 +89,7 @@ def project_detail(session: Session, project: Project, *, catalog=None) -> dict[
             ],
             "files": listing["files"] if listing is not None else storage.list_files(storage.workspace_dir(project.id)),
             "revisionId": listing["revisionId"] if listing is not None else None,
+            "incompleteSavedRevisionId": listing["incompleteSavedRevisionId"] if listing is not None else None,
             "acceptance": acceptance_json(session, project.id),
             "race": race_json(session, project.id, catalog=catalog),
         }
@@ -159,6 +160,7 @@ def race_json(session: Session, project_id: str, *, catalog=None) -> dict[str, A
                 if heat.run_id
                 else None,
                 "revisionId": listings[heat.id]["revisionId"] if catalog else None,
+                "incompleteSavedRevisionId": listings[heat.id]["incompleteSavedRevisionId"] if catalog else None,
                 "previewUrl": f"/preview/{project_id}/race/{heat.id}/" if previewable[heat.id] else None,
                 "elapsedMs": heat.elapsed_ms,
                 "inputTokens": heat.input_tokens,

@@ -197,3 +197,52 @@ class ExecutionCoordinator:
             except (ArtifactError, SnapshotError, RevisionError, BrokerClientError, ExecutionError):
                 await self._stop(owner, attempt_id, 'failed')
                 raise
+
+    async def checkpoint_incomplete(self, owner: str, attempt_id: str, store: ArtifactStore,
+                                    outcome: str) -> Recovery:
+        """Save only a verified changed snapshot, then close with a non-success outcome."""
+        if outcome not in ('cancelled', 'timed_out'):
+            raise ExecutionError('invalid_partial_outcome')
+        async with self._admission():
+            previous = await asyncio.to_thread(self.repository.recovery, owner, attempt_id)
+            if previous.outcome is not None:
+                if previous.outcome != outcome:
+                    raise ExecutionError('execution_outcome_conflict')
+                if previous.receipt is not None:
+                    await asyncio.to_thread(self._base, store, previous.receipt.artifact_key,
+                                            previous.receipt.snapshot_revision)
+                return await self._stop(owner, attempt_id, outcome)
+            try:
+                intent = await asyncio.to_thread(self.repository.completion, owner, attempt_id)
+                grant = Grant(intent.grant_id, owner, intent.project_id, intent.run_id, intent.id,
+                              intent.generation, intent.base_revision, intent.issued_at, intent.deadline)
+                receipt = await asyncio.to_thread(self.repository.receipt, owner, attempt_id,
+                                                 intent.broker_attempt_id, intent.grant_id)
+                acknowledged = False
+                if receipt is not None:
+                    await asyncio.to_thread(self._base, store, receipt.artifact_key, receipt.snapshot_revision)
+                    status = await self.broker.checkpoint_status(grant, intent.broker_attempt_id)
+                    if status.state == 'checkpointed':
+                        if status.revision != receipt.snapshot_revision:
+                            raise ExecutionError('execution_checkpoint_mismatch')
+                        acknowledged = True
+                if not acknowledged:
+                    exported = await self.broker.export(grant, intent.broker_attempt_id)
+                    if receipt is None:
+                        if exported.revision == intent.base_revision:
+                            return await self._stop(owner, attempt_id, outcome)
+                        artifact = await asyncio.to_thread(store.put, exported.payload)
+                        receipt = await asyncio.to_thread(self.repository.register, owner, attempt_id,
+                                                         intent.broker_attempt_id, intent.grant_id, artifact)
+                    elif exported.revision != receipt.snapshot_revision:
+                        raise ExecutionError('execution_checkpoint_mismatch')
+                    await asyncio.to_thread(self.repository.completion, owner, attempt_id)
+                    await self.broker.confirm(grant, exported, receipt)
+                await asyncio.to_thread(self.repository.completion, owner, attempt_id)
+                return await self._stop(owner, attempt_id, outcome)
+            except asyncio.CancelledError:
+                await self._stop(owner, attempt_id, 'cancelled')
+                raise
+            except (ArtifactError, SnapshotError, RevisionError, BrokerClientError, ExecutionError):
+                await self._stop(owner, attempt_id, outcome)
+                raise

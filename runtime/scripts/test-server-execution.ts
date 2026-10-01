@@ -59,13 +59,14 @@ try {
       systemPromptSuffix:input.request.systemPromptSuffix, enableTools:input.request.enableTools} : {}),
     workspacePath: join(root, 'workspace'), sessionPath: join(root, 'session.jsonl'), agentDir: join(root, 'agent'),
     gateway: { baseUrl: `http://127.0.0.1:${(model.address() as any).port}/v1`, apiKey: 'synthetic-model-key', model: 'test-model' },
-    budgetMs: input.interrupt?.startsWith('deadline') ? 3000 : 15000, lease: input.lease };
+    budgetMs: input.interrupt === 'deadline_checkpoint' ? 10000
+      : input.interrupt === 'deadline' ? 7000 : 15000, lease: input.lease };
   const denied = await fetch(`http://127.0.0.1:${port}/v1/runs`, { method: 'POST',
     headers: { authorization: `Bearer ${token}` }, body: JSON.stringify({ ...body, lease: undefined }) });
   assert.equal(denied.status, 400);
   assert.equal(requests, 0);
   const response = await fetch(`http://127.0.0.1:${port}/v1/runs`, { method: 'POST',
-    headers: { authorization: `Bearer ${token}` }, body: JSON.stringify(body), signal: AbortSignal.timeout(18000) });
+    headers: { authorization: `Bearer ${token}` }, body: JSON.stringify(body), signal: AbortSignal.timeout(25000) });
   assert.equal(response.status, 200);
   const lines = (await response.text()).trim().split('\n').map(line => JSON.parse(line));
   assert.equal(requests, 2);

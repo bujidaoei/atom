@@ -102,6 +102,8 @@ export type RaceHeat = {
   model: string;
   status: "queued" | "running" | "done" | "failed" | "cancelled" | "timed_out" | "interrupted" | "error";
   runId: string | null;
+  revisionId: string | null;
+  incompleteSavedRevisionId: string | null;
   previewUrl: string | null;
   elapsedMs: number | null;
   inputTokens: number;
@@ -124,6 +126,8 @@ export type ProjectDetail = ProjectSummary & {
   messages: Message[];
   requirements: Requirement[];
   files: FileEntry[];
+  revisionId: string | null;
+  incompleteSavedRevisionId: string | null;
   acceptance: AcceptanceRun | null;
   activeRunId: string | null;
   latestRun: { id: string; status: string; phase: string; error: string | null; startedAt: string; finishedAt: string | null } | null;

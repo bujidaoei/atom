@@ -19,6 +19,15 @@ class _Rejected(Exception):
         self.status, self.code = status, code
 
 
+def _unique_object(pairs):
+    value = {}
+    for key, item in pairs:
+        if key in value:
+            raise ValueError('duplicate_key')
+        value[key] = item
+    return value
+
+
 class ExecutionAPI:
     def __init__(self, coordinator: ExecutionCoordinator, store: ArtifactStore, codec: CompletionGrantCodec):
         if not isinstance(codec, CompletionGrantCodec):
@@ -52,7 +61,7 @@ class ExecutionAPI:
 
     async def _handle(self, scope, receive):
         path = scope['path'].removeprefix(scope.get('root_path',''))
-        if path not in ('/v1/executions/complete','/v1/executions/cancel'):
+        if path not in ('/v1/executions/complete','/v1/executions/cancel','/v1/executions/partial'):
             raise _Rejected(404,'not_found')
         if scope['method'] != 'POST':
             raise _Rejected(405,'method_not_allowed')
@@ -69,22 +78,45 @@ class ExecutionAPI:
             raise _Rejected(400,'invalid_request')
         if any(k.lower() == b'content-encoding' for k,v in headers):
             raise _Rejected(415,'unsupported_encoding')
+        partial = path.endswith('/partial')
+        if partial and [v.lower() for k,v in headers if k.lower() == b'content-type'] != [b'application/json']:
+            raise _Rejected(415,'unsupported_media_type')
+        body = bytearray()
         try:
             async with asyncio.timeout(5):
                 while True:
                     message = await receive()
-                    if message['type'] != 'http.request' or message.get('body'):
+                    chunk = message.get('body', b'')
+                    if message['type'] != 'http.request' or not isinstance(chunk, bytes):
                         raise _Rejected(400,'body_not_allowed')
+                    if (not partial and chunk) or len(body) + len(chunk) > 128:
+                        raise _Rejected(400,'invalid_request')
+                    body.extend(chunk)
                     if not message.get('more_body',False):
                         break
         except TimeoutError:
             raise _Rejected(408,'request_timeout') from None
+        if partial:
+            try:
+                value = json.loads(body, object_pairs_hook=_unique_object)
+            except (UnicodeDecodeError, ValueError):
+                raise _Rejected(400,'invalid_request') from None
+            if not isinstance(value, dict) or set(value) != {'outcome'} or value['outcome'] not in ('cancelled','timed_out'):
+                raise _Rejected(400,'invalid_request')
         grant = self.codec.verify(token)
         await asyncio.to_thread(self.coordinator.repository.authorize_capability, grant.org, grant.attempt,
             grant_id=grant.jti,project_id=grant.project,run_id=grant.run,generation=grant.fence,
             base_revision=grant.base_revision,issued_at=grant.iat,deadline=grant.exp)
         if path.endswith('/complete'):
             result = await self.coordinator.complete(grant.org,grant.attempt,self.store)
+        elif partial:
+            try:
+                result = await self.coordinator.checkpoint_incomplete(grant.org,grant.attempt,
+                                                                       self.store,value['outcome'])
+            except ExecutionError as error:
+                if str(error) == 'execution_outcome_conflict':
+                    raise _Rejected(409,'execution_scope_conflict') from None
+                raise
         else:
             result = await self.coordinator.cancel(grant.org,grant.attempt)
         if result.state != 'closed' or result.termination_state != 'confirmed':
