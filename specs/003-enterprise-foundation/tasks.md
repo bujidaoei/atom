@@ -254,3 +254,6 @@ T027/008-T029 increment: operator destination policy and verified public-IP-pinn
 
 
 T027/008-T029 increment: real HTTPS audit batch transport now validates explicit matching receiver ack, with local TLS/independent receiver SQLite dedup and lost-ack evidence.101 relevant regressions pass. Automatic lifecycle/configuration/remote operations and audit viewer/retention remain open.
+
+
+T027/008-T029 increment: real audit ledger and HTTPS sender are composed by an owned recurring exporter with tested cancellation/drain semantics and terminal-error stop.56 checks pass, including actual TLS lost-ack scheduled retry/dedup. Main-service enablement/configuration/global supervision, production receiver/egress and retention remain open.
