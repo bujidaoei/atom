@@ -23,14 +23,39 @@ from app.config import get_settings
 from app.content_hosts import ContentHosts
 from app.content_repository import ContentRepository
 from app.db import get_db
+from app.migrations import migrate
+from app.release_repository import ReleaseRepository
 from app.routers import releases
 from app.security import issue_session
-from test_adoption_repository import prepared
+from app.verification_repository import VerificationRepository
+from app.verifier_authority import VerifierAuthority
+from test_adoption_repository import Store, prepared, snapshot
 from test_adoption_verification_repository import adopted
 from test_revision_migrations import legacy
 from test_v13_content_consumers import published
-from test_verifier_authority import authorized
+from test_verifier_authority import authorized, _intent, _register
 from test_rollback_v14_repository import historical, _rollback_intent
+
+
+@pytest.fixture
+def http_history(adopted, tmp_path):
+    path, adopted_receipt, intent = adopted
+    migrate(path, tmp_path / 'before-v13.db', target_version=13)
+    request = VerificationRepository(path).reserve(**(intent | {'request_id':'a' * 32}))
+    authority = VerifierAuthority(path)
+    assignment = authority.dispatch(owner='user', request_id=request.id,
+        artifact=adopted_receipt.artifact, route_id='b' * 32,
+        verifier_id='http-worker', environment_digest='e' * 64)
+    _register(authority, assignment,
+        [{'key':'page', 'checkIndex':0, 'passed':True, 'note':'observed'}])
+    payload, artifact = snapshot(b'<html>heat</html>')
+    assert artifact == adopted_receipt.artifact
+    store = Store(artifact.key, payload)
+    release_intent = _intent(request) | {'release_id':'c' * 32}
+    source = ReleaseRepository(path).publish_verified(store, **release_intent)
+    displaced = ReleaseRepository(path).publish_verified(store, **(release_intent | {
+        'release_id':'d' * 32, 'expected_generation':1}))
+    return path, store, release_intent, source, displaced
 
 
 def _configured_api(path, active_store, intent, tmp_path, monkeypatch):
@@ -249,6 +274,158 @@ def test_rollback_http_requires_exact_v14(published, tmp_path, monkeypatch):
             assert db.execute('SELECT release_id,generation FROM release_publications').fetchone() == (
                 release.release_id, 1)
             assert db.execute("SELECT count(*) FROM command_receipts WHERE key LIKE 'rollback:%'").fetchone() == (0,)
+    finally:
+        engine.dispose()
+        get_settings.cache_clear()
+
+
+def test_v14_current_and_withdraw_follow_rollback(historical, tmp_path, monkeypatch):
+    path, store, intent, source, displaced = historical
+    app, token, engine = _configured_api(path, store, intent, tmp_path, monkeypatch)
+    args, body, route, headers = _command(intent, source, displaced)
+    current_route = '/api/projects/project/releases/current'
+    inspect_headers = {'x-atom-intent':'inspect-verified-release'}
+    try:
+        with TestClient(app, base_url='https://console.example.org',
+                        cookies={'__Host-atom_console':token}) as client:
+            before = client.get(current_route, headers=inspect_headers)
+            assert before.status_code == 200, before.text
+            assert before.json()['publication']['releaseId'] == displaced.release_id
+            assert before.json()['publication']['generation'] == 2
+            assert client.post(route, json=body, headers=headers).status_code == 200
+            current = client.get(current_route, headers=inspect_headers)
+            assert current.status_code == 200, current.text
+            publication = current.json()['publication']
+            assert publication['releaseId'] == args['release_id']
+            assert publication['generation'] == 3 and publication['live'] is True
+            assert publication['pinnedUrl'].startswith('https://r-')
+            withdraw_route = '/api/projects/project/releases/' + args['release_id'] + '/unpublish'
+            withdraw_body = {'commandId':'f' * 32, 'expectedGeneration':3}
+            withdraw_headers = {'origin':'https://console.example.org',
+                                'x-atom-intent':'unpublish-verified-release'}
+            withdrawn = client.post(withdraw_route, json=withdraw_body,
+                                    headers=withdraw_headers)
+            assert withdrawn.status_code == 200, withdrawn.text
+            assert withdrawn.json()['generation'] == 4
+            assert client.post(withdraw_route, json=withdraw_body,
+                               headers=withdraw_headers).json() == withdrawn.json()
+            after = client.get(current_route, headers=inspect_headers)
+            assert after.status_code == 200
+            assert after.json()['publication']['live'] is False
+            assert after.json()['publication']['pinnedUrl'] is None
+            assert after.json()['publication']['sharingUrl'] is None
+    finally:
+        engine.dispose()
+        get_settings.cache_clear()
+
+
+def test_verified_v13_current_withdraw_and_publish_regression(http_history, tmp_path, monkeypatch):
+    path, store, intent, _source, displaced = http_history
+    app, token, engine = _configured_api(path, store, intent, tmp_path, monkeypatch)
+    route = '/api/projects/project/releases'
+    try:
+        with TestClient(app, base_url='https://console.example.org',
+                        cookies={'__Host-atom_console':token}) as client:
+            current = client.get(route + '/current',
+                headers={'x-atom-intent':'inspect-verified-release'})
+            assert current.status_code == 200
+            assert current.json()['publication']['releaseId'] == displaced.release_id
+            withdrawal = client.post(route + '/' + displaced.release_id + '/unpublish',
+                json={'commandId':'e' * 32, 'expectedGeneration':2},
+                headers={'origin':'https://console.example.org',
+                         'x-atom-intent':'unpublish-verified-release'})
+            assert withdrawal.status_code == 200 and withdrawal.json()['generation'] == 3
+            publish = client.post(route, json={
+                'releaseId':'f' * 32, 'verificationId':intent['verification_id'],
+                'expectedRevision':intent['expected_revision'],
+                'expectedGeneration':3, 'audience':'public', 'slug':intent['slug']},
+                headers={'origin':'https://console.example.org',
+                         'x-atom-intent':'publish-verified-release'})
+            assert publish.status_code == 200, publish.text
+            assert publish.json()['generation'] == 4
+            assert client.get(route + '/current',
+                headers={'x-atom-intent':'inspect-verified-release'}).json()['publication']['releaseId'] == 'f' * 32
+    finally:
+        engine.dispose()
+        get_settings.cache_clear()
+
+
+@pytest.mark.parametrize('real_store', [False, True])
+def test_v14_rollback_withdraw_and_subsequent_publish_http(
+        http_history, tmp_path, monkeypatch, real_store):
+    path, fixture_store, intent, source, displaced = http_history
+    if real_store and sys.platform != 'linux':
+        pytest.skip('ArtifactStore is Linux-only')
+    migrate(path, tmp_path / 'before-v14.db', target_version=14)
+    root = tmp_path / 'artifacts'
+    if real_store:
+        root.mkdir(mode=0o700)
+        store = ArtifactStore(root)
+        assert store.put(fixture_store.payload).key == fixture_store.key
+    else:
+        store = fixture_store
+    app, token, engine = _configured_api(path, store, intent, tmp_path, monkeypatch)
+    args, body, rollback_route, rollback_headers = _command(intent, source, displaced)
+    route = '/api/projects/project/releases'
+    try:
+        with TestClient(app, base_url='https://console.example.org',
+                        cookies={'__Host-atom_console':token}) as client:
+            rolled = client.post(rollback_route, json=body, headers=rollback_headers)
+            assert rolled.status_code == 200, rolled.text
+            current = client.get(route + '/current',
+                headers={'x-atom-intent':'inspect-verified-release'})
+            assert current.status_code == 200
+            assert current.json()['publication']['releaseId'] == args['release_id']
+            withdrawn = client.post(route + '/' + args['release_id'] + '/unpublish',
+                json={'commandId':'e' * 32, 'expectedGeneration':3},
+                headers={'origin':'https://console.example.org',
+                         'x-atom-intent':'unpublish-verified-release'})
+            assert withdrawn.status_code == 200, withdrawn.text
+            assert withdrawn.json()['generation'] == 4
+            assert client.get(route + '/current',
+                headers={'x-atom-intent':'inspect-verified-release'}).json()['publication']['live'] is False
+            published_again = client.post(route, json={
+                'releaseId':'f' * 32, 'verificationId':intent['verification_id'],
+                'expectedRevision':intent['expected_revision'],
+                'expectedGeneration':4, 'audience':'public', 'slug':intent['slug']},
+                headers={'origin':'https://console.example.org',
+                         'x-atom-intent':'publish-verified-release'})
+            assert published_again.status_code == 200, published_again.text
+            assert published_again.json()['generation'] == 5
+            final = client.get(route + '/current',
+                headers={'x-atom-intent':'inspect-verified-release'}).json()['publication']
+            assert final['releaseId'] == 'f' * 32 and final['generation'] == 5
+            assert final['live'] is True and final['pinnedUrl'].startswith('https://r-')
+            if real_store:
+                binding = ContentRepository(path).sharing_binding(slug=intent['slug'])
+                _assert_separate_content(path, root, binding.id, intent['slug'], 'f' * 32)
+    finally:
+        engine.dispose()
+        get_settings.cache_clear()
+
+
+def test_verified_http_routes_reject_untrusted_v10_ledger(legacy, tmp_path, monkeypatch):
+    path, _baseline = legacy
+    migrate(path, tmp_path / 'before-v10.db', target_version=10)
+    intent = {'policy_digest':'c' * 64, 'runner_version':'runner-1'}
+    app, token, engine = _configured_api(path, Store('0' * 64, b''),
+                                         intent, tmp_path, monkeypatch)
+    route = '/api/projects/project/releases'
+    try:
+        with TestClient(app, base_url='https://console.example.org',
+                        cookies={'__Host-atom_console':token}) as client:
+            current = client.get(route + '/current',
+                headers={'x-atom-intent':'inspect-verified-release'})
+            assert current.status_code == 503
+            publish = client.post(route, json={
+                'releaseId':'a' * 32, 'verificationId':'b' * 32,
+                'expectedRevision':'root', 'expectedGeneration':0,
+                'audience':'public', 'slug':'untrusted-site'},
+                headers={'origin':'https://console.example.org',
+                         'x-atom-intent':'publish-verified-release'})
+            assert publish.status_code == 503
+        with sqlite3.connect(path) as db:
+            assert db.execute('SELECT count(*) FROM release_publications').fetchone() == (0,)
     finally:
         engine.dispose()
         get_settings.cache_clear()

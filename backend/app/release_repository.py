@@ -71,10 +71,15 @@ class CurrentRelease:
 
 class ReleaseRepository:
     def __init__(self, path, *, lock_timeout=3, required_schema=None):
-        if required_schema not in (None, 13, 14):
+        if required_schema not in (None, 13, 14, 'verified'):
             raise VerificationError('invalid_release_configuration')
         self._required_schema = required_schema
         self._ledger = VerificationRepository(path, lock_timeout=lock_timeout)
+
+    def _allows_schema(self, version: int) -> bool:
+        return (self._required_schema is None
+                or version == self._required_schema
+                or (self._required_schema == 'verified' and version in (13, 14)))
 
     def current(self, *, owner: str, project_id: str) -> CurrentRelease | None:
         """Read the owner-scoped verified pointer without reserving the writer lock."""
@@ -88,8 +93,7 @@ class ReleaseRepository:
                 db.execute('PRAGMA query_only=ON')
                 db.execute('BEGIN')
                 version = db.execute('PRAGMA user_version').fetchone()[0]
-                if version not in (13, 14) or (self._required_schema is not None
-                                               and version != self._required_schema):
+                if version not in (13, 14) or not self._allows_schema(version):
                     raise VerificationError('verified_release_schema_required')
                 project = db.execute('SELECT 1 FROM projects WHERE id=? AND user_id=?',
                                      (project_id, owner)).fetchone()
@@ -124,8 +128,7 @@ class ReleaseRepository:
                    for value in (viewer,release_id))):
             raise VerificationError('release_not_found')
         with self._ledger._transaction() as db:
-            if (self._required_schema is not None
-                    and db.execute('PRAGMA user_version').fetchone()[0] != self._required_schema):
+            if not self._allows_schema(db.execute('PRAGMA user_version').fetchone()[0]):
                 raise VerificationError('verified_release_schema_required')
             current = db.execute('''SELECT p.project_id,p.release_id,p.live,r.audience,o.user_id
                 FROM release_publications p JOIN release_records r ON r.id=p.release_id AND r.project_id=p.project_id
@@ -228,7 +231,7 @@ class ReleaseRepository:
         with self._ledger._transaction() as db:
             if db.execute('PRAGMA user_version').fetchone()[0] != 14:
                 raise VerificationError('verified_rollback_schema_required')
-            if self._required_schema is not None and self._required_schema != 14:
+            if not self._allows_schema(14):
                 raise VerificationError('verified_rollback_schema_required')
             project = db.execute('SELECT * FROM projects WHERE id=? AND user_id=?',
                                  (project_id, owner)).fetchone()
@@ -393,7 +396,7 @@ class ReleaseRepository:
         key = 'release:' + release_id
         with self._ledger._transaction() as db:
             schema_version = db.execute('PRAGMA user_version').fetchone()[0]
-            if self._required_schema is not None and schema_version != self._required_schema:
+            if not self._allows_schema(schema_version):
                 raise VerificationError('verified_release_schema_required')
             if schema_version in (13, 14) and not (_preflight or _expected_artifact is not None):
                 raise VerificationError('verified_release_required')
@@ -509,8 +512,7 @@ class ReleaseRepository:
         with self._ledger._transaction() as db:
             schema_version = db.execute('PRAGMA user_version').fetchone()[0]
             if ((require_verified_schema and schema_version not in (13, 14))
-                    or (self._required_schema is not None
-                        and schema_version != self._required_schema)):
+                    or not self._allows_schema(schema_version)):
                 raise VerificationError('release_schema_required')
             if db.execute('SELECT 1 FROM projects WHERE id=? AND user_id=?',(project_id,owner)).fetchone() is None:
                 raise VerificationError('release_not_found')

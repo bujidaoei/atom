@@ -159,7 +159,7 @@ async def publish_verified_release(project: OwnedProject, request: Request):
     release = True
     try:
         def apply():
-            receipt = ReleaseRepository(settings.db_path, required_schema=13).publish_verified(store,
+            receipt = ReleaseRepository(settings.db_path, required_schema='verified').publish_verified(store,
                 owner=project.user_id, project_id=project.id,
                 release_id=command['releaseId'], verification_id=command['verificationId'],
                 expected_revision=command['expectedRevision'],
@@ -207,7 +207,7 @@ async def current_release(project: OwnedProject, request: Request):
     release = True
     try:
         worker = asyncio.create_task(asyncio.to_thread(
-            lambda: ReleaseRepository(settings.db_path, required_schema=13).current(
+            lambda: ReleaseRepository(settings.db_path, required_schema='verified').current(
                 owner=project.user_id, project_id=project.id)))
         _WORKERS.add(worker)
         worker.add_done_callback(_WORKERS.discard)
@@ -260,7 +260,7 @@ async def unpublish_verified_release(project: OwnedProject, release_id: str, req
     release = True
     try:
         def apply():
-            receipt = ReleaseRepository(settings.db_path, required_schema=13).unpublish(
+            receipt = ReleaseRepository(settings.db_path, required_schema='verified').unpublish(
                 owner=project.user_id, project_id=project.id,
                 command_id=command['commandId'], expected_release=release_id,
                 expected_generation=command['expectedGeneration'],
