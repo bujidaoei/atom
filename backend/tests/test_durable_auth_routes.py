@@ -132,6 +132,62 @@ def test_durable_schema_failure_is_unavailable_not_anonymous(durable_client):
     assert response.status_code==503 and 'set-cookie' not in response.headers
 
 
+def test_console_origin_proof_rejects_cookie_only_and_foreign_requests(durable_client, monkeypatch):
+    client, path = durable_client
+    old = client.post('/api/auth/register', json=LOGIN)
+    assert old.status_code == 200
+    assert 'consoleProof' not in old.json()
+    old_cookie = client.cookies.get(DURABLE_COOKIE)
+    monkeypatch.setattr(get_settings(), 'console_proof_required', True)
+    assert client.get('/api/auth/me').status_code == 401
+
+    login = client.post('/api/auth/login', json=LOGIN)
+    assert login.status_code == 200
+    proof = login.json()['consoleProof']
+    cookie = client.cookies.get(DURABLE_COOKIE)
+    assert cookie != old_cookie
+    for headers in ({}, {'X-Atom-Console-Proof': proof[:-1] + ('A' if proof[-1] != 'A' else 'B')},
+                    {'X-Atom-Console-Proof': 'A'*43}):
+        assert client.get('/api/auth/me', headers=headers).status_code == 401
+    assert client.get('/api/auth/me', headers=[('X-Atom-Console-Proof', proof),
+                                               ('X-Atom-Console-Proof', proof)]).status_code == 401
+    assert client.post('/api/projects', json={'prompt': 'Build a website'}).status_code == 401
+    with sqlite3.connect(path) as db:
+        assert db.execute('SELECT count(*) FROM projects').fetchone() == (0,)
+    assert client.get('/api/auth/me', headers={'X-Atom-Console-Proof': proof}).status_code == 200
+    assert client.get('/api/auth/me', headers={'Host': '159.75.231.98:9001',
+                                              'X-Atom-Console-Proof': proof}).status_code == 403
+    assert client.post('/api/projects', json={'prompt': 'Build a website'},
+                       headers={'Origin': 'https://159.75.231.98:9001',
+                                'X-Atom-Console-Proof': proof}).status_code == 403
+    assert client.post('/api/auth/logout', headers={'X-Atom-Console-Proof': proof}).status_code == 200
+    assert client.get('/api/auth/me', headers={'X-Atom-Console-Proof': proof}).status_code == 401
+
+
+def test_console_proof_cannot_be_enabled_with_legacy_cookie_mode():
+    with pytest.raises(ValueError, match='console proof requires durable sessions'):
+        Settings(**(get_settings().model_dump() | {'session_mode': 'legacy', 'console_proof_required': True}))
+
+
+def test_protected_durable_session_accepts_ip_console_origin():
+    values = get_settings().model_dump() | {
+        'session_mode': 'durable', 'console_proof_required': True,
+        'console_origin': 'https://159.75.231.98', 'cookie_secure': True, 'cookie_path': '/',
+    }
+    assert Settings(**values).console_proof_required is True
+
+
+def test_proof_issuance_failure_never_returns_cookie_or_success(durable_client, monkeypatch):
+    client, _ = durable_client
+    monkeypatch.setattr(get_settings(), 'console_proof_required', True)
+    from app.routers import auth
+    def unavailable(_token):
+        raise AccessError('access_unavailable')
+    monkeypatch.setattr(auth, 'proof_for_new_session', unavailable)
+    response = client.post('/api/auth/register', json=LOGIN)
+    assert response.status_code == 503 and 'set-cookie' not in response.headers
+
+
 ACCOUNT_INTENT={'X-Atom-Intent':'revoke-account-sessions'}
 
 def test_logout_all_revokes_existing_devices_but_not_future_login(durable_client):

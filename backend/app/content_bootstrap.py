@@ -1,6 +1,7 @@
 """Top-level browser bootstrap with a fixed configured console destination."""
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from ipaddress import ip_address
 import re
 from urllib.parse import urlencode
 
@@ -31,10 +32,18 @@ class ContentNavigation:
         if (type(self.console_base_path) is not str or len(self.console_base_path) > 160
                 or re.fullmatch(r'(?:/[A-Za-z0-9_-]+)*', self.console_base_path) is None):
             raise ValueError('invalid_content_console_path')
+        authority = value[8:]
         try:
-            ContentHosts(value[8:])
-        except ContentHostError:
-            raise ValueError('invalid_content_console_origin') from None
+            address = ip_address(authority.strip('[]'))
+        except ValueError:
+            try:
+                ContentHosts(authority)
+            except ContentHostError:
+                raise ValueError('invalid_content_console_origin') from None
+        else:
+            canonical = f'[{address.compressed}]' if address.version == 6 else address.compressed
+            if authority != canonical:
+                raise ValueError('invalid_content_console_origin')
 
     def validate_content_hosts(self, hosts):
         console = self.console_origin[8:]

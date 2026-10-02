@@ -24,6 +24,7 @@ class Settings(ObjectStorageSettings):
     environment: Literal["development", "test", "production"] = "development"
     secret: str = Field(repr=False)
     session_mode: Literal["legacy", "durable"] = "legacy"
+    console_proof_required: bool = False
     console_origin: str | None = None
     content_host_suffix: str | None = None
     publication_verification: Literal['advisory', 'required'] = 'advisory'
@@ -108,6 +109,8 @@ class Settings(ObjectStorageSettings):
             ContentNavigation(self.console_origin)
             if not self.cookie_secure or self.cookie_path != '/':
                 raise ValueError('durable sessions require secure root cookies')
+        elif self.console_proof_required:
+            raise ValueError('console proof requires durable sessions')
         if self.content_host_suffix is not None:
             from .content_hosts import ContentHosts
             from .content_bootstrap import ContentNavigation

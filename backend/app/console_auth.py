@@ -1,13 +1,36 @@
 """Explicit console authentication cutover; no legacy credential fallback."""
+import base64
+import hashlib
+import hmac
 import re
 
 from fastapi import HTTPException
 
-from .access_repository import AccessRepository
+from .access_repository import AccessError, AccessRepository
 from .config import get_settings
 from .durable_credentials import DurableConsoleCredentials
 
 DURABLE_COOKIE = '__Host-atom_console'
+PROOF_HEADER = 'x-atom-console-proof'
+_PROOF_CONTEXT = b'atom-console-origin-proof-v1\0'
+
+
+def _session_proof(session_id: str) -> str:
+    """Derive a distinct browser-held proof from a live persisted session ID.
+
+    The server secret never reaches the browser; the HttpOnly cookie does not
+    reveal the session ID to content running on another port of the same IP.
+    """
+    digest = hmac.new(get_settings().secret.encode('ascii'),
+                      _PROOF_CONTEXT + session_id.encode('ascii'), hashlib.sha256).digest()
+    return base64.urlsafe_b64encode(digest).rstrip(b'=').decode('ascii')
+
+
+def proof_for_new_session(token: str) -> str:
+    source = credentials().authenticate(token)
+    if source is None:
+        raise AccessError('access_unavailable')
+    return _session_proof(source.id)
 
 
 def credentials():
@@ -38,7 +61,15 @@ def request_session_token(request):
             values.append(value)
     if len(values) > 1:
         raise HTTPException(401, '登录凭据无效')
-    return values[0] if values else None
+    token = values[0] if values else None
+    if token and get_settings().console_proof_required:
+        proofs = request.headers.getlist(PROOF_HEADER)
+        if len(proofs) != 1 or re.fullmatch(r'[A-Za-z0-9_-]{43}', proofs[0]) is None:
+            raise HTTPException(401, '请重新登录')
+        source = credentials().authenticate(token)
+        if source is None or not hmac.compare_digest(proofs[0], _session_proof(source.id)):
+            raise HTTPException(401, '请重新登录')
+    return token
 
 
 def require_console_host(request):

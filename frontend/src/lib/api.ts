@@ -23,6 +23,33 @@ import type {
  * routes /api and /preview to whatever else lives at the root.
  */
 const BASE = import.meta.env.BASE_URL.replace(/\/+$/, "");
+const CONSOLE_PROOF_KEY = "atom.console.proof.v1";
+
+function readConsoleProof(): string | null {
+  try { return window.localStorage.getItem(CONSOLE_PROOF_KEY); }
+  catch { return null; }
+}
+
+function clearConsoleProof(): void {
+  try { window.localStorage.removeItem(CONSOLE_PROOF_KEY); }
+  catch { /* the browser may disable storage; no proof can be sent then */ }
+}
+
+type LoginResponse = User & { consoleProof?: string };
+
+function acceptLogin(response: LoginResponse): User {
+  if (response.consoleProof !== undefined) {
+    if (!/^[A-Za-z0-9_-]{43}$/.test(response.consoleProof)) {
+      throw new ApiError(0, "登录凭据无效，请重新登录。");
+    }
+    try { window.localStorage.setItem(CONSOLE_PROOF_KEY, response.consoleProof); }
+    catch { throw new ApiError(0, "浏览器无法保存登录凭据，请允许本站使用本地存储。"); }
+  } else {
+    clearConsoleProof();
+  }
+  const { consoleProof: _proof, ...user } = response;
+  return user;
+}
 
 function commandKey(): string {
   return Array.from(crypto.getRandomValues(new Uint8Array(16)), b => b.toString(16).padStart(2, "0")).join("");
@@ -65,18 +92,22 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
 
   let response: Response;
   try {
-    const send = () => fetch(withBase(path), {
-      method,
-      credentials: "include",
-      signal: options.signal,
-      headers: {
-        Accept: accept,
-        ...(options.intent ? { "X-Atom-Intent": options.intent } : {}),
-        ...(body === undefined ? {} : { "Content-Type": "application/json" }),
-        ...(options.commandKey ? { "Idempotency-Key": options.commandKey } : {}),
-      },
-      body: body === undefined ? undefined : JSON.stringify(body),
-    });
+    const send = () => {
+      const proof = readConsoleProof();
+      return fetch(withBase(path), {
+        method,
+        credentials: "include",
+        signal: options.signal,
+        headers: {
+          Accept: accept,
+          ...(proof ? { "X-Atom-Console-Proof": proof } : {}),
+          ...(options.intent ? { "X-Atom-Intent": options.intent } : {}),
+          ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+          ...(options.commandKey ? { "Idempotency-Key": options.commandKey } : {}),
+        },
+        body: body === undefined ? undefined : JSON.stringify(body),
+      });
+    };
     try { response = await send(); }
     catch (error) {
       if (!options.commandKey) throw error;
@@ -87,6 +118,7 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
   }
 
   if (response.status === 401) {
+    clearConsoleProof();
     if (!silent401) onUnauthorized?.();
     throw new ApiError(401, "登录态已失效，请重新登录。");
   }
@@ -118,15 +150,23 @@ export const api = {
   lookup: (email: string) =>
     request<LookupResult>("/api/auth/lookup", { method: "POST", body: { email } }),
   login: (email: string, password: string) =>
-    request<User>("/api/auth/login", { method: "POST", body: { email, password } }),
+    request<LoginResponse>("/api/auth/login", { method: "POST", body: { email, password } }).then(acceptLogin),
   register: (email: string, password: string, name?: string) =>
-    request<User>("/api/auth/register", {
+    request<LoginResponse>("/api/auth/register", {
       method: "POST",
       body: name ? { email, password, name } : { email, password },
-    }),
-  logout: (signal: AbortSignal) => request<{ ok: true }>("/api/auth/logout", { method: "POST", signal, silent401: true }),
-  logoutAll: (signal: AbortSignal) => request<{ ok: true }>("/api/auth/logout-all",
-    { method: "POST", signal, silent401: true, intent: "revoke-account-sessions" }),
+    }).then(acceptLogin),
+  logout: async (signal: AbortSignal) => {
+    const result = await request<{ ok: true }>("/api/auth/logout", { method: "POST", signal, silent401: true });
+    clearConsoleProof();
+    return result;
+  },
+  logoutAll: async (signal: AbortSignal) => {
+    const result = await request<{ ok: true }>("/api/auth/logout-all",
+      { method: "POST", signal, silent401: true, intent: "revoke-account-sessions" });
+    clearConsoleProof();
+    return result;
+  },
   me: (silent401 = false, signal?: AbortSignal) => request<User>("/api/auth/me", { silent401, signal }),
 
   // ---- settings

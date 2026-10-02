@@ -2,7 +2,7 @@
 
 **Feature Branch**: `codex/009-publish-experience`
 **Created**: 2026-10-02
-**Status**: Specified; implementation and acceptance pending
+**Status**: Partial implementation; IP-only isolation and production acceptance pending
 **Input**: Repair check HTTP500, restore simple publication, make publishing a comprehensible history of restorable published snapshots; retain Atom runtime.
 
 ## User Scenarios & Testing
@@ -70,6 +70,6 @@ Saved version: immutable content. Functional check: version-bound observations a
 
 ## COS amendment
 - **FR-009**: Persist immutable publication content in configured private Tencent COS and publication metadata in the mounted server database. Secrets stay in ignored environment files; checked-in examples have empty credentials. Storage failure must not change the live publication.
-- **FR-010**: Public generated JavaScript must remain isolated from the console and other projects' browser storage. The user has no domain and prefers the server IP; deployment must establish and test a safe IP-only isolation architecture or keep public activation pending. A different port alone does not isolate HTTP cookies.
+- **FR-010**: Public generated JavaScript, including legacy `/p/{slug}` links, must remain isolated from the console and other projects' browser storage. The user has no domain and prefers the server IP; deployment must establish and test a safe IP-only isolation architecture or keep public activation pending. A different port alone does not isolate HTTP cookies.
 - **FR-011**: Draft preview and functional checks must execute generated JavaScript outside the console origin. The owner must retain native scripts and browser storage in preview; an isolated server browser must collect real observations for a specific owner-initiated, version-bound check run. Generated pages cannot submit their own check results.
 - **FR-012**: When using same-IP HTTPS ports, every authenticated console API request must require a durable console-origin proof in addition to its HttpOnly session cookie. Project preview/public origins must be stable, unique and never reassigned across projects or releases; capacity exhaustion and ingress failure must leave the previous publication intact.

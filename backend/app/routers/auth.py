@@ -6,7 +6,7 @@ from sqlalchemy import func, select
 
 from ..config import get_settings
 from ..access_repository import AccessError
-from ..console_auth import credentials, request_session_token, require_auth_origin, session_cookie_name
+from ..console_auth import credentials, proof_for_new_session, request_session_token, require_auth_origin, session_cookie_name
 from ..deps import CurrentUser, DbSession
 from ..models import User, UserSettings
 from ..security import hash_password, issue_session, verify_password
@@ -31,17 +31,21 @@ def _find(session, email: str) -> User | None:
     ).first()
 
 
-def _set_cookie(response: Response, user_id: str) -> None:
+def _set_cookie(response: Response, user_id: str) -> str | None:
     settings = get_settings()
+    token = issue_session(user_id)
+    proof = proof_for_new_session(token) if settings.console_proof_required else None
     response.set_cookie(
         session_cookie_name(),
-        issue_session(user_id),
+        token,
         max_age=settings.session_days * 86400,
         httponly=True,
         secure=settings.cookie_secure,
         samesite="lax",
         path=settings.cookie_path,
     )
+    response.headers['Cache-Control'] = 'no-store'
+    return proof
 
 
 @router.post("/lookup")
@@ -75,8 +79,8 @@ def register(body: Credentials, request: Request, response: Response, session: D
     session.add(UserSettings(user_id=user.id))
     session.commit()
 
-    _set_cookie(response, user.id)
-    return user_json(user)
+    proof = _set_cookie(response, user.id)
+    return {**user_json(user), **({'consoleProof': proof} if proof is not None else {})}
 
 
 @router.post("/login")
@@ -85,8 +89,8 @@ def login(body: Credentials, request: Request, response: Response, session: DbSe
     user = _find(session, body.email)
     if user is None or not verify_password(body.password, user.password_hash):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "邮箱或密码不正确")
-    _set_cookie(response, user.id)
-    return user_json(user)
+    proof = _set_cookie(response, user.id)
+    return {**user_json(user), **({'consoleProof': proof} if proof is not None else {})}
 
 
 @router.post("/logout")
