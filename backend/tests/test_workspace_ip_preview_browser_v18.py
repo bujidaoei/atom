@@ -3,7 +3,6 @@ from types import SimpleNamespace
 import socket
 
 from fastapi import FastAPI
-from fastapi.responses import HTMLResponse
 from playwright.sync_api import sync_playwright
 import pytest
 
@@ -170,11 +169,11 @@ def test_workspace_opens_isolated_saved_preview(
 
 @pytest.mark.parametrize('browser_name', ('chromium', 'firefox', 'webkit'))
 def test_real_tls_console_cookie_survives_public_port_and_logout(
-        http_history, tmp_path, monkeypatch, browser_name):
+        http_history, tmp_path, monkeypatch, built_dist, browser_name):
     path, store, intent, _source, _displaced = http_history
     for version in range(14, 19):
         migrate(path, tmp_path / f'before-console-v{version}.db', target_version=version)
-    app, token, engine = _configured_api(path, store, intent, tmp_path, monkeypatch)
+    app, _token, engine = _configured_api(path, store, intent, tmp_path, monkeypatch)
     listeners = _adjacent_listeners()
     preview_port, public_port = [sock.getsockname()[1] for sock in listeners]
     console_listener = socket.socket()
@@ -187,9 +186,9 @@ def test_real_tls_console_cookie_survives_public_port_and_logout(
     monkeypatch.setenv('ATOM_CONSOLE_PROOF_REQUIRED', 'true')
     monkeypatch.delenv('ATOM_CONTENT_HOST_SUFFIX')
     get_settings.cache_clear()
-    proof = proof_for_new_session(token)
     app.include_router(auth.router, prefix='/api')
-    app.add_api_route('/_seed', lambda: HTMLResponse('<!doctype html><title>Atom</title>'))
+    app.include_router(projects.router, prefix='/api')
+    _static(app, built_dist)
     outer = FastAPI()
     outer.mount('/atom', app)
     repository = ContentRepository(path)
@@ -206,11 +205,25 @@ def test_real_tls_console_cookie_survives_public_port_and_logout(
                 args=['--no-proxy-server'] if browser_name == 'chromium' else [])
             context = browser.new_context(ignore_https_errors=True, service_workers='block')
             try:
-                context.add_cookies([{'name':'__Host-atom_console', 'value':token,
-                    'url':console_origin, 'secure':True, 'httpOnly':True, 'sameSite':'Lax'}])
                 console = context.new_page()
-                console.goto(console_origin + '/atom/_seed')
-                console.evaluate("(value) => localStorage.setItem('atom.console.proof.v1', value)", proof)
+                account_email = f'isolated-{browser_name}@example.com'
+                account_password = 'Browser-Isolation-2026!'
+                console.goto(console_origin + '/atom/register')
+                console.get_by_label('邮箱').fill(account_email)
+                console.get_by_role('button', name='继续').click()
+                try:
+                    console.get_by_label('密码').wait_for(timeout=5000)
+                except Exception as error:
+                    raise AssertionError(f'registration lookup did not advance: '
+                        f'url={console.url} body={console.locator("body").inner_text()[:500]}') from error
+                console.get_by_label('密码').fill(account_password)
+                console.get_by_role('button', name='创建账户').click()
+                console.wait_for_url(console_origin + '/atom/app', timeout=10000)
+                assert console.evaluate("Boolean(localStorage.getItem('atom.console.proof.v1'))")
+                cookies = [item for item in context.cookies([console_origin])
+                           if item['name'] == '__Host-atom_console']
+                assert len(cookies) == 1 and cookies[0]['httpOnly'] is True
+                token = cookies[0]['value']
                 me = """async () => (await fetch('/atom/api/auth/me', {
                     credentials:'include', headers:{'x-atom-console-proof':
                     localStorage.getItem('atom.console.proof.v1')}})).status"""
@@ -233,11 +246,20 @@ def test_real_tls_console_cookie_survives_public_port_and_logout(
                 assert len(cookies) == 1 and cookies[0]['value'] == token
                 assert cookies[0]['httpOnly'] is True
                 assert console.evaluate(me) == 200
-                logout = """async () => (await fetch('/atom/api/auth/logout', {
-                    method:'POST', credentials:'include', headers:{'x-atom-console-proof':
-                    localStorage.getItem('atom.console.proof.v1')}})).status"""
-                assert console.evaluate(logout) == 200
+                console.get_by_role('button', name='退出登录').click()
+                console.wait_for_url(console_origin + '/atom/login', timeout=10000)
+                assert console.evaluate("localStorage.getItem('atom.console.proof.v1')") is None
                 assert console.evaluate(me) == 401
+                console.goto(console_origin + '/atom/login')
+                console.get_by_label('邮箱').fill(account_email)
+                console.get_by_role('button', name='继续').click()
+                console.get_by_label('密码').fill(account_password)
+                console.get_by_role('button', name='登录', exact=True).click()
+                console.wait_for_url(console_origin + '/atom/app', timeout=10000)
+                assert console.evaluate(me) == 200
+                renewed = [item for item in context.cookies([console_origin])
+                           if item['name'] == '__Host-atom_console']
+                assert len(renewed) == 1 and renewed[0]['value'] != token
             finally:
                 context.close()
                 browser.close()
