@@ -69,7 +69,7 @@ def test_reconcile_uses_ledger_and_reloads_again_after_restart(ingress):
     assert active.read_bytes() == expected
     assert digest == hashlib.sha256(expected).hexdigest()
     assert caddy.mount_checked and caddy.validated == [expected]
-    assert caddy.reloads == 1 and observed == [(origins.active_routes(), config)]
+    assert caddy.reloads == 1 and observed == [(origins.active_routes(), config.address)]
     # A restart must reapply even if the config bytes have not changed.
     assert controller.reconcile() == digest
     assert caddy.reloads == 2 and len(observed) == 2

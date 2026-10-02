@@ -164,12 +164,15 @@ class ReleaseRepository:
         """Strict publication preserves trusted passing-evidence requirements."""
         return self.publish_snapshot(store, verification_mode='required', **intent)
 
-    def publish_snapshot(self, store: ArtifactStore, *, verification_mode='advisory', **intent) -> ReleaseReceipt:
+    def publish_snapshot(self, store: ArtifactStore, *, verification_mode='advisory',
+                         readiness=None, **intent) -> ReleaseReceipt:
         """Validate stored content before promotion, without holding the DB lock.
 
         This validates artifact integrity/policy, not independent verifier identity.
         Exact committed replay returns its receipt without reading storage again.
         """
+        if readiness is not None and not callable(readiness):
+            raise VerificationError('invalid_release_request')
         intent = {'verification_id': None, 'policy_digest': None, 'runner_version': None,
                   **intent, 'verification_mode': verification_mode}
         candidate = self._publish(**intent, _preflight=True)
@@ -187,6 +190,8 @@ class ReleaseRepository:
                     or len(payload) != candidate.size or manifest.revision != candidate.revision):
                 raise ArtifactError('release_artifact_mismatch')
             validate_content_manifest(manifest)
+            if readiness is not None:
+                readiness()
             # Repeat all current authorization/evidence/generation checks and
             # compare the exact captured descriptor inside the promotion lock.
             return self._publish(**intent, _expected_artifact=candidate)
@@ -196,13 +201,16 @@ class ReleaseRepository:
     def rollback_verified(self, store: ArtifactStore, **intent) -> RollbackReceipt:
         return self.restore_snapshot(store, verification_mode='required', **intent)
 
-    def restore_snapshot(self, store: ArtifactStore, *, verification_mode='advisory', **intent) -> RollbackReceipt:
+    def restore_snapshot(self, store: ArtifactStore, *, verification_mode='advisory',
+                         readiness=None, **intent) -> RollbackReceipt:
         """Create a new v14 release from trusted historical bytes and evidence.
 
         A receipt replay is read from the ledger without consulting mutable
         storage. Fresh admission verifies retained bytes outside the writer
         transaction, then repeats every ledger fence before promotion.
         """
+        if readiness is not None and not callable(readiness):
+            raise VerificationError('invalid_release_request')
         intent = {'policy_digest': None, 'runner_version': None, **intent,
                   'verification_mode': verification_mode}
         candidate = self._rollback(**intent, _preflight=True)
@@ -220,6 +228,8 @@ class ReleaseRepository:
                     or len(payload) != candidate.size or manifest.revision != candidate.revision):
                 raise ArtifactError('release_artifact_mismatch')
             validate_content_manifest(manifest)
+            if readiness is not None:
+                readiness()
             return self._rollback(**intent, _expected_artifact=candidate)
         finally:
             _PREFLIGHTS.release()

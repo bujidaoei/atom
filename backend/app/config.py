@@ -32,6 +32,7 @@ class Settings(ObjectStorageSettings):
     ip_preview_address: str | None = None
     ip_preview_first_port: int | None = None
     ip_preview_last_port: int | None = None
+    ip_ingress_ca_file: Path | None = None
     publication_verification: Literal['advisory', 'required'] = 'advisory'
     cookie_secure: bool = False
     cookie_path: str = "/"
@@ -128,6 +129,10 @@ class Settings(ObjectStorageSettings):
                     or self.ip_preview_address is None
                     or self.ip_preview_first_port is None or self.ip_preview_last_port is None):
                 raise ValueError('ip preview requires durable console proof, verifier and complete origin configuration')
+            if (self.ip_ingress_ca_file is not None and
+                    (not self.ip_ingress_ca_file.is_absolute()
+                     or not self.ip_ingress_ca_file.is_file())):
+                raise ValueError('ip ingress CA file must be an absolute readable file')
             # Validate the literal address without touching the database here.
             try:
                 parsed = ip_address(self.ip_preview_address.strip('[]'))

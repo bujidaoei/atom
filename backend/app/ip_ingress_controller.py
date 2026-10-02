@@ -170,7 +170,7 @@ class IpIngressController:
                     deadline = time.monotonic() + self.probe_budget_seconds
                     while True:
                         try:
-                            self.probe(routes, self.config)
+                            self.probe(routes, self.config.address)
                             break
                         except IngressError:
                             if time.monotonic() >= deadline:

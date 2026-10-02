@@ -105,7 +105,7 @@ def render_ip_routes(base: str, routes: tuple[OriginRoute, ...],
     return base.rstrip() + '\n\n' + _MARKER + '\n'.join(blocks)
 
 
-def probe_ip_routes(routes: tuple[OriginRoute, ...], config: IpIngressConfig, *,
+def probe_ip_routes(routes: tuple[OriginRoute, ...], address: str, *,
                     tls_context: ssl.SSLContext | None = None,
                     timeout_seconds: float = 5) -> None:
     """Verify each TLS listener answers for its exact committed role/project.
@@ -114,18 +114,25 @@ def probe_ip_routes(routes: tuple[OriginRoute, ...], config: IpIngressConfig, *,
     the listener from the caller's network location; deployment also needs an
     independent external reachability check before enabling publication.
     """
-    if (not isinstance(routes, tuple) or not isinstance(config, IpIngressConfig)
+    if (not isinstance(routes, tuple) or not isinstance(address, str)
             or isinstance(timeout_seconds, bool)
             or not isinstance(timeout_seconds, (int, float))
             or not 0 < timeout_seconds <= 15):
         raise IngressError('invalid_ingress_probe')
+    try:
+        parsed = ip_address(address.strip('[]'))
+        canonical = f'[{parsed.compressed}]' if parsed.version == 6 else parsed.compressed
+        if canonical != address:
+            raise ValueError
+    except ValueError:
+        raise IngressError('invalid_ingress_probe') from None
     opener = build_opener(ProxyHandler({}), _NoRedirect(), HTTPSHandler(
         context=tls_context or ssl.create_default_context()))
     for route in routes:
         if (not isinstance(route, OriginRoute) or route.purpose not in ('preview', 'public')
                 or type(route.port) is not int or not 1024 <= route.port <= 65535):
             raise IngressError('invalid_origin_route')
-        url = f'https://{config.address}:{route.port}{HEALTH_PATH}'
+        url = f'https://{address}:{route.port}{HEALTH_PATH}'
         try:
             with opener.open(Request(url, headers={'Accept':'application/json'}),
                              timeout=timeout_seconds) as response:

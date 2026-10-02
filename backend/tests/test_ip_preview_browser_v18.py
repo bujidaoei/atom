@@ -131,13 +131,13 @@ def test_browser_preview_exchange_storage_and_public_port_separation(historical,
         services.append(_start(public, listeners[1], key, cert))
         probe_config = IpIngressConfig('127.0.0.1', 'preview:8000', 'public:8000',
             'https://acme.example.test/directory')
-        probe_ip_routes(origins.active_routes(), probe_config,
+        probe_ip_routes(origins.active_routes(), probe_config.address,
                         tls_context=ssl.create_default_context(cafile=str(cert)))
         with pytest.raises(IngressError, match='ingress_probe_mismatch'):
             probe_ip_routes((OriginRoute('wrong-project', 'preview', preview_port),),
-                            probe_config, tls_context=ssl.create_default_context(cafile=str(cert)))
+                            probe_config.address, tls_context=ssl.create_default_context(cafile=str(cert)))
         with pytest.raises(IngressError, match='ingress_probe_unavailable'):
-            probe_ip_routes(origins.active_routes(), probe_config, timeout_seconds=2)
+            probe_ip_routes(origins.active_routes(), probe_config.address, timeout_seconds=2)
         with sync_playwright() as playwright:
             browser = playwright.chromium.launch()
             context = browser.new_context(ignore_https_errors=True, service_workers='block')

@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import ssl
 
 from fastapi import APIRouter, HTTPException, Request
 from starlette.requests import ClientDisconnect
@@ -13,7 +14,8 @@ from ..bounded_operations import OwnedJSONResponse
 from ..config import get_settings
 from ..console_auth import require_auth_origin, require_console_host
 from ..content_hosts import ContentHosts
-from ..project_origins import ProjectOriginError
+from ..ip_ingress import IngressError, probe_ip_routes
+from ..project_origins import OriginRoute, ProjectOriginError, ProjectOriginRepository
 from ..project_site_url import public_project_url
 from ..deps import OwnedProject
 from ..release_repository import ReleaseRepository
@@ -145,6 +147,32 @@ def _configured(request: Request, project_id: str):
     return settings, resources.store
 
 
+def _ip_readiness(settings, project_id: str):
+    if not settings.ip_public_enabled:
+        return None
+
+    def check():
+        try:
+            origins = ProjectOriginRepository(settings.db_path,
+                first_port=settings.ip_preview_first_port,
+                last_port=settings.ip_preview_last_port)
+            pair = origins.for_project(project_id)
+            if pair is None:
+                raise IngressError('ingress_origin_missing')
+            context = ssl.create_default_context(
+                cafile=str(settings.ip_ingress_ca_file) if settings.ip_ingress_ca_file else None)
+            probe_ip_routes((OriginRoute(project_id, 'preview', pair.preview_port),
+                             OriginRoute(project_id, 'public', pair.public_port)),
+                            settings.ip_preview_address, tls_context=context,
+                            timeout_seconds=3)
+        except IngressError:
+            raise
+        except (ProjectOriginError, OSError, ValueError):
+            raise IngressError('ingress_probe_unavailable') from None
+
+    return check
+
+
 def _status(error: VerificationError | ArtifactError) -> int:
     code = str(error)
     if code in ('release_not_found', 'verification_not_found'):
@@ -183,6 +211,7 @@ async def publish_verified_release(project: OwnedProject, request: Request):
             receipt = ReleaseRepository(settings.db_path,
                 required_schema='verified' if required else 16).publish_snapshot(store,
                 verification_mode=settings.publication_verification,
+                readiness=_ip_readiness(settings, project.id),
                 owner=project.user_id, project_id=project.id,
                 release_id=command['releaseId'], verification_id=command.get('verificationId'),
                 expected_revision=command['expectedRevision'],
@@ -202,6 +231,11 @@ async def publish_verified_release(project: OwnedProject, request: Request):
             worker.add_done_callback(lambda done: _finished(done, lifecycle, token))
             raise
         response = OwnedJSONResponse(result, lifecycle, token, headers=_HEADERS)
+        release = False
+        return response
+    except IngressError:
+        response = OwnedJSONResponse({'detail':'项目网站尚未就绪，请稍后重试'}, lifecycle, token,
+                                     status_code=503, headers=_HEADERS)
         release = False
         return response
     except (VerificationError, ArtifactError) as error:
@@ -338,6 +372,7 @@ async def rollback_verified_release(project: OwnedProject, release_id: str, requ
             receipt = ReleaseRepository(settings.db_path,
                 required_schema='verified' if required else 16).restore_snapshot(store,
                 verification_mode=settings.publication_verification,
+                readiness=_ip_readiness(settings, project.id),
                 owner=project.user_id, project_id=project.id,
                 command_id=command['commandId'], release_id=command['newReleaseId'],
                 source_release_id=command['sourceReleaseId'], expected_release=release_id,
@@ -359,6 +394,11 @@ async def rollback_verified_release(project: OwnedProject, release_id: str, requ
             worker.add_done_callback(lambda done: _finished(done, lifecycle, token))
             raise
         response = OwnedJSONResponse(result, lifecycle, token, headers=_HEADERS)
+        release = False
+        return response
+    except IngressError:
+        response = OwnedJSONResponse({'detail':'项目网站尚未就绪，请稍后重试'}, lifecycle, token,
+                                     status_code=503, headers=_HEADERS)
         release = False
         return response
     except (VerificationError, ArtifactError) as error:
