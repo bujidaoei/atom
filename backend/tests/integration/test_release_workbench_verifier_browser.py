@@ -131,8 +131,7 @@ def test_ui_runs_real_private_verification_and_publishes(
         server, thread, api_port = _serve(outer)
         stage('api-started')
         with sync_playwright() as playwright:
-            browser = playwright.chromium.launch(args=[
-                '--disable-gpu', '--disable-accelerated-compositing'])
+            browser = playwright.chromium.launch(channel='chromium')
             stage('browser-started')
             context = browser.new_context(viewport=viewport, service_workers='block')
             context.add_cookies([{'name': '__Host-atom_console', 'value': owner_token,
