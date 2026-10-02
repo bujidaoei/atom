@@ -1,20 +1,26 @@
 """Real SQLite migration and immutable port ledger constraints."""
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 import sqlite3
 
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
+from starlette.testclient import TestClient
 
 from app.migrations import MigrationError, migrate, verify, verify_backup
 from app.access_repository import AccessRepository
 from app.content_repository import ContentRepository
+from app.content_service import ContentService
+from app.content_hosts import ContentHostError
+from app.content_entry import ContentStartupError, IpPublicContentConfig, create_ip_public_app
 from app.models import Project
 from app.project_origins import ProjectOriginError, ProjectOriginRepository
+from app.project_public_hosts import ProjectPublicHosts
 from app.release_history import publication_history
 from app.release_repository import ReleaseRepository
 from app.revisions import RevisionRepository
-from app.verification_repository import VerificationRepository
+from app.verification_repository import VerificationError, VerificationRepository
 from test_revision_migrations import legacy
 from test_publication_policy_v16 import v15_history
 from test_rollback_v14_repository import historical
@@ -72,6 +78,17 @@ def test_v17_failed_migration_keeps_exact_v16(v16, tmp_path, monkeypatch):
         migrate(v16, backup, target_version=17)
     assert verify(v16) == 16
     assert verify_backup(backup, expected_version=16)
+
+
+def test_ip_public_process_refuses_unmigrated_or_invalid_configuration(v16, tmp_path):
+    config = IpPublicContentConfig(v16, tmp_path / 'artifacts',
+                                   '192.0.2.10', 20000, 20003)
+    with pytest.raises(ContentStartupError, match='public_startup_unavailable'):
+        create_ip_public_app(config)
+    with pytest.raises(ContentStartupError, match='public_configuration_invalid'):
+        create_ip_public_app(IpPublicContentConfig(Path('relative.db'),
+                                                  tmp_path / 'artifacts',
+                                                  '192.0.2.10', 20000, 20003))
 
 
 def test_origin_reservation_is_atomic_stable_and_bounded(v16, tmp_path):
@@ -145,3 +162,34 @@ def test_v17_direct_publication_uses_saved_artifact_without_required_check(v15_h
     assert current.release_id == published.release_id
     assert current.verification_mode == 'advisory'
     assert repository.resolve(slug=published.slug).revision_id == request['expected_revision']
+    content = ContentRepository(path)
+    binding = content.public_project_binding(project_id='project')
+    assert binding.release_id == published.release_id
+    assert content.resolve(binding_id=binding.id).release_id == published.release_id
+    origins = ProjectOriginRepository(path, first_port=20000, last_port=20003)
+    assert origins.reserve('project').public_port == 20001
+    hosts = ProjectPublicHosts('192.0.2.10', origins, content)
+    with TestClient(ContentService(content, store, hosts),
+                    base_url='https://192.0.2.10:20001') as client:
+        page = client.get('/')
+        assert page.status_code == 200 and page.content == b'<html>heat</html>'
+        assert page.headers['x-atom-release'] == published.release_id
+        assert client.get('https://192.0.2.10:20000/').status_code == 404
+        assert client.get('https://192.0.2.10:20002/').status_code == 404
+        assert client.get('https://192.0.2.10:20001/_atom/exchange').status_code == 404
+        with pytest.raises(ContentHostError, match='invalid_content_host'):
+            hosts.route([(b'host', b'192.0.2.10:20001'),
+                         (b'host', b'192.0.2.10:20001')])
+        with pytest.raises(ContentHostError, match='invalid_content_host'):
+            hosts.route([(b'host', b'192.0.2.10:020001')])
+        with pytest.raises(ContentHostError, match='invalid_content_host'):
+            hosts.route([(b'host', b'192.0.2.11:20001')])
+        with pytest.raises(ContentHostError, match='invalid_public_address'):
+            ProjectPublicHosts('192.000.2.10', origins, content)
+    repository.unpublish(owner='user', project_id='project', command_id='b' * 32,
+                         expected_release=published.release_id, expected_generation=4)
+    with pytest.raises(VerificationError, match='content_not_found'):
+        content.public_project_binding(project_id='project')
+    with TestClient(ContentService(content, store, hosts),
+                    base_url='https://192.0.2.10:20001') as client:
+        assert client.get('/').status_code == 404

@@ -15,6 +15,7 @@ from .content_exchange import (EXCHANGE_PATH, EXCHANGE_HEADERS, ExchangeRequestE
                                validate_exchange, receive_handoff, exchange_response)
 from .content_policy import ContentPolicyError, is_control_path
 from .content_hosts import ContentHostError
+from .project_origins import ProjectOriginError
 from .release_view import materialized_content, materialized_private_content
 from .snapshots import SnapshotError
 from .verification_repository import VerificationError
@@ -106,6 +107,8 @@ class ContentService:
             response=Response(status_code=error.status,headers={**EXCHANGE_HEADERS,**({'Allow':error.allow} if error.allow else {})})
         except ContentHostError:
             response = Response(status_code=404,headers=HEADERS)
+        except ProjectOriginError:
+            response = Response(status_code=503,headers=HEADERS)
         except AccessError as error:
             code=404 if str(error) in ('content_access_denied','session_not_found') else 503
             response=Response(status_code=code,headers=HEADERS)
