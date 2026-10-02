@@ -28,9 +28,10 @@ from app.revisions import RevisionRepository
 from app.routers import auth, projects, verifications
 from app.verification_repository import VerificationRepository
 from app.verifier_client import VerifierClient
-from test_adoption_repository import snapshot
+from test_adoption_repository import prepared, snapshot
 from test_adoption_verification_repository import adopted
 from test_release_workbench_browser import ORIGIN, _serve, _static
+from test_revision_migrations import legacy
 from test_rollback_v14_api import _configured_api
 
 
