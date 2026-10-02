@@ -2,6 +2,8 @@
 
 Status: **not deployed**. This document separates observed production facts, rehearsal, and cutover evidence. Do not mark T013/T014 complete until every applicable entry below has a real result.
 
+The private verifier now has `deploy/compose.ip-verifier.yml`. At cutover, supply exact application and worker image IDs, a durable verifier identity, a host-visible seccomp path, the host Docker CLI path, the authoritative data directory and existing private bridge through a root-private Compose environment. Load the same root-private COS settings as the application plus a separate mode0600 verifier control-token file; configure the console with the matching private `ATOM_VERIFIER_ORIGIN` and token only after the coordinator is healthy. The coordinator gets the Docker socket as a trusted host capability and publishes no host port. A disposable target Compose rehearsal passed against a database copy; this is not production activation or a substitute for owner/COS verification.
+
 ## Production inventory, read only
 
 - Server: `159.75.231.98`, existing `atom-candidate` container; mounted application volume `/home/ubuntu/atom-staging/94bfcd7/data` → `/data`.
