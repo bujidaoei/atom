@@ -1,6 +1,7 @@
 """Standalone owner-preview ASGI service with no console API authority."""
 import asyncio
 from datetime import datetime, timezone
+import json
 import mimetypes
 from threading import BoundedSemaphore
 
@@ -17,6 +18,7 @@ from .preview_cookie import preview_cookie, preview_cookie_name
 from .preview_exchange import EXCHANGE_HEADERS, EXCHANGE_PATH, OPEN_PATH, PAGE
 from .preview_view import materialized_preview
 from .project_origins import ProjectOriginError
+from .ip_ingress import HEALTH_PATH
 from .project_port_hosts import ProjectPortHosts
 from .snapshots import SnapshotError
 
@@ -96,7 +98,16 @@ class PreviewService:
             if scope.get('scheme') != 'https':
                 raise ContentHostError('insecure_preview_transport')
             path = scope.get('path', '/')
-            if path in (OPEN_PATH, EXCHANGE_PATH):
+            if path == HEALTH_PATH:
+                if (method not in ('GET', 'HEAD') or scope.get('query_string', b'')
+                        or scope.get('raw_path', b'') != HEALTH_PATH.encode('ascii')):
+                    response = Response(status_code=404, headers=PREVIEW_HEADERS)
+                else:
+                    body = json.dumps({'purpose':'preview', 'projectId':route.project_id},
+                                      sort_keys=True, separators=(',', ':'))
+                    response = Response(body, media_type='application/json',
+                                        headers=PREVIEW_HEADERS)
+            elif path in (OPEN_PATH, EXCHANGE_PATH):
                 self._validate_control(scope, route)
                 if path == OPEN_PATH:
                     response = Response(PAGE, media_type='text/html', headers=EXCHANGE_HEADERS)

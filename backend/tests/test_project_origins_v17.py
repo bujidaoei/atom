@@ -242,6 +242,13 @@ def test_v17_direct_publication_uses_saved_artifact_without_required_check(v15_h
     hosts = ProjectPublicHosts('192.0.2.10', origins, content)
     with TestClient(ContentService(content, store, hosts),
                     base_url='https://192.0.2.10:20001') as client:
+        health = client.get('/_atom/health')
+        assert health.status_code == 200
+        assert health.json() == {'purpose':'public', 'projectId':'project'}
+        assert 'set-cookie' not in health.headers
+        assert client.get('/_atom/health?x=1').status_code == 404
+        assert client.get('http://192.0.2.10:20001/_atom/health').status_code == 404
+        assert client.get('https://192.0.2.10:20000/_atom/health').status_code == 404
         page = client.get('/')
         assert page.status_code == 200 and page.content == b'<html>heat</html>'
         assert page.headers['x-atom-release'] == published.release_id
@@ -263,4 +270,5 @@ def test_v17_direct_publication_uses_saved_artifact_without_required_check(v15_h
         content.public_project_binding(project_id='project')
     with TestClient(ContentService(content, store, hosts),
                     base_url='https://192.0.2.10:20001') as client:
+        assert client.get('/_atom/health').json() == {'purpose':'public', 'projectId':'project'}
         assert client.get('/').status_code == 404

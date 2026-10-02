@@ -35,6 +35,13 @@ def test_preview_port_serves_only_one_exchanged_owner_revision(historical, tmp_p
                          project_id='project', revision_id=revision)
     service = PreviewService(access, store, ProjectPortHosts('192.0.2.10', origins))
     with TestClient(service, base_url='https://192.0.2.10:20000') as client:
+        health = client.get('/_atom/health')
+        assert health.status_code == 200
+        assert health.json() == {'purpose':'preview', 'projectId':'project'}
+        assert 'set-cookie' not in health.headers
+        assert client.get('/_atom/health?x=1').status_code == 404
+        assert client.get('http://192.0.2.10:20000/_atom/health').status_code == 404
+        assert client.get('https://192.0.2.10:20001/_atom/health').status_code == 404
         assert client.get('/').status_code == 404
         opening = client.get('/_atom/open')
         assert opening.status_code == 200 and b'/_atom/exchange' in opening.content

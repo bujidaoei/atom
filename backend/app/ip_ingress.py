@@ -1,7 +1,11 @@
 """Deterministic Caddy configuration from committed IP-origin reservations."""
 from dataclasses import dataclass
 from ipaddress import ip_address
+import json
 import re
+import ssl
+from urllib.error import HTTPError, URLError
+from urllib.request import HTTPRedirectHandler, HTTPSHandler, ProxyHandler, Request, build_opener
 from urllib.parse import urlsplit
 
 from .project_origins import OriginRoute, ProjectOriginRepository
@@ -16,6 +20,12 @@ _UPSTREAM = re.compile(r'(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*'
                        r'(?:[1-9][0-9]{0,4})\Z')
 _DIRECTORY = re.compile(r'https://[A-Za-z0-9./:_-]+\Z')
 _MARKER = '# atom-project-origins: generated from schema17\n'
+HEALTH_PATH = '/_atom/health'
+
+
+class _NoRedirect(HTTPRedirectHandler):
+    def redirect_request(self, request, response, code, message, headers, url):
+        return None
 
 
 @dataclass(frozen=True)
@@ -93,3 +103,46 @@ def render_ip_routes(base: str, routes: tuple[OriginRoute, ...],
 }}
 ''')
     return base.rstrip() + '\n\n' + _MARKER + '\n'.join(blocks)
+
+
+def probe_ip_routes(routes: tuple[OriginRoute, ...], config: IpIngressConfig, *,
+                    tls_context: ssl.SSLContext | None = None,
+                    timeout_seconds: float = 5) -> None:
+    """Verify each TLS listener answers for its exact committed role/project.
+
+    No ambient proxy, cookie or insecure TLS fallback is permitted. This checks
+    the listener from the caller's network location; deployment also needs an
+    independent external reachability check before enabling publication.
+    """
+    if (not isinstance(routes, tuple) or not isinstance(config, IpIngressConfig)
+            or isinstance(timeout_seconds, bool)
+            or not isinstance(timeout_seconds, (int, float))
+            or not 0 < timeout_seconds <= 15):
+        raise IngressError('invalid_ingress_probe')
+    opener = build_opener(ProxyHandler({}), _NoRedirect(), HTTPSHandler(
+        context=tls_context or ssl.create_default_context()))
+    for route in routes:
+        if (not isinstance(route, OriginRoute) or route.purpose not in ('preview', 'public')
+                or type(route.port) is not int or not 1024 <= route.port <= 65535):
+            raise IngressError('invalid_origin_route')
+        url = f'https://{config.address}:{route.port}{HEALTH_PATH}'
+        try:
+            with opener.open(Request(url, headers={'Accept':'application/json'}),
+                             timeout=timeout_seconds) as response:
+                if (response.status != 200 or
+                        response.headers.get_content_type() != 'application/json'
+                        or response.headers.get('Cache-Control') != 'no-store'
+                        or response.headers.get_all('Set-Cookie')):
+                    raise IngressError('ingress_probe_mismatch')
+                raw = response.read(513)
+            if len(raw) > 512:
+                raise IngressError('ingress_probe_mismatch')
+            body = json.loads(raw)
+            if (type(body) is not dict or body != {'purpose':route.purpose,
+                                                   'projectId':route.project_id}):
+                raise IngressError('ingress_probe_mismatch')
+        except IngressError:
+            raise
+        except (HTTPError, URLError, TimeoutError, ssl.SSLError, OSError,
+                UnicodeError, ValueError):
+            raise IngressError('ingress_probe_unavailable') from None
