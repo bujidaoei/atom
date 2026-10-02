@@ -54,11 +54,11 @@ def _tls_files(tmp_path):
     return key_file, cert_file
 
 
-def _adjacent_listeners():
-    for port in range(21000, 21500, 2):
+def _adjacent_listeners(count=2):
+    for port in range(21000, 21500, count):
         sockets = []
         try:
-            for candidate in (port, port + 1):
+            for candidate in range(port, port + count):
                 listener = socket.socket()
                 listener.bind(('127.0.0.1', candidate))
                 listener.listen(32)
@@ -165,6 +165,101 @@ def test_browser_preview_exchange_storage_and_public_port_separation(historical,
                 AccessRepository(path).revoke_console_session(user_id='user', session_id=source.id)
                 page.reload()
                 assert page.locator('body').inner_text() == ''
+            finally:
+                context.close()
+                browser.close()
+    finally:
+        for server, thread in services:
+            server.should_exit = True
+            thread.join(timeout=15)
+            assert not thread.is_alive()
+        for listener in listeners:
+            listener.close()
+
+
+def test_two_projects_have_independent_browser_storage_and_preview_authority(historical, tmp_path):
+    path, _original_store, _intent, _source, _displaced = historical
+    for version in range(15, 19):
+        migrate(path, tmp_path / f'before-two-v{version}.db', target_version=version)
+    html = (b'<html><body><span id="project"></span><script>'
+            b'document.querySelector("#project").textContent='
+            b'localStorage.getItem("project-marker")||"empty";'
+            b'</script></body></html>')
+    payload, artifact = snapshot(html)
+    class Store:
+        def read(self, key):
+            assert key == artifact.key
+            return payload
+    store = Store()
+    engine = create_engine('sqlite:///' + path.as_posix())
+    with Session(engine) as db:
+        for project_id in ('isolation-a', 'isolation-b'):
+            db.add(Project(id=project_id, user_id='user', prompt=project_id,
+                           title=project_id, status='ready'))
+        db.commit()
+    engine.dispose()
+    revisions = RevisionRepository(path)
+    revision_ids = {}
+    for project_id in ('isolation-a', 'isolation-b'):
+        workspace = revisions.ensure_workspace('user', project_id)
+        revision = revisions.bootstrap('user', workspace, artifact)
+        revision_ids[project_id] = revision
+        ReleaseRepository(path, required_schema=16).publish_snapshot(
+            store,
+            verification_mode='advisory', owner='user', project_id=project_id,
+            release_id=('a' if project_id.endswith('a') else 'b') * 32,
+            verification_id=None, expected_revision=revision, expected_generation=0,
+            policy_digest=None, runner_version=None, audience='public',
+            slug=project_id)
+    listeners = _adjacent_listeners(4)
+    ports = [listener.getsockname()[1] for listener in listeners]
+    origins = ProjectOriginRepository(path, first_port=ports[0], last_port=ports[-1])
+    a, b = origins.reserve('isolation-a'), origins.reserve('isolation-b')
+    assert (a.preview_port, a.public_port, b.preview_port, b.public_port) == tuple(ports)
+    source = AccessRepository(path).create_console_session(user_id='user', lifetime_seconds=900)
+    access = PreviewAccessRepository(path)
+    grant = access.issue(owner_id='user', source_session_id=source.id,
+                         project_id='isolation-a', revision_id=revision_ids['isolation-a'])
+    preview = PreviewService(access, store, ProjectPortHosts('127.0.0.1', origins))
+    public = ContentService(ContentRepository(path), store,
+        ProjectPublicHosts('127.0.0.1', origins, ContentRepository(path)))
+    key, cert = _tls_files(tmp_path)
+    services = []
+    try:
+        for listener in listeners:
+            purpose = origins.route(listener.getsockname()[1]).purpose
+            services.append(_start(preview if purpose == 'preview' else public,
+                                   listener, key, cert))
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch()
+            context = browser.new_context(ignore_https_errors=True, service_workers='block')
+            try:
+                owner = context.new_page()
+                owner.goto(f'https://127.0.0.1:{a.preview_port}/_atom/open#{grant.secret}')
+                owner.wait_for_url(f'https://127.0.0.1:{a.preview_port}/', timeout=10000)
+                assert owner.locator('#project').inner_text() == 'empty'
+                owner.evaluate("localStorage.setItem('project-marker','owner-a')")
+                public_a, public_b = context.new_page(), context.new_page()
+                public_a.goto(f'https://127.0.0.1:{a.public_port}/')
+                public_b.goto(f'https://127.0.0.1:{b.public_port}/')
+                assert public_a.locator('#project').inner_text() == 'empty'
+                assert public_b.locator('#project').inner_text() == 'empty'
+                public_a.evaluate("localStorage.setItem('project-marker','public-a')")
+                public_b.evaluate("localStorage.setItem('project-marker','public-b')")
+                for page, expected in ((owner, 'owner-a'), (public_a, 'public-a'),
+                                       (public_b, 'public-b')):
+                    page.reload()
+                    assert page.locator('#project').inner_text() == expected
+                foreign_preview = context.new_page()
+                foreign_preview.goto(f'https://127.0.0.1:{b.preview_port}/')
+                assert foreign_preview.locator('body').inner_text() == ''
+                # The browser sends IP-scoped cookies to every port. A forged
+                # cookie from project B must not grant access to project B's preview.
+                public_b.evaluate("document.cookie='__Host-atom_preview_" +
+                    str(b.preview_port) + "=forged; Secure; Path=/'")
+                foreign_preview.reload()
+                assert foreign_preview.locator('body').inner_text() == ''
+                assert owner.locator('#project').inner_text() == 'owner-a'
             finally:
                 context.close()
                 browser.close()
