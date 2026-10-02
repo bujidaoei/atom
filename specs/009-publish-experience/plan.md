@@ -53,6 +53,8 @@ The owner preview uses its own short-lived, one-use capability and port-specific
 4. Integrate UI using existing design tokens and real API states; desktop/mobile browser tests.
 5. Risk-based targeted gates, protected deployment, public smoke/owner acceptance and evidence reconciliation.
 
+For this schema-changing cutover, add a reusable root-private paired backup: online SQLite backup for the application and broker ledgers, non-database data tree copied without following symlinks, exact Caddy base and old image identity, then a file digest/SQLite integrity receipt. Verify and restore that bundle into a separate directory before any production replacement. An online rehearsal checks the mechanism only; repeat the capture after stopping writers and validate the restored old-image/old-data pair before declaring rollback ready. The existing image-only cutover script cannot be reused for schema10→18 because it assumes schema preservation.
+
 ## Testing strategy amendment (owner direction, 2026-10-03)
 Do not repeat the complete backend regression suite. The last complete source checkpoint passed 2,843 tests with 286 environment-specific skips. From this point, select tests by changed module and security boundary, run type/build checks for affected frontend code, and use focused Docker/browser/fault checks where those behaviors change. Record exact selected suites and omissions; do not infer overall acceptance from focused results. Production cutover still requires protected migration, target ingress, owner/public browser and rollback evidence.
 
