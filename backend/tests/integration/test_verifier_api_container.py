@@ -1,5 +1,6 @@
 """Authenticated v13 console route through private Uvicorn and real Chromium."""
 import asyncio
+from contextlib import asynccontextmanager
 import json
 import os
 from pathlib import Path
@@ -22,8 +23,6 @@ from app.artifacts import ArtifactStore
 from app.bounded_operations import BoundedOperations
 from app.config import get_settings
 from app.content_hosts import ContentHosts
-from app.content_repository import ContentRepository
-from app.content_service import ContentService
 from app.db import get_db
 from app.migrations import migrate
 from app.release_repository import ReleaseRepository
@@ -46,6 +45,41 @@ def _port():
     with socket.socket() as listener:
         listener.bind(('127.0.0.1', 0))
         return listener.getsockname()[1]
+
+
+@asynccontextmanager
+async def separate_content_process(path, root):
+    port = _port()
+    environment = dict(os.environ, ATOM_CONTENT_DB_PATH=str(path),
+        ATOM_CONTENT_ARTIFACT_DIR=str(root), ATOM_CONTENT_HOST_SUFFIX='apps.example.net',
+        ATOM_CONTENT_CONSOLE_ORIGIN='https://console.example.org')
+    process = await asyncio.create_subprocess_exec(sys.executable, '-m', 'uvicorn',
+        'app.content_entry:create_app', '--factory', '--host', '127.0.0.1',
+        '--port', str(port), '--log-level', 'error', env=environment,
+        stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+    try:
+        deadline = time.monotonic() + 15
+        async with httpx.AsyncClient(base_url=f'http://127.0.0.1:{port}',
+                                     trust_env=False, timeout=2) as probe:
+            while True:
+                assert process.returncode is None, 'separate content process failed startup'
+                try:
+                    response = await probe.get('/', headers={'host':'share.apps.example.net'})
+                    assert response.status_code == 404
+                    break
+                except httpx.ConnectError:
+                    assert time.monotonic() < deadline
+                    await asyncio.sleep(.05)
+        yield port
+    finally:
+        if process.returncode is None:
+            process.terminate()
+        try:
+            await asyncio.wait_for(process.communicate(), 10)
+        except TimeoutError:
+            process.kill()
+            await asyncio.wait_for(process.communicate(), 5)
+        assert process.returncode is not None
 
 
 def test_authenticated_main_routes_reconcile_real_browser_result(adopted, tmp_path, monkeypatch):
@@ -165,6 +199,48 @@ def test_authenticated_main_routes_reconcile_real_browser_result(adopted, tmp_pa
                         headers={'origin':'https://foreign.example.org',
                                  'x-atom-intent':'publish-verified-release'})
                     assert denied_release.status_code == 403
+                    foreign_release = await client.post('/api/projects/other/releases',
+                        json=release_command, headers=release_headers)
+                    assert foreign_release.status_code == 404
+                    with sqlite3.connect(path) as db:
+                        db.execute("UPDATE revision_workspaces SET current_revision_id='root' "
+                                   "WHERE project_id='project' AND heat_id IS NULL")
+                    stale_head = await client.post(release_route, json=release_command,
+                                                   headers=release_headers)
+                    assert stale_head.status_code == 409
+                    with sqlite3.connect(path) as db:
+                        db.execute('UPDATE revision_workspaces SET current_revision_id=? '
+                                   'WHERE project_id=? AND heat_id IS NULL',
+                                   (receipt.revision_id, 'project'))
+                        requirement = db.execute('SELECT id,title FROM requirements '
+                                                 'WHERE project_id=? ORDER BY position,id LIMIT 1',
+                                                 ('project',)).fetchone()
+                        assert requirement is not None
+                        db.execute('UPDATE requirements SET title=? WHERE id=?',
+                                   (requirement[1] + ' changed', requirement[0]))
+                    stale_contract = await client.post(release_route, json=release_command,
+                                                       headers=release_headers)
+                    assert stale_contract.status_code == 409
+                    with sqlite3.connect(path) as db:
+                        db.execute('UPDATE requirements SET title=? WHERE id=?',
+                                   (requirement[1], requirement[0]))
+                    stored = root / (artifact.key + '.atomsnap')
+                    stored.unlink()
+                    try:
+                        missing = await client.post(release_route, json=release_command,
+                                                    headers=release_headers)
+                        assert missing.status_code == 503
+                    finally:
+                        assert api.state.execution.store.put(payload) == artifact
+                    stored.write_bytes(b'broken-snapshot')
+                    try:
+                        corrupt = await client.post(release_route, json=release_command,
+                                                    headers=release_headers)
+                        assert corrupt.status_code == 503
+                    finally:
+                        stored.write_bytes(payload)
+                    assert await asyncio.to_thread(ReleaseRepository(path).current,
+                        owner='user', project_id='project') is None
                     store = api.state.execution.store
                     original_read = store.read
                     started, resume = Event(), Event()
@@ -180,7 +256,16 @@ def test_authenticated_main_routes_reconcile_real_browser_result(adopted, tmp_pa
                     assert isinstance((await asyncio.gather(lost, return_exceptions=True))[0],
                                       asyncio.CancelledError)
                     assert api.state.release_operations.pending_count == 1
+                    api.state.release_operations.close_admission()
+                    closed = await client.get(release_route+'/current',
+                        headers={'x-atom-intent':'inspect-verified-release'})
+                    assert closed.status_code == 503
+                    draining = asyncio.create_task(api.state.release_operations.drain())
+                    await asyncio.sleep(.05)
+                    assert not draining.done()
                     resume.set()
+                    await asyncio.wait_for(draining, 10)
+                    api.state.release_operations.start()
                     deadline = time.monotonic() + 10
                     while True:
                         pointer_after_loss = await asyncio.to_thread(
@@ -221,13 +306,15 @@ def test_authenticated_main_routes_reconcile_real_browser_result(adopted, tmp_pa
                     assert duplicate.status_code == 400
                     foreign = await client.get('/api/projects/other/verifications/' + key)
                     assert foreign.status_code == 404
-                    content = ContentService(ContentRepository(path), store,
-                                             ContentHosts('apps.example.net'))
-                    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=content),
-                        base_url=pointer['pinnedUrl'], trust_env=False) as published:
-                        page = await published.get('/')
+                    hosts = ContentHosts('apps.example.net')
+                    pinned_host = {'host':hosts.hostname(pointer['bindingId'])}
+                    sharing_host = {'host':'share.' + hosts.suffix}
+                    async with separate_content_process(path, root) as content_port, \
+                        httpx.AsyncClient(base_url=f'http://127.0.0.1:{content_port}',
+                                          trust_env=False, timeout=5) as published:
+                        page = await published.get('/', headers=pinned_host)
                         assert page.status_code == 200 and page.content == b'<html>heat</html>'
-                        shared = await published.get(pointer['sharingUrl'])
+                        shared = await published.get('/s/verified-page', headers=sharing_host)
                         assert shared.status_code == 307
                         assert shared.headers['location'] == pointer['pinnedUrl']
                         revoke_route = release_route + '/' + release_command['releaseId'] + '/unpublish'
@@ -262,8 +349,23 @@ def test_authenticated_main_routes_reconcile_real_browser_result(adopted, tmp_pa
                         assert after.json()['publication']['generation'] == 2
                         assert after.json()['publication']['pinnedUrl'] is None
                         assert after.json()['publication']['sharingUrl'] is None
-                        assert (await published.get('/')).status_code == 404
-                        assert (await published.get(pointer['sharingUrl'])).status_code == 404
+                        assert (await published.get('/', headers=pinned_host)).status_code == 404
+                        assert (await published.get('/s/verified-page',
+                                                    headers=sharing_host)).status_code == 404
+                    competing = [release_command | {'releaseId':secrets.token_hex(16),
+                        'expectedGeneration':2} for _ in range(2)]
+                    outcomes = await asyncio.gather(*(client.post(release_route,
+                        json=command, headers=release_headers) for command in competing))
+                    assert sorted(response.status_code for response in outcomes) == [200, 409]
+                    winner = next(response.json() for response in outcomes
+                                  if response.status_code == 200)
+                    assert winner['releaseId'] in {item['releaseId'] for item in competing}
+                    assert winner['generation'] == 3
+                    latest = await client.get(release_route+'/current',
+                                              headers={'x-atom-intent':'inspect-verified-release'})
+                    assert latest.status_code == 200
+                    assert latest.json()['publication']['releaseId'] == winner['releaseId']
+                    assert latest.json()['publication']['generation'] == 3
                     slow_checks = [{'type':'flow','selector':'#missing','expect':'body'}]
                     with sqlite3.connect(path) as db:
                         db.execute('UPDATE requirements SET checks_json=? WHERE project_id=?',
@@ -305,8 +407,8 @@ def test_authenticated_main_routes_reconcile_real_browser_result(adopted, tmp_pa
             assert db.execute('SELECT outcome FROM verification_results WHERE request_id=?',
                               (failed_id,)).fetchone() == ('failed',)
             assert db.execute('SELECT count(*) FROM verification_attestations').fetchone() == (2,)
-            assert db.execute('SELECT count(*) FROM release_records').fetchone() == (1,)
-            assert db.execute('SELECT count(*) FROM content_bindings').fetchone() == (1,)
+            assert db.execute('SELECT count(*) FROM release_records').fetchone() == (2,)
+            assert db.execute('SELECT count(*) FROM content_bindings').fetchone() == (2,)
             assert db.execute('PRAGMA foreign_key_check').fetchall() == []
         engine.dispose()
     finally:
