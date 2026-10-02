@@ -170,10 +170,16 @@ def test_ui_runs_real_private_verification_and_publishes(
             page.on('console', lambda message: failures.append(message.text)
                     if message.type == 'error' and
                     'net::ERR_BLOCKED_BY_CLIENT' not in message.text else None)
-            page.on('requestfailed', lambda request: failures.append(
-                'request_failed: ' + request.url + ' ' + str(request.failure))
-                if not ('/events?' in request.url and
-                        'ERR_BLOCKED_BY_CLIENT' in str(request.failure)) else None)
+            def note_failed(request):
+                failure = str(request.failure)
+                if '/events?' in request.url and 'ERR_BLOCKED_BY_CLIENT' in failure:
+                    return  # The test deliberately stops the long-lived event stream.
+                if (request.url.startswith(ORIGIN + '/atom/') and
+                    request.resource_type in {'document', 'script', 'stylesheet', 'font', 'image'}
+                    and 'ERR_ABORTED' in failure):
+                    return  # Tab changes and reload cancel iframe/static requests.
+                failures.append('request_failed: ' + request.url + ' ' + failure)
+            page.on('requestfailed', note_failed)
             page.on('response', lambda response: responses.append((response.status, response.url)))
             page.on('response', lambda response: stage('response-type-' +
                 str(response.status) + '-' + str(response.header_value('content-type'))))
