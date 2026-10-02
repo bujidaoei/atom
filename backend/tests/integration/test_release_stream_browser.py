@@ -177,14 +177,21 @@ def test_release_workbench_keeps_real_event_stream_and_recovers(
             stream_gate.available = True
             reconnect.click()
             reconnect.wait_for(state='hidden', timeout=15000)
+            deadline = time.monotonic() + 10
+            while len([r for r in stream_responses if r.status == 200]) < 2 and time.monotonic() < deadline:
+                page.wait_for_timeout(100)
+            assert len([r for r in stream_responses if r.status == 200]) >= 2
             page.get_by_role('tab', name='预览', exact=True).click()
             page.get_by_role('tab', name='发布', exact=True).click()
+            before_reload = len([r for r in stream_responses if r.status == 200])
             page.reload(wait_until='domcontentloaded')
             page.get_by_role('tab', name='发布', exact=True).click()
             page.get_by_role('button', name='连接中断，点击重连').wait_for(
                 state='hidden', timeout=15000)
-            assert len([response for response in stream_responses
-                        if response.status == 200]) >= 2
+            deadline = time.monotonic() + 10
+            while len([r for r in stream_responses if r.status == 200]) <= before_reload and time.monotonic() < deadline:
+                page.wait_for_timeout(100)
+            assert len([r for r in stream_responses if r.status == 200]) > before_reload
             assert not errors, errors
             assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
     finally:
