@@ -9,6 +9,7 @@ Status: **not deployed**. This document separates observed production facts, reh
 - Existing public entry is the IP under `/atom/`. The owner has no domain and requests IP-only publication. Independent project browser origins and console-cookie isolation remain unresolved. Private COS storage does not provide this browser origin; a second port alone is insufficient because cookies are shared across ports.
 - Server has approximately 11 GB free at inspection. No migration, COS import, service restart or public route change has occurred for feature 009.
 - A root-private online SQLite backup exists at `/home/ubuntu/atom-staging/publish-experience-rehearsal-20261002/atom.db` (18,538,496 bytes, SHA256 `5e40bd7a746dc44fbc8abf84bf397c1edda738fe2e72c03e90d65e7d53ac3912`). A separate `migrated-fixed/` rehearsal copy completed schema10→16 with six verified predecessor backups, preserved counts (36/182/62/0), integrity and foreign key checks. The rehearsal discovered and fixed WAL-mode copy handling before schema12. This online database backup is **not** a quiesced full-volume cutover backup and the running service remains at schema10.
+- The requested COS settings are in ignored project `.env` files and a root-owned mode0600 `/etc/atom/publication-storage.env` on the server. The service has **not** loaded or activated this file; production continues using local artifacts until all registered objects and public isolation are verified. No credential values are recorded in Git or these docs.
 
 ## Protected sequence
 
