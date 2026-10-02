@@ -4,6 +4,7 @@ The browser connects directly to the isolated TLS Uvicorn server so the
 long-lived response is never materialized by a Playwright route bridge.
 """
 
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 import os
 from pathlib import Path
@@ -20,8 +21,10 @@ from cryptography.x509.oid import NameOID
 from fastapi import FastAPI
 from playwright.sync_api import sync_playwright
 import pytest
+from sqlalchemy.orm import Session
 import uvicorn
 
+from app import events as events_module
 from app.artifacts import ArtifactStore
 from app.config import get_settings
 from app.migrations import migrate
@@ -81,7 +84,7 @@ def _serve_https(app: FastAPI, key: Path, cert: Path):
     while not server.started:
         assert thread.is_alive() and time.monotonic() < deadline, 'TLS API did not start'
         time.sleep(.02)
-    return server, thread, port
+    return server, thread, listener, port
 
 
 @pytest.mark.parametrize('viewport', [
@@ -103,6 +106,16 @@ def test_release_workbench_keeps_real_event_stream_and_recovers(
     assert store.put(payload) == artifact
 
     app, token, engine = _configured_api(path, store, intent, tmp_path, monkeypatch)
+    @contextmanager
+    def event_session():
+        with Session(engine) as session:
+            try:
+                yield session
+                session.commit()
+            except Exception:
+                session.rollback()
+                raise
+    monkeypatch.setattr(events_module, 'session_scope', event_session)
     app.state.execution = SimpleNamespace(store=store, repository=RevisionRepository(path))
     app.state.verifier_client = object()
     app.include_router(auth.router, prefix='/api')
@@ -112,7 +125,7 @@ def test_release_workbench_keeps_real_event_stream_and_recovers(
     outer = FastAPI()
     outer.mount('/atom', app)
     key, cert = _certificate(tmp_path)
-    server, thread, port = _serve_https(outer, key, cert)
+    server, thread, listener, port = _serve_https(outer, key, cert)
     assert port == 443
     origin = 'https://console.example.org'
     monkeypatch.setenv('ATOM_CONSOLE_ORIGIN', origin)
@@ -165,6 +178,7 @@ def test_release_workbench_keeps_real_event_stream_and_recovers(
             browser.close()
         server.should_exit = True
         thread.join(timeout=10)
+        listener.close()
         assert not thread.is_alive(), 'TLS API browser server did not stop'
         engine.dispose()
         get_settings.cache_clear()
