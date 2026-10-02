@@ -172,6 +172,8 @@ def test_ui_runs_real_private_verification_and_publishes(
             page.on('requestfailed', lambda request: failures.append(
                 'request_failed: ' + request.url + ' ' + str(request.failure)))
             page.on('response', lambda response: responses.append((response.status, response.url)))
+            page.on('response', lambda response: stage('response-type-' +
+                str(response.status) + '-' + str(response.header_value('content-type'))))
             try:
                 page.goto(ORIGIN + '/atom/app/p/project', wait_until='domcontentloaded',
                           timeout=15000)
@@ -181,7 +183,10 @@ def test_ui_runs_real_private_verification_and_publishes(
             try:
                 page.get_by_role('tab', name='发布', exact=True).wait_for(timeout=8000)
             except Exception:
-                stage('tab-missing ' + repr((page.url, requests, responses, failures)))
+                state = page.evaluate('''() => ({ ready: document.readyState,
+                    root: document.getElementById('root')?.innerHTML.slice(0, 500),
+                    module: document.querySelector('script[type="module"]')?.outerHTML })''')
+                stage('tab-missing ' + repr((page.url, requests, responses, failures, state)))
                 context.close()
                 browser.close()
                 raise
