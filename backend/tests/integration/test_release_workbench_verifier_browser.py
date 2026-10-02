@@ -143,6 +143,13 @@ def test_ui_runs_real_private_verification_and_publishes(
                 if '/events?' in request.url:
                     route.abort('blockedbyclient')
                     return
+                if request.url.startswith(ORIGIN + '/atom/assets/'):
+                    relative = request.url.removeprefix(ORIGIN + '/atom/')
+                    asset = (DIST / relative).resolve()
+                    assert asset.is_relative_to(DIST.resolve()) and asset.is_file()
+                    route.fulfill(path=str(asset))
+                    stage('asset-fulfilled')
+                    return
                 headers = request.headers | {'host': 'console.example.org',
                     'x-forwarded-proto': 'https', 'accept-encoding': 'identity'}
                 response = route.fetch(url=f'http://127.0.0.1:{api_port}' +
