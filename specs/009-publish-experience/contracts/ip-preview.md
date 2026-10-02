@@ -1,6 +1,6 @@
 # IP-only owner preview contract
 
-Status: schema18, transactional capability repository, byte-verified materialization, standalone HTTP exchange/content process and gated console issuance implemented and locally tested. Frontend replacement, browser checks, target ingress and production acceptance remain open. The same-IP browser origin includes its TCP port. Every project keeps one immutable preview port, separate from its public port and the console on 443. A preview port may serve only a revision belonging to that exact project after a fresh owner authorization.
+Status: schema18, transactional capability repository, byte-verified materialization, standalone HTTP exchange/content process and gated console issuance implemented and locally tested. One local Chromium HTTPS case proves real generated script execution, refresh-persistent preview/public storage separation and cross-port read denial; full browser matrix, frontend replacement, target ingress and production acceptance remain open. The same-IP browser origin includes its TCP port. Every project keeps one immutable preview port, separate from its public port and the console on 443. A preview port may serve only a revision belonging to that exact project after a fresh owner authorization.
 
 ## Console-issued capability
 
