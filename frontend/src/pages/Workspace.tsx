@@ -259,10 +259,10 @@ function ProjectWorkspace({ id }: { id: string | undefined }) {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <header className="flex shrink-0 flex-wrap items-center gap-s border-b border-neutral-12 bg-base-default px-l py-s">
-        <div className="min-w-0 flex-1">
+        <div className="min-w-0 w-full flex-1 sm:w-auto">
           <div className="flex items-center gap-s">
             <h1 className="truncate text-md font-medium text-neutral-95">{project.title}</h1>
-            <StatusBadge status={project.status} />
+            <span className="shrink-0"><StatusBadge status={project.status} /></span>
             {activeMeta ? (
               <Badge tone="bg-brand-alpha-soft text-brand-text">{activeMeta.name} 在跑</Badge>
             ) : null}
@@ -270,7 +270,7 @@ function ProjectWorkspace({ id }: { id: string | undefined }) {
           <p className="mt-xxs truncate text-xs text-neutral-40">{project.prompt}</p>
         </div>
 
-        <div className="flex items-center gap-xs">
+        <div className="flex w-full items-center justify-between gap-xs sm:w-auto sm:justify-start">
           {stream.connection === "retrying" ? (
             <button
               type="button"
@@ -337,9 +337,9 @@ function ProjectWorkspace({ id }: { id: string | undefined }) {
         </div>
       ) : null}
 
-      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto md:flex-row md:overflow-hidden">
+      <div className={`flex min-h-0 flex-1 flex-col md:flex-row md:overflow-hidden ${tab === "release" ? "overflow-hidden" : "overflow-y-auto"}`}>
         <section
-          className="flex min-h-[420px] flex-col border-b border-neutral-12 md:min-h-0 md:w-[46%] md:max-w-[560px] md:border-b-0 md:border-r"
+          className={`${tab === "release" ? "hidden md:flex" : "flex"} min-h-[420px] flex-col border-b border-neutral-12 md:min-h-0 md:w-[46%] md:max-w-[560px] md:border-b-0 md:border-r`}
           aria-label="对话"
         >
           <Conversation
@@ -375,7 +375,7 @@ function ProjectWorkspace({ id }: { id: string | undefined }) {
           </div>
         </section>
 
-        <section className="flex min-h-[520px] min-w-0 flex-1 flex-col md:min-h-0" aria-label="产物面板">
+        <section className={`flex min-w-0 flex-1 flex-col md:min-h-0 ${tab === "release" ? "min-h-0" : "min-h-[520px]"}`} aria-label="产物面板">
           <div
             role="tablist"
             aria-label="产物视图"
