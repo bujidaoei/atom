@@ -21,6 +21,9 @@ from sqlalchemy.orm import sessionmaker
 from app.artifacts import ArtifactStore
 from app.bounded_operations import BoundedOperations
 from app.config import get_settings
+from app.content_hosts import ContentHosts
+from app.content_repository import ContentRepository
+from app.content_service import ContentService
 from app.db import get_db
 from app.migrations import migrate
 from app.release_repository import ReleaseRepository
@@ -218,6 +221,49 @@ def test_authenticated_main_routes_reconcile_real_browser_result(adopted, tmp_pa
                     assert duplicate.status_code == 400
                     foreign = await client.get('/api/projects/other/verifications/' + key)
                     assert foreign.status_code == 404
+                    content = ContentService(ContentRepository(path), store,
+                                             ContentHosts('apps.example.net'))
+                    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=content),
+                        base_url=pointer['pinnedUrl'], trust_env=False) as published:
+                        page = await published.get('/')
+                        assert page.status_code == 200 and page.content == b'<html>heat</html>'
+                        shared = await published.get(pointer['sharingUrl'])
+                        assert shared.status_code == 307
+                        assert shared.headers['location'] == pointer['pinnedUrl']
+                        revoke_route = release_route + '/' + release_command['releaseId'] + '/unpublish'
+                        revoke_headers = intent_headers | {'x-atom-intent':'unpublish-verified-release'}
+                        revoke_command = {'commandId':secrets.token_hex(16),
+                                          'expectedGeneration':1}
+                        wrong_origin = await client.post(revoke_route, json=revoke_command,
+                            headers={'origin':'https://foreign.example.org',
+                                     'x-atom-intent':'unpublish-verified-release'})
+                        assert wrong_origin.status_code == 403
+                        wrong_owner = await client.post(
+                            '/api/projects/other/releases/' + release_command['releaseId'] + '/unpublish',
+                            json=revoke_command, headers=revoke_headers)
+                        assert wrong_owner.status_code == 404
+                        stale_revoke = await client.post(revoke_route,
+                            json=revoke_command | {'expectedGeneration':2},
+                            headers=revoke_headers)
+                        assert stale_revoke.status_code == 409
+                        revoked = await client.post(revoke_route, json=revoke_command,
+                                                    headers=revoke_headers)
+                        assert revoked.status_code == 200, revoked.text
+                        assert revoked.json() == {'commandId':revoke_command['commandId'],
+                            'releaseId':release_command['releaseId'], 'generation':2}
+                        replay_revoke = await client.post(revoke_route, json=revoke_command,
+                                                          headers=revoke_headers)
+                        assert replay_revoke.status_code == 200
+                        assert replay_revoke.json() == revoked.json()
+                        after = await client.get(release_route+'/current',
+                            headers={'x-atom-intent':'inspect-verified-release'})
+                        assert after.status_code == 200
+                        assert after.json()['publication']['live'] is False
+                        assert after.json()['publication']['generation'] == 2
+                        assert after.json()['publication']['pinnedUrl'] is None
+                        assert after.json()['publication']['sharingUrl'] is None
+                        assert (await published.get('/')).status_code == 404
+                        assert (await published.get(pointer['sharingUrl'])).status_code == 404
                     slow_checks = [{'type':'flow','selector':'#missing','expect':'body'}]
                     with sqlite3.connect(path) as db:
                         db.execute('UPDATE requirements SET checks_json=? WHERE project_id=?',

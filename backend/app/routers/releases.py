@@ -39,7 +39,7 @@ def _unique(pairs):
     return result
 
 
-async def _command(request: Request):
+async def _json_command(request: Request):
     headers = request.scope['headers']
     lengths = [value for key, value in headers if key.lower() == b'content-length']
     if (request.scope.get('query_string')
@@ -66,6 +66,13 @@ async def _command(request: Request):
             parse_constant=lambda _value: (_ for _ in ()).throw(ValueError()))
     except (ValueError, UnicodeError, RecursionError):
         _deny(400, '发布请求格式不正确')
+    if type(command) is not dict:
+        _deny(400, '发布请求格式不正确')
+    return command
+
+
+async def _command(request: Request):
+    command = await _json_command(request)
     if (type(command) is not dict
             or set(command) != {'releaseId', 'verificationId', 'expectedRevision',
                                 'expectedGeneration', 'audience', 'slug'}
@@ -79,6 +86,17 @@ async def _command(request: Request):
             or type(command['slug']) is not str or len(command['slug']) > 63
             or _SLUG.fullmatch(command['slug']) is None):
         _deny(400, '发布请求格式不正确')
+    return command
+
+
+async def _unpublish_command(request: Request):
+    command = await _json_command(request)
+    if (set(command) != {'commandId', 'expectedGeneration'}
+            or type(command['commandId']) is not str
+            or _ID.fullmatch(command['commandId']) is None
+            or type(command['expectedGeneration']) is not int
+            or not 1 <= command['expectedGeneration'] < 2**63-1):
+        _deny(400, '撤销请求格式不正确')
     return command
 
 
@@ -205,6 +223,49 @@ async def current_release(project: OwnedProject, request: Request):
         return response
     except VerificationError as error:
         response = OwnedJSONResponse({'detail':'无法读取发布状态'}, lifecycle, token,
+                                     status_code=_status(error), headers=_HEADERS)
+        release = False
+        return response
+    finally:
+        if release:
+            lifecycle.release(token)
+
+
+@router.post('/{project_id}/releases/{release_id}/unpublish')
+async def unpublish_verified_release(project: OwnedProject, release_id: str, request: Request):
+    require_auth_origin(request)
+    if (request.headers.getlist('x-atom-intent') != ['unpublish-verified-release']
+            or _ID.fullmatch(release_id) is None):
+        _deny(403, '撤销意图不明确')
+    settings, _store = _configured(request)
+    command = await _unpublish_command(request)
+    lifecycle = request.app.state.release_operations
+    token = lifecycle.acquire()
+    if token is None:
+        _deny(503, '发布服务繁忙')
+    release = True
+    try:
+        def apply():
+            receipt = ReleaseRepository(settings.db_path).unpublish(
+                owner=project.user_id, project_id=project.id,
+                command_id=command['commandId'], expected_release=release_id,
+                expected_generation=command['expectedGeneration'])
+            return {'commandId': receipt.command_id, 'releaseId': receipt.release_id,
+                    'generation': receipt.generation}
+        worker = asyncio.create_task(asyncio.to_thread(apply))
+        _WORKERS.add(worker)
+        worker.add_done_callback(_WORKERS.discard)
+        try:
+            result = await asyncio.shield(worker)
+        except asyncio.CancelledError:
+            release = False
+            worker.add_done_callback(lambda done: _finished(done, lifecycle, token))
+            raise
+        response = OwnedJSONResponse(result, lifecycle, token, headers=_HEADERS)
+        release = False
+        return response
+    except VerificationError as error:
+        response = OwnedJSONResponse({'detail':'无法确认可信撤销'}, lifecycle, token,
                                      status_code=_status(error), headers=_HEADERS)
         release = False
         return response
