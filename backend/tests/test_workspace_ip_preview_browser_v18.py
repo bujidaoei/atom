@@ -102,6 +102,20 @@ def test_workspace_opens_isolated_saved_preview(
             assert child.locator('body').inner_text() == 'heat'
             assert child.evaluate('window.opener') is None
             assert child.evaluate('localStorage.getItem("atom.console.proof.v1")') is None
+            child_console_requests = []
+            child.on('request', lambda request: child_console_requests.append(request.url)
+                     if request.url.endswith('/api/auth/me') else None)
+            result = child.evaluate("""async () => {
+                try {
+                    const response = await fetch('https://127.0.0.1/atom/api/auth/me',
+                        {credentials: 'include'});
+                    return response.status;
+                } catch (_) {
+                    return 'blocked';
+                }
+            }""")
+            assert result == 'blocked'
+            assert child_console_requests == []
             child.close()
             context.close()
             browser.close()
