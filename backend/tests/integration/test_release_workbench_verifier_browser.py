@@ -147,6 +147,8 @@ def test_ui_runs_real_private_verification_and_publishes(
             page.on('pageerror', lambda error: failures.append(str(error)))
             page.on('response', lambda response: responses.append((response.status, response.url)))
             page.goto(ORIGIN + '/atom/app/p/project', wait_until='domcontentloaded')
+            assert page.get_by_role('tab', name='发布', exact=True).count() == 1, (
+                page.url, responses, failures, page.locator('body').inner_text()[:600])
             page.get_by_role('tab', name='发布', exact=True).click()
             panel = page.get_by_label('发布工作台')
             controls = panel.get_by_label('可信发布操作')
