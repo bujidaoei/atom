@@ -97,6 +97,7 @@ def test_ui_runs_real_private_verification_and_publishes(
     server = thread = None
     failures = []
     responses = []
+    requests = []
     try:
         with httpx.Client(base_url=f'http://127.0.0.1:{port}', trust_env=False,
                           timeout=2) as probe:
@@ -128,6 +129,7 @@ def test_ui_runs_real_private_verification_and_publishes(
 
             def bridge(route):
                 request = route.request
+                requests.append(request.url)
                 assert request.url.startswith(ORIGIN + '/atom/')
                 if '/events?' in request.url:
                     route.abort('blockedbyclient')
@@ -135,7 +137,7 @@ def test_ui_runs_real_private_verification_and_publishes(
                 headers = request.headers | {'host': 'console.example.org',
                     'x-forwarded-proto': 'https', 'accept-encoding': 'identity'}
                 response = route.fetch(url=f'http://127.0.0.1:{api_port}' +
-                    request.url[len(ORIGIN):], headers=headers, timeout=60000)
+                    request.url[len(ORIGIN):], headers=headers, timeout=10000)
                 route.fulfill(status=response.status,
                     headers={key: value for key, value in response.headers.items()
                         if key.lower() not in ('content-encoding', 'content-length',
@@ -146,9 +148,13 @@ def test_ui_runs_real_private_verification_and_publishes(
             page = context.new_page()
             page.on('pageerror', lambda error: failures.append(str(error)))
             page.on('response', lambda response: responses.append((response.status, response.url)))
-            page.goto(ORIGIN + '/atom/app/p/project', wait_until='domcontentloaded')
+            try:
+                page.goto(ORIGIN + '/atom/app/p/project', wait_until='domcontentloaded',
+                          timeout=15000)
+            except Exception as error:
+                raise AssertionError((type(error).__name__, requests, responses, failures)) from error
             assert page.get_by_role('tab', name='发布', exact=True).count() == 1, (
-                page.url, responses, failures, page.locator('body').inner_text()[:600])
+                page.url, requests, responses, failures, page.locator('body').inner_text()[:600])
             page.get_by_role('tab', name='发布', exact=True).click()
             panel = page.get_by_label('发布工作台')
             controls = panel.get_by_label('可信发布操作')
