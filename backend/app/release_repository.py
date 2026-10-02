@@ -1,4 +1,5 @@
 """Atomic release metadata for trusted orchestration; does not serve artifacts."""
+from contextlib import closing
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import hashlib
@@ -6,6 +7,7 @@ import hmac
 import io
 import json
 import re
+import sqlite3
 import time
 from threading import BoundedSemaphore
 
@@ -44,9 +46,58 @@ class PublishedArtifact:
     artifact: Artifact
 
 
+@dataclass(frozen=True)
+class CurrentRelease:
+    release_id: str
+    revision_id: str
+    verification_id: str
+    contract_digest: str
+    policy_digest: str
+    audience: str
+    slug: str
+    generation: int
+    live: bool
+    binding_id: str
+
+
 class ReleaseRepository:
     def __init__(self, path, *, lock_timeout=3):
         self._ledger = VerificationRepository(path, lock_timeout=lock_timeout)
+
+    def current(self, *, owner: str, project_id: str) -> CurrentRelease | None:
+        """Read the owner-scoped v13 pointer without reserving the writer lock."""
+        if any(type(value) is not str or re.fullmatch(r'[A-Za-z0-9_.-]{1,100}', value) is None
+               for value in (owner, project_id)):
+            raise VerificationError('invalid_release_request')
+        try:
+            with closing(sqlite3.connect(self._ledger.path.as_uri() + '?mode=ro', uri=True,
+                                         timeout=self._ledger.timeout)) as db:
+                db.row_factory = sqlite3.Row
+                db.execute('PRAGMA query_only=ON')
+                db.execute('BEGIN')
+                if db.execute('PRAGMA user_version').fetchone()[0] != 13:
+                    raise VerificationError('verified_release_schema_required')
+                project = db.execute('SELECT 1 FROM projects WHERE id=? AND user_id=?',
+                                     (project_id, owner)).fetchone()
+                if project is None:
+                    raise VerificationError('release_not_found')
+                row = db.execute('''SELECT p.release_id,p.slug,p.generation,p.live,
+                    r.revision_id,r.verification_id,r.contract_digest,r.policy_digest,
+                    r.audience,b.id AS binding_id FROM release_publications p
+                    JOIN release_records r ON r.id=p.release_id AND r.project_id=p.project_id
+                    LEFT JOIN content_bindings b ON b.project_id=r.project_id AND b.release_id=r.id
+                    WHERE p.project_id=?''', (project_id,)).fetchone()
+                if row is None:
+                    return None
+                if (row['binding_id'] is None or type(row['generation']) is not int
+                        or row['generation'] < 1 or row['live'] not in (0, 1)):
+                    raise VerificationError('release_corrupt')
+                return CurrentRelease(row['release_id'], row['revision_id'],
+                    row['verification_id'], row['contract_digest'], row['policy_digest'],
+                    row['audience'], row['slug'], row['generation'], bool(row['live']),
+                    row['binding_id'])
+        except sqlite3.Error:
+            raise VerificationError('release_unavailable') from None
 
     def resolve(self, *, slug: str, viewer: str | None = None, release_id: str | None = None) -> PublishedArtifact:
         """Resolve authorized immutable metadata, never a mutable workspace.

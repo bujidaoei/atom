@@ -17,7 +17,7 @@ from .execution_service import ExecutionGateway, execution_resources
 from .sandbox.client import BrokerClientError
 from .errors import AtomError
 from .models import Base
-from .routers import audit, content_access, auth, preview, projects, publish, settings, usage, verifications
+from .routers import audit, content_access, auth, preview, projects, publish, releases, settings, usage, verifications
 from .schema_guard import verify as verify_schema
 from .services.orchestrator import orchestrator
 from .services.runtime_client import runtime_client
@@ -29,6 +29,8 @@ async def lifespan(_app: FastAPI):
     previous_exports = getattr(_app.state, 'audit_exports', None)
     if previous_exports is not None and previous_exports.pending_count:
         raise RuntimeError('audit_export_operations_pending')
+    if _app.state.release_operations.pending_count:
+        raise RuntimeError('release_operations_pending')
     if get_settings().session_mode == 'durable':
         credentials()  # Fail closed on missing/offline migration before serving.
     _app.state.audit_exports = AuditExportService(get_settings())
@@ -47,6 +49,7 @@ async def lifespan(_app: FastAPI):
             await _app.state.audit_exports.start()
             _app.state.content_issuer.start()
             _app.state.audit_reads.start()
+            _app.state.release_operations.start()
             settings = get_settings()
             if settings.verifier_origin is not None:
                 verifier_client = VerifierClient(settings.verifier_origin,
@@ -62,6 +65,7 @@ async def lifespan(_app: FastAPI):
             finally:
                 _app.state.content_issuer.close_admission()
                 _app.state.audit_reads.close_admission()
+                _app.state.release_operations.close_admission()
                 _app.state.audit_exports.stop_admission()
                 _app.state.execution = None
                 try:
@@ -72,7 +76,10 @@ async def lifespan(_app: FastAPI):
                             try:
                                 await _app.state.audit_reads.drain()
                             finally:
-                                await _app.state.audit_exports.close()
+                                try:
+                                    await _app.state.release_operations.drain()
+                                finally:
+                                    await _app.state.audit_exports.close()
                     finally:
                         await orchestrator.shutdown()
                 finally:
@@ -82,6 +89,7 @@ async def lifespan(_app: FastAPI):
 app = FastAPI(title="Atoms Demo API", version="1.0.0", lifespan=lifespan)
 app.state.content_issuer = BoundedOperations()
 app.state.audit_reads = BoundedOperations(capacity=4)
+app.state.release_operations = BoundedOperations(capacity=2)
 for action in ('complete', 'cancel', 'partial'):
     app.router.routes.append(Route('/v1/executions/' + action, ExecutionGateway(), methods=['POST']))
 
@@ -173,6 +181,7 @@ app.include_router(audit.router, prefix="/api")
 app.include_router(settings.router, prefix="/api")
 app.include_router(projects.router, prefix="/api")
 app.include_router(verifications.router, prefix="/api")
+app.include_router(releases.router, prefix="/api")
 app.include_router(publish.router, prefix="/api")
 app.include_router(usage.router, prefix="/api")
 

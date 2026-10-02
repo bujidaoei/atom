@@ -9,6 +9,8 @@ import sqlite3
 import subprocess
 import sys
 import time
+from types import SimpleNamespace
+from threading import Event
 
 from fastapi import FastAPI
 import httpx
@@ -17,10 +19,12 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.artifacts import ArtifactStore
+from app.bounded_operations import BoundedOperations
 from app.config import get_settings
 from app.db import get_db
 from app.migrations import migrate
-from app.routers import verifications
+from app.release_repository import ReleaseRepository
+from app.routers import releases, verifications
 from app.security import issue_session
 from app.verifier_client import VerifierClient
 from test_adoption_repository import prepared, snapshot
@@ -87,6 +91,7 @@ def test_authenticated_main_routes_reconcile_real_browser_result(adopted, tmp_pa
             'ATOM_COMPLETION_GRANT_KEY':'synthetic-completion-key-32-characters',
             'ATOM_DATA_DIR':str(tmp_path / 'data'), 'ATOM_DB_PATH':str(path),
             'ATOM_ARTIFACT_DIR':str(root),
+            'ATOM_CONTENT_HOST_SUFFIX':'apps.example.net',
             'ATOM_VERIFIER_ORIGIN':f'http://127.0.0.1:{port}',
             'ATOM_VERIFIER_CONTROL_TOKEN':token,
             'ATOM_VERIFIER_POLICY_DIGEST':'c' * 64,
@@ -100,6 +105,9 @@ def test_authenticated_main_routes_reconcile_real_browser_result(adopted, tmp_pa
         sessions = sessionmaker(bind=engine)
         api = FastAPI()
         api.include_router(verifications.router, prefix='/api')
+        api.include_router(releases.router, prefix='/api')
+        api.state.release_operations = BoundedOperations(capacity=2)
+        api.state.execution = SimpleNamespace(store=ArtifactStore(root))
         def database():
             with sessions() as session:
                 yield session
@@ -145,6 +153,69 @@ def test_authenticated_main_routes_reconcile_real_browser_result(adopted, tmp_pa
                     repeat = await client.post(route + '/' + key + '/run',
                                                headers=intent_headers)
                     assert repeat.status_code == 200 and repeat.json() == result.json()
+                    release_route = '/api/projects/project/releases'
+                    release_command = {'releaseId':secrets.token_hex(16),
+                        'verificationId':key, 'expectedRevision':receipt.revision_id,
+                        'expectedGeneration':0, 'audience':'public', 'slug':'verified-page'}
+                    release_headers = intent_headers | {'x-atom-intent':'publish-verified-release'}
+                    denied_release = await client.post(release_route, json=release_command,
+                        headers={'origin':'https://foreign.example.org',
+                                 'x-atom-intent':'publish-verified-release'})
+                    assert denied_release.status_code == 403
+                    store = api.state.execution.store
+                    original_read = store.read
+                    started, resume = Event(), Event()
+                    def delayed_read(key):
+                        started.set()
+                        assert resume.wait(10)
+                        return original_read(key)
+                    monkeypatch.setattr(store, 'read', delayed_read)
+                    lost = asyncio.create_task(client.post(release_route,
+                        json=release_command, headers=release_headers))
+                    assert await asyncio.to_thread(started.wait, 5)
+                    lost.cancel()
+                    assert isinstance((await asyncio.gather(lost, return_exceptions=True))[0],
+                                      asyncio.CancelledError)
+                    assert api.state.release_operations.pending_count == 1
+                    resume.set()
+                    deadline = time.monotonic() + 10
+                    while True:
+                        pointer_after_loss = await asyncio.to_thread(
+                            ReleaseRepository(path).current, owner='user', project_id='project')
+                        if pointer_after_loss is not None and api.state.release_operations.pending_count == 0:
+                            break
+                        assert time.monotonic() < deadline
+                        await asyncio.sleep(.02)
+                    assert pointer_after_loss.release_id == release_command['releaseId']
+                    def forbidden_read(_key):
+                        raise AssertionError('committed replay read artifact again')
+                    monkeypatch.setattr(store, 'read', forbidden_read)
+                    replay_release = await client.post(release_route, json=release_command,
+                                                       headers=release_headers)
+                    assert replay_release.status_code == 200, replay_release.text
+                    assert replay_release.json() == {'releaseId':release_command['releaseId'],
+                        'revisionId':receipt.revision_id, 'generation':1, 'slug':'verified-page'}
+                    monkeypatch.setattr(store, 'read', original_read)
+                    current = await client.get(release_route+'/current',
+                        headers={'x-atom-intent':'inspect-verified-release'})
+                    assert current.status_code == 200, current.text
+                    pointer = current.json()['publication']
+                    assert pointer['releaseId'] == release_command['releaseId']
+                    assert pointer['revisionId'] == receipt.revision_id
+                    assert pointer['live'] is True and pointer['audience'] == 'public'
+                    assert pointer['pinnedUrl'].startswith('https://r-')
+                    assert pointer['pinnedUrl'].endswith('.apps.example.net/')
+                    assert pointer['sharingUrl'] == 'https://share.apps.example.net/s/verified-page'
+                    stale = await client.post(release_route,
+                        json=release_command | {'releaseId':secrets.token_hex(16),
+                                                'expectedGeneration':0},
+                        headers=release_headers)
+                    assert stale.status_code == 409
+                    duplicate = await client.post(release_route,
+                        content=b'{"releaseId":"' + release_command['releaseId'].encode() +
+                                b'","releaseId":"' + release_command['releaseId'].encode() + b'"}',
+                        headers=release_headers | {'content-type':'application/json'})
+                    assert duplicate.status_code == 400
                     foreign = await client.get('/api/projects/other/verifications/' + key)
                     assert foreign.status_code == 404
                     slow_checks = [{'type':'flow','selector':'#missing','expect':'body'}]
@@ -188,6 +259,8 @@ def test_authenticated_main_routes_reconcile_real_browser_result(adopted, tmp_pa
             assert db.execute('SELECT outcome FROM verification_results WHERE request_id=?',
                               (failed_id,)).fetchone() == ('failed',)
             assert db.execute('SELECT count(*) FROM verification_attestations').fetchone() == (2,)
+            assert db.execute('SELECT count(*) FROM release_records').fetchone() == (1,)
+            assert db.execute('SELECT count(*) FROM content_bindings').fetchone() == (1,)
             assert db.execute('PRAGMA foreign_key_check').fetchall() == []
         engine.dispose()
     finally:

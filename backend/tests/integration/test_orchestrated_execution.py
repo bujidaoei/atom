@@ -113,6 +113,8 @@ if data['verify_output']:
         ATOM_VERIFIER_DB_PATH='/tmp/data/api.db',ATOM_VERIFIER_ARTIFACT_DIR='/tmp/artifacts',
         ATOM_VERIFIER_IMAGE=data['verifier_image'],
         ATOM_VERIFIER_SECCOMP_PATH=data['seccomp'],ATOM_VERIFIER_ID=data['verifier_id'])
+if data['isolate_verifier']:
+    os.environ['ATOM_CONTENT_HOST_SUFFIX']='apps.example.net'
 if data['schema_version'] in (4,5,6,7,9,10,13):
     os.environ.update(ATOM_SESSION_MODE='durable',ATOM_CONSOLE_ORIGIN='https://console.example.org',ATOM_COOKIE_SECURE='true')
 from app.main import app
@@ -286,6 +288,24 @@ async def main():
                 assert result.json()['state']=='passed' and result.json()['total']==result.json()['passed']==1
                 settled=await client.get(route+'/'+key,headers=headers)
                 assert settled.status_code==200 and settled.json()==result.json()
+                if data['isolate_verifier']:
+                    release_route='http://127.0.0.1:8767/api/projects/p/releases'
+                    release_id=secrets.token_hex(16)
+                    release_command={'releaseId':release_id,'verificationId':key,
+                        'expectedRevision':head.revision_id,'expectedGeneration':0,
+                        'audience':'public','slug':'orchestrated-page'}
+                    mutation=headers|{'x-atom-intent':'publish-verified-release'}
+                    promoted=await client.post(release_route,json=release_command,headers=mutation)
+                    assert promoted.status_code==200,promoted.text
+                    assert promoted.json()['releaseId']==release_id
+                    assert promoted.json()['revisionId']==head.revision_id
+                    current=await client.get(release_route+'/current',
+                        headers=headers|{'x-atom-intent':'inspect-verified-release'})
+                    assert current.status_code==200,current.text
+                    publication=current.json()['publication']
+                    assert publication['releaseId']==release_id and publication['generation']==1
+                    assert publication['pinnedUrl'].endswith('.apps.example.net/')
+                    assert publication['sharingUrl']=='https://share.apps.example.net/s/orchestrated-page'
                 with sqlite3.connect(settings.db_path) as db:
                     db.execute('UPDATE requirements SET checks_json=? WHERE project_id=?',
                         (json.dumps([{'type':'flow','selector':'#missing','expect':'body'}]),'p'))
@@ -342,6 +362,9 @@ async def main():
                 assert db.execute('SELECT count(*) FROM verification_attestations').fetchone()==(1,)
                 assert db.execute('SELECT count(*) FROM verification_dispatches').fetchone()==(2,)
                 assert db.execute('SELECT count(*) FROM verification_results').fetchone()==(1,)
+                if data['isolate_verifier']:
+                    assert db.execute('SELECT count(*) FROM release_records').fetchone()==(1,)
+                    assert db.execute('SELECT count(*) FROM content_bindings').fetchone()==(1,)
         if data['schema_version'] in (4,5,6,7,9,10,13):
             codec=credentials();source=codec.authenticate(console_token)
             assert source and source.user_id=='owner'
