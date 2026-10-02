@@ -193,8 +193,8 @@ async def publish_verified_release(project: OwnedProject, request: Request):
 
 @router.get('/{project_id}/releases/current')
 async def current_release(project: OwnedProject, request: Request):
-    require_console_host(request)
     settings, _store = _configured(request)
+    require_console_host(request)
     if (request.scope.get('query_string')
             or request.headers.getlist('x-atom-intent') != ['inspect-verified-release']
             or (request.headers.getlist('origin')

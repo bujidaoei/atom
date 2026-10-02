@@ -147,10 +147,10 @@ async def reserve_verification(project: OwnedProject, request: Request):
 
 @router.get('/{project_id}/verifications/latest')
 async def latest_verification(project: OwnedProject, request: Request):
+    settings, _client = _configured(request)
     require_console_host(request)
     if request.scope.get('query_string'):
         _deny(400, '验证查询格式不正确')
-    settings, _client = _configured(request)
     if request.headers.getlist('origin') and request.headers.getlist('origin') != [settings.console_origin]:
         _deny(400, '验证查询格式不正确')
     repository = _repository(settings)
