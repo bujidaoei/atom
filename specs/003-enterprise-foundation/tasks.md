@@ -8,6 +8,7 @@ Input: spec.md, plan.md, research.md. Status: research-stage decomposition only.
 - [x] T003 [P] Research seven commercial products using official sources in docs/research/2026-09-30-commercial-products.md.
 - [x] T004 [P] Audit current trust and reliability boundaries with source references in docs/research/2026-09-30-architecture-audit.md.
 - [ ] T005 Complete Atoms observed flow and register untested branches in specs/003-enterprise-foundation/research.md; generation waits for credit allowance.
+  2026-10-02 partial evidence: an already-authenticated browser exposed the real project list, existing published workspace/preview/agent record, history clone dialog, share/export plan gates, app-card version choice and settings/domain/unpublish surface. No new generation, update, export, paid action, recovery or deletion was executed; keep T005 open.
 - [x] T006 Add dated official incident evidence and distinguish support limitations from incidents in specs/003-enterprise-foundation/research.md (bounded initial sample, not exhaustive vendor history).
 
 ## Phase 2: Foundational design

@@ -22,6 +22,8 @@ Pre-existing modification: `backend/app/routers/__init__.py`. Excluded from this
 ## Change log
 - Initial draft sets evidence-backed delivery as design hypothesis and prioritizes trust boundaries. Proposed numeric acceptance goals are explicitly unmeasured and require resource validation.
 
+2026-10-02 authenticated Atoms read-only follow-up: the user's already signed-in browser reached the real My Projects list and an existing published workspace. UI inspection confirmed the agent step/approval record, version card, live iframe preview, design and console tools, task strip, history clone dialog, Share audience/export gates, app-card latest-versus-selected-version choice, project settings and domain status. The clone and upgrade dialogs were cancelled; a temporary unsaved version-choice change was restored. No generation, publishing, account mutation, export, paid action or recovery was executed. Observations and their limits are in research.md. T005 stays open; no implementation or vendor-equivalence claim follows from this inspection.
+
 ## Local verification
 - `git diff --check`: no whitespace errors; existing CRLF normalization warnings noted.
 - First Pi verifier invocation from repository root failed because it expects runtime as working directory (`atom/pi` missing). This was an invocation-path failure, not evidence of modified Pi; rerun from runtime required.
