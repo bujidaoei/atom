@@ -15,7 +15,7 @@ SCRIPT = """(async () => {
   }
   try {
     const response = await fetch('/_atom/exchange', {
-      method: 'POST', mode: 'same-origin', credentials: 'same-origin', redirect: 'error',
+      method: 'POST', mode: 'cors', credentials: 'same-origin', redirect: 'error',
       headers: {'Content-Type': 'application/octet-stream'}, body: handoff,
       signal: AbortSignal.timeout(10000)
     });
