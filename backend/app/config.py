@@ -124,9 +124,10 @@ class Settings(ObjectStorageSettings):
             ContentNavigation(self.console_origin).validate_content_hosts(ContentHosts(self.content_host_suffix))
         if self.ip_preview_enabled:
             if (self.session_mode != 'durable' or not self.console_proof_required
+                    or self.verifier_origin is None
                     or self.ip_preview_address is None
                     or self.ip_preview_first_port is None or self.ip_preview_last_port is None):
-                raise ValueError('ip preview requires durable console proof and complete origin configuration')
+                raise ValueError('ip preview requires durable console proof, verifier and complete origin configuration')
             # Validate the literal address without touching the database here.
             try:
                 parsed = ip_address(self.ip_preview_address.strip('[]'))

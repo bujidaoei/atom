@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, errorMessage } from "../lib/api";
+import { openRevisionPreview } from "../lib/previewAccess";
 import type { ProjectDetail, VerifiedPublication, PublicationHistory, PublicationSnapshot, VerificationStatus } from "../lib/types";
 import { Button } from "../components/ui/Button";
 import { ReleaseControls } from "./ReleaseControls";
@@ -20,21 +21,11 @@ export function ReleaseTab({ project }: { project: ProjectDetail }) {
   const refresh = useCallback(() => { setCursor(undefined); setRefreshIndex(value => value + 1); }, []);
 
   async function openSnapshot(item: PublicationSnapshot) {
-    const popup = window.open("about:blank", "_blank");
-    if (!popup) { setPreviewError("浏览器阻止了新窗口，请允许弹出窗口后重试。"); return; }
-    popup.opener = null;
-    popup.document.title = "正在打开版本预览";
-    popup.document.body.textContent = "正在打开版本预览…";
     setPreviewBusy(item.releaseId);
     setPreviewError(null);
     try {
-      const handoff = await api.issueRevisionPreview(project.id, item.revisionId);
-      if (handoff.revisionId !== item.revisionId || !handoff.url.startsWith("https://")) {
-        throw new Error("预览版本暂时无法确认，请重试。");
-      }
-      popup.location.replace(handoff.url);
+      await openRevisionPreview(project.id, item.revisionId);
     } catch (failure) {
-      popup.close();
       setPreviewError(`无法打开版本预览：${errorMessage(failure)}`);
     } finally {
       setPreviewBusy(null);

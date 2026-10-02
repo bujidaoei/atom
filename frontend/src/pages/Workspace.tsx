@@ -11,7 +11,7 @@ import { useAuth } from "../lib/auth";
 import { agentMeta } from "../lib/agents";
 import { isRunningStatus } from "../lib/format";
 import { useProjects } from "../lib/projects";
-import type { ProjectDetail, RunEventPayload } from "../lib/types";
+import type { ProjectDetail, RunEventPayload, VerificationStatus } from "../lib/types";
 import { Conversation } from "../workspace/Conversation";
 import { ContractTab } from "../workspace/ContractTab";
 import { CodeTab } from "../workspace/CodeTab";
@@ -51,6 +51,7 @@ function ProjectWorkspace({ id }: { id: string | undefined }) {
   const [approveError, setApproveError] = useState<string | null>(null);
   const [acceptanceRunning, setAcceptanceRunning] = useState(false);
   const [acceptanceError, setAcceptanceError] = useState<string | null>(null);
+  const [verification, setVerification] = useState<VerificationStatus | null>(null);
   const [publishBusy, setPublishBusy] = useState(false);
   const [previewToken, setPreviewToken] = useState(0);
 
@@ -131,6 +132,26 @@ function ProjectWorkspace({ id }: { id: string | undefined }) {
     if (fileSignature) setPreviewToken((token) => token + 1);
   }, [fileSignature]);
 
+  useEffect(() => {
+    if (!id || !project?.isolatedPreviewEnabled) { setVerification(null); return; }
+    const controller = new AbortController();
+    void api.latestVerification(id, controller.signal)
+      .then(data => { if (!controller.signal.aborted) setVerification(
+        data.verification?.current && data.verification.revisionId === project.revisionId ? data.verification : null); })
+      .catch(error => { if (!controller.signal.aborted) setAcceptanceError(errorMessage(error)); });
+    return () => controller.abort();
+  }, [id, project?.isolatedPreviewEnabled, project?.revisionId]);
+
+  useEffect(() => {
+    if (!id || verification?.state !== "running") return;
+    const timer = window.setTimeout(() => {
+      void api.latestVerification(id)
+        .then(data => setVerification(data.verification?.current ? data.verification : null))
+        .catch(error => setAcceptanceError(errorMessage(error)));
+    }, 3000);
+    return () => window.clearTimeout(timer);
+  }, [id, verification]);
+
   const running = project ? isRunningStatus(project.status) : false;
   useEffect(() => {
     if (!running && stream.connection !== "retrying") return;
@@ -196,6 +217,23 @@ function ProjectWorkspace({ id }: { id: string | undefined }) {
     setAcceptanceError(null);
     setTab("contract");
     try {
+      if (project.isolatedPreviewEnabled) {
+        if (!project.revisionId) throw new Error("当前还没有可检查的已保存版本。");
+        const requestId = Array.from(crypto.getRandomValues(new Uint8Array(16)),
+          value => value.toString(16).padStart(2, "0")).join("");
+        const reserved = await api.reserveVerification(id, requestId);
+        if (reserved.revisionId !== project.revisionId) throw new Error("检查版本已变化，请刷新后重试。");
+        setVerification(reserved);
+        try {
+          const result = await api.runVerification(id, requestId);
+          setVerification(result);
+        } catch (error) {
+          const latest = await api.getVerification(id, requestId);
+          setVerification(latest);
+          if (latest.state !== "passed" && latest.state !== "failed") throw error;
+        }
+        return;
+      }
       let doc = iframeRef.current?.contentDocument;
       const deadline = Date.now() + 10000;
       while ((!doc?.body || doc.readyState !== "complete" || doc.URL === "about:blank") && Date.now() < deadline) {
@@ -426,6 +464,8 @@ function ProjectWorkspace({ id }: { id: string | undefined }) {
               projectId={project.id}
               status={project.status}
               hasFiles={hasFiles}
+              isolated={project.isolatedPreviewEnabled}
+              revisionId={project.revisionId}
               iframeRef={iframeRef}
               reloadToken={previewToken}
             />
@@ -453,13 +493,16 @@ function ProjectWorkspace({ id }: { id: string | undefined }) {
                 status={project.status}
                 requirements={project.requirements}
                 acceptance={project.acceptance}
+                isolated={project.isolatedPreviewEnabled}
+                verification={verification}
                 onApprove={approve}
                 approving={approving}
                 approveError={approveError}
                 onRunAcceptance={runChecksNow}
                 acceptanceRunning={acceptanceRunning}
                 acceptanceError={acceptanceError}
-                canRunAcceptance={!running && hasFiles && project.requirements.length > 0}
+                canRunAcceptance={!running && hasFiles && project.requirements.length > 0 &&
+                  (!project.isolatedPreviewEnabled || (Boolean(project.revisionId) && verification?.state !== "running"))}
               />
             </div>
           ) : null}
@@ -473,6 +516,7 @@ function ProjectWorkspace({ id }: { id: string | undefined }) {
             >
               <RaceTab
                 projectId={project.id}
+                isolatedPreview={project.isolatedPreviewEnabled}
                 legacyAdoptionAvailable={project.legacyAdoptionAvailable}
                 initialRace={project.race}
                 onChanged={() => { void load(true); }}

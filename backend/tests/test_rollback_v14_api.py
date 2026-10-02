@@ -1,5 +1,6 @@
 """Authenticated v14 rollback control over the existing owner-scoped API."""
 import asyncio
+import json
 import os
 import secrets
 import socket
@@ -470,7 +471,17 @@ def test_latest_verification_is_owner_scoped_and_survives_nonready_project(
                 'requestId':'a' * 32, 'revisionId':expected.request.revision_id,
                 'contractDigest':expected.request.contract.digest, 'state':'passed',
                 'deadline':expected.request.deadline, 'total':1, 'passed':1,
-                'completedAt':expected.result.completed_at}
+                'completedAt':expected.result.completed_at,
+                'results':json.loads(expected.result.report)['results'],
+                'current':False}
+            with sqlite3.connect(path) as db:
+                db.execute("UPDATE projects SET status='ready' WHERE id='project'")
+                db.execute("UPDATE revision_workspaces SET current_revision_id=? "
+                           "WHERE project_id='project' AND heat_id IS NULL",
+                           (expected.request.revision_id,))
+            current = client.get(route)
+            assert current.status_code == 200, current.text
+            assert current.json()['verification']['current'] is True
             assert client.get(route + '?other=1').status_code == 400
             assert client.get(route, headers={'origin':'https://foreign.example.org'}).status_code == 400
             assert client.get('/api/projects/other/verifications/latest').status_code == 404

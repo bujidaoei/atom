@@ -134,6 +134,7 @@ export type ProjectDetail = ProjectSummary & {
   buildBudgetSeconds: number;
   legacyPublicationAvailable: boolean;
   legacyAdoptionAvailable: boolean;
+  isolatedPreviewEnabled: boolean;
   race: RaceSummary | null;
 };
 
@@ -174,6 +175,7 @@ export type PublicationHistory = {
 };
 
 export type VerificationStatus = {
+  current?: boolean;
   requestId: string;
   revisionId: string;
   contractDigest: string;
@@ -182,6 +184,7 @@ export type VerificationStatus = {
   total: number | null;
   passed: number | null;
   completedAt: number | null;
+  results: AcceptanceResult[] | null;
 };
 
 export type LedgerEntry = {

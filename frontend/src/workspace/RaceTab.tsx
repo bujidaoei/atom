@@ -11,6 +11,7 @@ import type { HeatActivity } from "./useProjectStream";
 
 type RaceTabProps = {
   projectId: string;
+  isolatedPreview: boolean;
   legacyAdoptionAvailable: boolean;
   initialRace: RaceSummary | null;
   heatActivity: Record<string, HeatActivity>;
@@ -33,6 +34,7 @@ const HEAT_STATUS: Record<RaceHeat["status"], { label: string; tone: string }> =
 
 export function RaceTab({
   projectId,
+  isolatedPreview,
   legacyAdoptionAvailable,
   initialRace,
   heatActivity,
@@ -244,6 +246,7 @@ export function RaceTab({
                 <HeatCard
                   key={heat.id}
                   projectId={projectId}
+                  isolatedPreview={isolatedPreview}
                   legacyAdoptionAvailable={legacyAdoptionAvailable}
                   heat={heat}
                   activity={heatActivity[heat.id]}
@@ -269,6 +272,7 @@ export function RaceTab({
 
 function HeatCard({
   projectId,
+  isolatedPreview,
   legacyAdoptionAvailable,
   heat,
   activity,
@@ -280,6 +284,7 @@ function HeatCard({
   onAdopted,
 }: {
   projectId: string;
+  isolatedPreview: boolean;
   legacyAdoptionAvailable: boolean;
   heat: RaceHeat;
   activity: HeatActivity | undefined;
@@ -317,7 +322,7 @@ function HeatCard({
       </header>
 
       <div className="relative aspect-[16/10] bg-base-secondary-alt">
-        {heat.previewUrl && (heat.status === "done" || heat.fileCount > 0) ? (
+        {!isolatedPreview && heat.previewUrl && (heat.status === "done" || heat.fileCount > 0) ? (
           <iframe
             src={`${withBase(heat.previewUrl)}?run=${heat.runId ?? ""}&status=${heat.status}`}
             title={`${heat.model} 的预览`}
@@ -328,7 +333,9 @@ function HeatCard({
         ) : (
           <div className="flex h-full items-center justify-center px-m text-center">
             <p className="text-sm text-neutral-40">
-              {!["queued", "running", "done"].includes(heat.status)
+              {isolatedPreview && heat.previewUrl
+                ? "赛道预览需要先成为已保存版本，避免在工作区执行生成的脚本。"
+                : !["queued", "running", "done"].includes(heat.status)
                 ? (heat.error ?? "这一路失败了")
                 : (activity?.label ?? "等待第一个文件…")}
             </p>
@@ -390,7 +397,7 @@ function HeatCard({
         {heat.status === "done" && !legacyAdoptionAvailable ? (
           <span className="text-xs text-neutral-60">按修订采用尚未开放</span>
         ) : null}
-        {heat.previewUrl ? (
+        {!isolatedPreview && heat.previewUrl ? (
           <a
             href={withBase(heat.previewUrl)}
             target="_blank"

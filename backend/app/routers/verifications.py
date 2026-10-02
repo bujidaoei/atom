@@ -107,11 +107,14 @@ def _view(state: VerificationState):
         name = 'unresolved' if state.dispatched else 'expired'
     else:
         name = 'running' if state.dispatched else 'reserved'
+    results = (json.loads(result.report)['results']
+               if result is not None and result.outcome in ('passed', 'failed') else None)
     return {'requestId':request.id, 'revisionId':request.revision_id,
             'contractDigest':request.contract.digest, 'state':name,
             'deadline':request.deadline, 'total':result.total if result else None,
             'passed':result.passed if result else None,
-            'completedAt':result.completed_at if result else None}
+            'completedAt':result.completed_at if result else None,
+            'results':results}
 
 
 async def _describe(repository, owner, project_id, request_id):
@@ -157,9 +160,22 @@ async def latest_verification(project: OwnedProject, request: Request):
     try:
         state = await asyncio.to_thread(repository.latest, owner=project.user_id,
                                         project_id=project.id)
+        current = False
+        if state is not None:
+            try:
+                scope = await asyncio.to_thread(repository.current_scope,
+                    owner=project.user_id, project_id=project.id)
+                current = (scope.revision_id == state.request.revision_id
+                           and scope.contract_digest == state.request.contract.digest
+                           and state.request.policy_digest == settings.verifier_policy_digest
+                           and state.request.runner_version == settings.verifier_runner_version)
+            except VerificationError as error:
+                if str(error) not in ('verification_conflict', 'invalid_stored_contract'):
+                    raise
     except VerificationError as error:
         _repository_error(error)
-    return JSONResponse({'verification':_view(state) if state is not None else None},
+    return JSONResponse({'verification':({**_view(state), 'current':current}
+                                         if state is not None else None)},
                         headers=_HEADERS)
 
 
