@@ -1,4 +1,4 @@
-"""Offline v13 verifier dispatch and one-use report registration.
+"""Offline v13/v14 verifier dispatch and one-use report registration.
 
 The trusted coordinator owns dispatch. A separate worker receives only the
 returned credential and pinned identities; no HTTP route exposes this class.
@@ -51,7 +51,7 @@ class VerifierAssignment:
 class VerifierAuthority:
     def __init__(self, path, *, lock_timeout=3):
         try:
-            if verify(path) != 13:
+            if verify(path) not in (13, 14):
                 raise VerificationError('verifier_schema_required')
         except MigrationError:
             raise VerificationError('verifier_schema_required') from None
@@ -77,7 +77,7 @@ class VerifierAuthority:
                 or (artifact is not None and type(artifact) is not Artifact)):
             raise VerificationError('invalid_verifier_dispatch')
         with self._ledger._transaction() as db:
-            if db.execute('PRAGMA user_version').fetchone()[0] != 13:
+            if db.execute('PRAGMA user_version').fetchone()[0] not in (13, 14):
                 raise VerificationError('verifier_schema_required')
             row = db.execute('''SELECT q.* FROM verification_requests q
                 JOIN projects p ON p.id=q.project_id AND p.user_id=?
@@ -135,7 +135,7 @@ class VerifierAuthority:
                 or len(credential) != 32):
             raise VerificationError('verifier_unauthorized')
         with self._ledger._transaction() as db:
-            if db.execute('PRAGMA user_version').fetchone()[0] != 13:
+            if db.execute('PRAGMA user_version').fetchone()[0] not in (13, 14):
                 raise VerificationError('verifier_schema_required')
             dispatch = db.execute('SELECT * FROM verification_dispatches WHERE request_id=?',
                                   (request_id,)).fetchone()
