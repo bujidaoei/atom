@@ -5,11 +5,9 @@ long-lived response is never materialized by a Playwright route bridge.
 """
 
 from datetime import datetime, timedelta, timezone
-import ipaddress
 import os
 from pathlib import Path
 import socket
-import sqlite3
 import sys
 from threading import Thread
 import time
@@ -44,7 +42,7 @@ pytestmark = pytest.mark.skipif(
 
 def _certificate(directory: Path) -> tuple[Path, Path]:
     key = ec.generate_private_key(ec.SECP256R1())
-    subject = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, '127.0.0.1')])
+    subject = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, 'console.example.org')])
     now = datetime.now(timezone.utc)
     certificate = (
         x509.CertificateBuilder()
@@ -55,7 +53,7 @@ def _certificate(directory: Path) -> tuple[Path, Path]:
         .not_valid_before(now - timedelta(minutes=1))
         .not_valid_after(now + timedelta(days=1))
         .add_extension(x509.SubjectAlternativeName([
-            x509.IPAddress(ipaddress.ip_address('127.0.0.1'))]), critical=False)
+            x509.DNSName('console.example.org')]), critical=False)
         .sign(key, hashes.SHA256())
     )
     key_path = directory / 'tls-key.pem'
@@ -70,7 +68,8 @@ def _certificate(directory: Path) -> tuple[Path, Path]:
 
 def _serve_https(app: FastAPI, key: Path, cert: Path):
     listener = socket.socket()
-    listener.bind(('127.0.0.1', 0))
+    listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    listener.bind(('127.0.0.1', 443))
     listener.listen(128)
     port = listener.getsockname()[1]
     server = uvicorn.Server(uvicorn.Config(app, host='127.0.0.1', port=port,
@@ -114,7 +113,8 @@ def test_release_workbench_keeps_real_event_stream_and_recovers(
     outer.mount('/atom', app)
     key, cert = _certificate(tmp_path)
     server, thread, port = _serve_https(outer, key, cert)
-    origin = f'https://127.0.0.1:{port}'
+    assert port == 443
+    origin = 'https://console.example.org'
     monkeypatch.setenv('ATOM_CONSOLE_ORIGIN', origin)
     get_settings.cache_clear()
     browser = context = None
