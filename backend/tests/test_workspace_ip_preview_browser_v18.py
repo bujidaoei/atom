@@ -3,6 +3,7 @@ from types import SimpleNamespace
 import socket
 
 from fastapi import FastAPI
+from fastapi.responses import HTMLResponse
 from playwright.sync_api import sync_playwright
 import pytest
 
@@ -20,14 +21,14 @@ from app.project_public_hosts import ProjectPublicHosts
 from app.revisions import RevisionRepository
 from app.routers import auth, preview_access, projects, verifications
 from test_ip_preview_browser_v18 import _adjacent_listeners, _start, _tls_files
-from test_release_workbench_browser import _serve, _static, built_dist
+from test_release_workbench_browser import _static, built_dist
 from test_rollback_v14_api import _configured_api, http_history
 from test_adoption_verification_repository import adopted
 from test_adoption_repository import prepared
 from test_revision_migrations import legacy
 
 
-@pytest.mark.parametrize('browser_name', ('chromium', 'firefox'))
+@pytest.mark.parametrize('browser_name', ('chromium', 'firefox', 'webkit'))
 def test_workspace_opens_isolated_saved_preview(
         http_history, tmp_path, monkeypatch, built_dist, browser_name):
     path, store, intent, _source, _displaced = http_history
@@ -55,17 +56,21 @@ def test_workspace_opens_isolated_saved_preview(
     app.include_router(projects.router, prefix='/api')
     app.include_router(preview_access.router, prefix='/api')
     app.include_router(verifications.router, prefix='/api')
+    app.add_api_route('/_seed', lambda: HTMLResponse('<!doctype html><title>Atom</title>'))
     _static(app, built_dist)
     outer = FastAPI()
     outer.mount('/atom', app)
-    server, thread, port = _serve(outer)
     hosts = ProjectPortHosts('127.0.0.1', origins)
     key, cert = _tls_files(tmp_path)
-    preview_server = preview_thread = None
+    console_listener = socket.socket()
+    console_listener.bind(('127.0.0.1', 443))
+    console_listener.listen(32)
+    services = []
     try:
-        preview_server, preview_thread = _start(
+        services.append(_start(outer, console_listener, key, cert))
+        services.append(_start(
             PreviewService(PreviewAccessRepository(path), store, hosts),
-            listeners[0], key, cert)
+            listeners[0], key, cert))
         with sync_playwright() as playwright:
             browser_type = getattr(playwright, browser_name)
             browser = browser_type.launch(
@@ -73,27 +78,6 @@ def test_workspace_opens_isolated_saved_preview(
             context = browser.new_context(ignore_https_errors=True, service_workers='block')
             context.add_cookies([{'name':'__Host-atom_console', 'value':token,
                 'url':'https://127.0.0.1', 'secure':True, 'httpOnly':True, 'sameSite':'Lax'}])
-            auth_requests = []
-            def bridge(route):
-                request = route.request
-                if request.url == 'https://127.0.0.1/atom/_seed':
-                    route.fulfill(status=200, content_type='text/html', body='<!doctype html>')
-                    return
-                if '/events?' in request.url:
-                    route.abort('blockedbyclient')
-                    return
-                if request.url.endswith('/api/auth/me'):
-                    auth_requests.append({name:bool(request.all_headers().get(name))
-                        for name in ('cookie', 'x-atom-console-proof')})
-                response = route.fetch(url=f'http://127.0.0.1:{port}' +
-                    request.url[len('https://127.0.0.1'):], headers=request.all_headers() | {
-                        'host':'127.0.0.1', 'x-forwarded-proto':'https',
-                        'accept-encoding':'identity'}, timeout=10000)
-                route.fulfill(status=response.status, headers={
-                    name:value for name,value in response.headers.items() if name.lower()
-                    not in ('content-encoding','content-length','transfer-encoding')},
-                    body=response.body())
-            context.route('https://127.0.0.1/atom/**', bridge)
             page = context.new_page()
             responses = []
             page.on('response', lambda response: responses.append((response.status, response.url.split('?')[0])))
@@ -108,7 +92,6 @@ def test_workspace_opens_isolated_saved_preview(
                 has_cookie = any(item['name'] == '__Host-atom_console' for item in context.cookies())
                 raise AssertionError(f'workspace={page.url} responses={responses[-15:]} '
                     f'proof={has_proof} cookie={has_cookie} '
-                    f'auth_requests={auth_requests} '
                     f'origin={page.evaluate("location.origin")} '
                     f'body={page.locator("body").inner_text()[:800]}') from error
             assert page.locator('iframe').count() == 0
@@ -156,11 +139,10 @@ def test_workspace_opens_isolated_saved_preview(
             context.close()
             browser.close()
     finally:
-        if preview_server is not None:
-            preview_server.should_exit = True
-            preview_thread.join(timeout=15)
-        server.should_exit = True
-        thread.join(timeout=15)
+        for server, thread in services:
+            server.should_exit = True
+            thread.join(timeout=15)
+        console_listener.close()
         for listener in listeners:
             listener.close()
         engine.dispose()
