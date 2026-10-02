@@ -25,6 +25,6 @@ def test_old_schema_cannot_start_content_process(legacy, tmp_path):
     path, _ = legacy
     config = ContentProcessConfig(path, tmp_path / 'artifacts',
                                   'content.example.test', 'https://console.example.org')
-    with pytest.raises(ContentStartupError, match='content_schema_v13_required'):
+    with pytest.raises(ContentStartupError, match='content_verified_schema_required'):
         create_app(config)
     assert not config.artifacts.exists()
