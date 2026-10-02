@@ -117,7 +117,7 @@ def test_ui_runs_real_private_verification_and_publishes(
                 yield
                 app.state.verifier_client = None
 
-        app.router.lifespan_context = trusted_client
+        outer.router.lifespan_context = trusted_client
         server, thread, api_port = _serve(outer)
         with sync_playwright() as playwright:
             browser = playwright.chromium.launch()
