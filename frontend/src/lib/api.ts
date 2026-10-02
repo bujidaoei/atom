@@ -10,6 +10,8 @@ import type {
   Settings,
   Usage,
   User,
+  VerifiedPublication,
+  VerificationStatus,
 } from "./types";
 
 /**
@@ -53,7 +55,7 @@ type RequestOptions = {
   silent401?: boolean;
   accept?: string;
   commandKey?: string;
-  intent?: "inspect-private-content" | "open-private-content" | "revoke-account-sessions";
+  intent?: "inspect-private-content" | "open-private-content" | "revoke-account-sessions" | "inspect-verified-release";
   signal?: AbortSignal;
 };
 
@@ -167,6 +169,11 @@ export const api = {
     request<PublishResult>(`/api/projects/${id}/publish`, { method: "POST" }),
   unpublish: (id: string) =>
     request<{ ok: true }>(`/api/projects/${id}/unpublish`, { method: "POST" }),
+  currentVerifiedRelease: (id: string, signal?: AbortSignal) =>
+    request<{ publication: VerifiedPublication | null }>(`/api/projects/${id}/releases/current`,
+      { intent: "inspect-verified-release", signal }),
+  getVerification: (id: string, requestId: string, signal?: AbortSignal) =>
+    request<VerificationStatus>(`/api/projects/${id}/verifications/${requestId}`, { signal }),
 
   // ---- acceptance
   postAcceptance: (id: string, results: AcceptanceResult[]) =>

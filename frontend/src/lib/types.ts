@@ -137,6 +137,32 @@ export type ProjectDetail = ProjectSummary & {
   race: RaceSummary | null;
 };
 
+export type VerifiedPublication = {
+  releaseId: string;
+  revisionId: string;
+  verificationId: string;
+  contractDigest: string;
+  policyDigest: string;
+  audience: "owner" | "public";
+  slug: string;
+  generation: number;
+  live: boolean;
+  bindingId: string;
+  pinnedUrl: string | null;
+  sharingUrl: string | null;
+};
+
+export type VerificationStatus = {
+  requestId: string;
+  revisionId: string;
+  contractDigest: string;
+  state: "reserved" | "running" | "passed" | "failed" | "cancelled" | "timed_out" | "unresolved" | "expired";
+  deadline: number;
+  total: number | null;
+  passed: number | null;
+  completedAt: number | null;
+};
+
 export type LedgerEntry = {
   delta: number;
   reason: string;

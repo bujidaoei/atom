@@ -17,16 +17,18 @@ import { ContractTab } from "../workspace/ContractTab";
 import { CodeTab } from "../workspace/CodeTab";
 import { PreviewTab } from "../workspace/PreviewTab";
 import { RaceTab } from "../workspace/RaceTab";
+import { ReleaseTab } from "../workspace/ReleaseTab";
 import { runAcceptance } from "../workspace/acceptance";
 import { useProjectStream } from "../workspace/useProjectStream";
 
-type TabId = "preview" | "code" | "contract" | "race";
+type TabId = "preview" | "code" | "contract" | "race" | "release";
 
 const TABS: { id: TabId; label: string; icon: IconName }[] = [
   { id: "preview", label: "预览", icon: "eye" },
   { id: "code", label: "代码", icon: "code" },
   { id: "contract", label: "契约", icon: "contract" },
   { id: "race", label: "竞速", icon: "race" },
+  { id: "release", label: "发布", icon: "external" },
 ];
 
 export function WorkspacePage() {
@@ -299,19 +301,15 @@ function ProjectWorkspace({ id }: { id: string | undefined }) {
             </a>
           ) : null}
 
-          <Button
-            variant={project.slug ? "secondary" : "primary"}
-            size="sm"
-            loading={publishBusy}
-            disabled={!project.slug && (!hasFiles || project.status !== "ready" || !project.legacyPublicationAvailable)}
-            title={!project.slug && !project.legacyPublicationAvailable ? "隔离制品尚无独立验收的发布版本" : undefined}
-            onClick={() => void togglePublish()}
-          >
-            {project.slug ? "取消发布" : "发布"}
-          </Button>
-          {!project.slug && project.status === "ready" && !project.legacyPublicationAvailable ? (
-            <span className="text-xs text-neutral-60">当前版本尚无独立验收的发布版本</span>
-          ) : null}
+          {project.legacyPublicationAvailable ? (
+            <Button variant={project.slug ? "secondary" : "primary"} size="sm"
+              loading={publishBusy} disabled={!project.slug && (!hasFiles || project.status !== "ready")}
+              onClick={() => void togglePublish()}>
+              {project.slug ? "取消发布" : "发布"}
+            </Button>
+          ) : (
+            <Button variant="secondary" size="sm" onClick={() => setTab("release")}>发布工作台</Button>
+          )}
 
           <IconButton label="刷新项目" onClick={() => void load(true)}>
             <Icon name="refresh" size={14} />
@@ -484,6 +482,12 @@ function ProjectWorkspace({ id }: { id: string | undefined }) {
                   setTab("preview");
                 }}
               />
+            </div>
+          ) : null}
+
+          {tab === "release" ? (
+            <div role="tabpanel" id="panel-release" aria-labelledby="tab-release" className="flex min-h-0 flex-1 flex-col">
+              <ReleaseTab project={project} />
             </div>
           ) : null}
         </section>
