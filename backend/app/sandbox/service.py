@@ -181,7 +181,8 @@ def create_app(config: BrokerConfig | None = None) -> FastAPI:
         lifecycle = getattr(app.state, "lifecycle", None)
         if lifecycle is None or not app.state.maintenance_ok:
             return False
-        return await run_in_threadpool(lifecycle.ready_after_control)
+        status = await run_in_threadpool(lifecycle.ready_after_control)
+        return status and app.state.maintenance_ok
 
     def signed_header(request, header="authorization"):
         values = request.headers.getlist(header)
