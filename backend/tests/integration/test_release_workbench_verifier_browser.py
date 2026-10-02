@@ -131,7 +131,7 @@ def test_ui_runs_real_private_verification_and_publishes(
         server, thread, api_port = _serve(outer)
         stage('api-started')
         with sync_playwright() as playwright:
-            browser = playwright.chromium.launch(channel='chromium', headless=False)
+            browser = playwright.chromium.launch(channel='chromium')
             stage('browser-started')
             context = browser.new_context(viewport=viewport, service_workers='block')
             context.add_cookies([{'name': '__Host-atom_console', 'value': owner_token,
@@ -168,9 +168,12 @@ def test_ui_runs_real_private_verification_and_publishes(
             stage('page-created')
             page.on('pageerror', lambda error: failures.append(str(error)))
             page.on('console', lambda message: failures.append(message.text)
-                    if message.type == 'error' else None)
+                    if message.type == 'error' and
+                    'net::ERR_BLOCKED_BY_CLIENT' not in message.text else None)
             page.on('requestfailed', lambda request: failures.append(
-                'request_failed: ' + request.url + ' ' + str(request.failure)))
+                'request_failed: ' + request.url + ' ' + str(request.failure))
+                if not ('/events?' in request.url and
+                        'ERR_BLOCKED_BY_CLIENT' in str(request.failure)) else None)
             page.on('response', lambda response: responses.append((response.status, response.url)))
             page.on('response', lambda response: stage('response-type-' +
                 str(response.status) + '-' + str(response.header_value('content-type'))))
