@@ -40,7 +40,7 @@ def _identifier(value, maximum=100):
 
 
 class RetentionRepository:
-    _versions = (8, 9, 10, 13)
+    _versions = (8, 9, 10, 13, 14)
 
     def __init__(self, path):
         self.path = Path(path)
