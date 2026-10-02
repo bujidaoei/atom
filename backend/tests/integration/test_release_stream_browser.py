@@ -4,7 +4,7 @@ The browser connects directly to the isolated TLS Uvicorn server so the
 long-lived response is never materialized by a Playwright route bridge.
 """
 
-from contextlib import contextmanager
+from contextlib import contextmanager, ExitStack
 from datetime import datetime, timedelta, timezone
 import os
 from pathlib import Path
@@ -18,7 +18,8 @@ from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import NameOID
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import Response
 from playwright.sync_api import sync_playwright
 import pytest
 from sqlalchemy.orm import Session
@@ -122,6 +123,19 @@ def test_release_workbench_keeps_real_event_stream_and_recovers(
     app.include_router(projects.router, prefix='/api')
     app.include_router(verifications.router, prefix='/api')
     _static(app, DIST)
+    stream_gate = SimpleNamespace(available=True)
+    @app.middleware('http')
+    async def stream_fault_gate(request: Request, call_next):
+        if request.url.path.endswith('/events') and not stream_gate.available:
+            return Response(status_code=503)
+        return await call_next(request)
+
+    @app.post('/__test/close-stream')
+    async def close_stream():
+        stream_gate.available = False
+        await events_module.bus.publish('project', 'stream.resync', {})
+        return {'ok': True}
+
     outer = FastAPI()
     outer.mount('/atom', app)
     key, cert = _certificate(tmp_path)
@@ -130,14 +144,15 @@ def test_release_workbench_keeps_real_event_stream_and_recovers(
     origin = 'https://console.example.org'
     monkeypatch.setenv('ATOM_CONSOLE_ORIGIN', origin)
     get_settings.cache_clear()
-    browser = context = None
     errors = []
     stream_responses = []
     try:
-        with sync_playwright() as playwright:
+        with sync_playwright() as playwright, ExitStack() as cleanup:
             browser = playwright.chromium.launch(channel='chromium')
+            cleanup.callback(browser.close)
             context = browser.new_context(viewport=viewport, ignore_https_errors=True,
                                           service_workers='block')
+            cleanup.callback(context.close)
             context.add_cookies([{'name': '__Host-atom_console', 'value': token,
                 'url': origin, 'secure': True, 'httpOnly': True, 'sameSite': 'Lax'}])
             page = context.new_page()
@@ -155,10 +170,11 @@ def test_release_workbench_keeps_real_event_stream_and_recovers(
             assert stream_responses and stream_responses[0].status == 200
             assert 'text/event-stream' in stream_responses[0].headers['content-type']
 
-            context.set_offline(True)
+            fault = page.request.post(origin + '/atom/__test/close-stream')
+            assert fault.status == 200 and fault.json() == {'ok': True}
             reconnect = page.get_by_role('button', name='连接中断，点击重连')
             reconnect.wait_for(timeout=15000)
-            context.set_offline(False)
+            stream_gate.available = True
             reconnect.click()
             reconnect.wait_for(state='hidden', timeout=15000)
             page.get_by_role('tab', name='预览', exact=True).click()
@@ -172,10 +188,6 @@ def test_release_workbench_keeps_real_event_stream_and_recovers(
             assert not errors, errors
             assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
     finally:
-        if context is not None:
-            context.close()
-        if browser is not None:
-            browser.close()
         server.should_exit = True
         thread.join(timeout=10)
         listener.close()
