@@ -188,6 +188,7 @@ def test_interruption_is_durable_without_fabricated_observations(ledger, monkeyp
 def test_expired_inventory_is_bounded_and_does_not_mutate(ledger, monkeypatch):
     path, repository, arguments = ledger
     one = repository.reserve(**arguments)
+    monkeypatch.setattr('app.verification_repository.time.time', lambda: one.created_at)
     two = repository.reserve(**(arguments | {'request_id':'verification2'}))
     monkeypatch.setattr('app.verification_repository.time.time',lambda:max(one.deadline,two.deadline))
     assert repository.expired() == ()

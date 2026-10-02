@@ -3,11 +3,11 @@ import { api, ApiError, errorMessage } from "../lib/api";
 import type { ProjectDetail, VerifiedPublication, VerificationStatus } from "../lib/types";
 import { Button } from "../components/ui/Button";
 
-type Snapshot =
+type ReadState<T> =
   | { kind: "loading" }
   | { kind: "unavailable" }
   | { kind: "error"; message: string }
-  | { kind: "ready"; publication: VerifiedPublication | null; verification: VerificationStatus | null; verificationError: string | null };
+  | { kind: "ready"; value: T };
 
 function Evidence({ label, value }: { label: string; value: string }) {
   return <div className="min-w-0 rounded-xl border border-neutral-12 bg-base-default p-m">
@@ -17,38 +17,52 @@ function Evidence({ label, value }: { label: string; value: string }) {
 }
 
 export function ReleaseTab({ project }: { project: ProjectDetail }) {
-  const [snapshot, setSnapshot] = useState<Snapshot>({ kind: "loading" });
+  const [release, setRelease] = useState<ReadState<VerifiedPublication | null>>({ kind: "loading" });
+  const [latest, setLatest] = useState<ReadState<VerificationStatus | null>>({ kind: "loading" });
+  const [publishedVerification, setPublishedVerification] = useState<ReadState<VerificationStatus> | null>(null);
   const [refreshIndex, setRefreshIndex] = useState(0);
   const refresh = useCallback(() => setRefreshIndex(value => value + 1), []);
 
   useEffect(() => {
     const controller = new AbortController();
-    setSnapshot({ kind: "loading" });
-    async function load() {
+    setRelease({ kind: "loading" });
+    setLatest({ kind: "loading" });
+    setPublishedVerification(null);
+    async function loadRelease() {
       try {
         const { publication } = await api.currentVerifiedRelease(project.id, controller.signal);
-        let verification: VerificationStatus | null = null;
-        let verificationError: string | null = null;
+        if (!controller.signal.aborted) setRelease({ kind: "ready", value: publication });
         if (publication) {
           try {
-            verification = await api.getVerification(project.id, publication.verificationId, controller.signal);
+            const verification = await api.getVerification(project.id, publication.verificationId, controller.signal);
+            if (!controller.signal.aborted) setPublishedVerification({ kind: "ready", value: verification });
           } catch (error) {
             if (controller.signal.aborted) return;
-            verificationError = errorMessage(error);
+            setPublishedVerification({ kind: "error", message: errorMessage(error) });
           }
         }
-        if (!controller.signal.aborted) setSnapshot({ kind: "ready", publication, verification, verificationError });
       } catch (error) {
         if (controller.signal.aborted) return;
-        if (error instanceof ApiError && error.status === 404) setSnapshot({ kind: "unavailable" });
-        else setSnapshot({ kind: "error", message: errorMessage(error) });
+        if (error instanceof ApiError && error.status === 404) setRelease({ kind: "unavailable" });
+        else setRelease({ kind: "error", message: errorMessage(error) });
       }
     }
-    void load();
+    async function loadLatest() {
+      try {
+        const { verification } = await api.latestVerification(project.id, controller.signal);
+        if (!controller.signal.aborted) setLatest({ kind: "ready", value: verification });
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        if (error instanceof ApiError && error.status === 404) setLatest({ kind: "unavailable" });
+        else setLatest({ kind: "error", message: errorMessage(error) });
+      }
+    }
+    void loadRelease();
+    void loadLatest();
     return () => controller.abort();
   }, [project.id, project.revisionId, refreshIndex]);
 
-  const publication = snapshot.kind === "ready" ? snapshot.publication : null;
+  const publication = release.kind === "ready" ? release.value : null;
   const stale = Boolean(publication && project.revisionId !== publication.revisionId);
 
   return <div className="min-h-0 flex-1 overflow-y-auto p-l" aria-label="发布工作台">
@@ -66,15 +80,32 @@ export function ReleaseTab({ project }: { project: ProjectDetail }) {
         <Evidence label="项目状态" value={project.status} />
       </dl>
 
-      {snapshot.kind === "loading" ? <p role="status" className="text-sm text-neutral-60">正在读取发布账本…</p> : null}
-      {snapshot.kind === "unavailable" ? <div role="status" className="rounded-xl border border-neutral-12 bg-neutral-8 p-l">
+      <div className="space-y-m rounded-xl border border-neutral-12 bg-base-default p-l">
+        <h3 className="font-medium text-neutral-95">最近一次可信验证</h3>
+        {latest.kind === "loading" ? <p role="status" className="text-sm text-neutral-60">正在读取验证账本…</p> : null}
+        {latest.kind === "unavailable" ? <p className="text-sm text-neutral-60">可信验证服务尚未启用。</p> : null}
+        {latest.kind === "error" ? <p role="alert" className="text-sm text-danger-strong">验证状态无法确认：{latest.message}</p> : null}
+        {latest.kind === "ready" && !latest.value ? <p className="text-sm text-neutral-60">当前项目没有验证记录。</p> : null}
+        {latest.kind === "ready" && latest.value ? <>
+          <dl className="grid gap-s sm:grid-cols-2">
+            <Evidence label="验证请求" value={latest.value.requestId} />
+            <Evidence label="所验证修订" value={latest.value.revisionId} />
+            <Evidence label="需求契约摘要" value={latest.value.contractDigest} />
+            <Evidence label="验证状态" value={`${latest.value.state} · ${latest.value.passed ?? "—"}/${latest.value.total ?? "—"}`} />
+          </dl>
+          {latest.value.revisionId !== project.revisionId ? <p role="status" className="text-sm text-neutral-60">该验证属于旧修订，不能作为当前修订的发布依据。</p> : null}
+        </> : null}
+      </div>
+
+      {release.kind === "loading" ? <p role="status" className="text-sm text-neutral-60">正在读取发布账本…</p> : null}
+      {release.kind === "unavailable" ? <div role="status" className="rounded-xl border border-neutral-12 bg-neutral-8 p-l">
         <h3 className="font-medium text-neutral-95">可信发布尚未启用</h3>
         <p className="mt-xs text-sm text-neutral-60">当前服务没有提供可信验证和独立制品站点。这个版本只能在工作区预览；发布需要服务端完成验证、独立站点配置和迁移验收。</p>
       </div> : null}
-      {snapshot.kind === "error" ? <div role="alert" className="rounded-xl border border-danger-strong p-l text-sm">
-        发布状态无法确认：{snapshot.message}。请刷新状态后再判断，不能把查询失败视作未发布。
+      {release.kind === "error" ? <div role="alert" className="rounded-xl border border-danger-strong p-l text-sm">
+        发布状态无法确认：{release.message}。请刷新状态后再判断，不能把查询失败视作未发布。
       </div> : null}
-      {snapshot.kind === "ready" && !publication ? <div role="status" className="rounded-xl border border-neutral-12 bg-neutral-8 p-l">
+      {release.kind === "ready" && !publication ? <div role="status" className="rounded-xl border border-neutral-12 bg-neutral-8 p-l">
         <h3 className="font-medium text-neutral-95">暂无已登记的发布指针</h3>
         <p className="mt-xs text-sm text-neutral-60">发布账本已连接，但当前没有线上版本。可信验证和发布操作仍需从经过验收的控制流程完成。</p>
       </div> : null}
@@ -90,10 +121,10 @@ export function ReleaseTab({ project }: { project: ProjectDetail }) {
           <Evidence label="契约摘要" value={publication.contractDigest} />
           <Evidence label="可信验证" value={publication.verificationId} />
         </dl>
-        {snapshot.kind === "ready" && snapshot.verification ? <p className="text-sm text-neutral-60">
-          验证结果：{snapshot.verification.state} · {snapshot.verification.passed ?? "—"}/{snapshot.verification.total ?? "—"} 项通过
+        {publishedVerification?.kind === "ready" ? <p className="text-sm text-neutral-60">
+          发布依据：{publishedVerification.value.state} · {publishedVerification.value.passed ?? "—"}/{publishedVerification.value.total ?? "—"} 项通过
         </p> : null}
-        {snapshot.kind === "ready" && snapshot.verificationError ? <p role="alert" className="text-sm text-danger-strong">验证记录暂无法读取：{snapshot.verificationError}</p> : null}
+        {publishedVerification?.kind === "error" ? <p role="alert" className="text-sm text-danger-strong">发布依据暂无法读取：{publishedVerification.message}</p> : null}
         {publication.live && publication.pinnedUrl ? <a href={publication.pinnedUrl} target="_blank" rel="noreferrer" className="block break-all text-sm text-brand-text hover:underline">打开不可变版本：{publication.pinnedUrl}</a> : null}
         {publication.live && publication.sharingUrl ? <a href={publication.sharingUrl} target="_blank" rel="noreferrer" className="block break-all text-sm text-brand-text hover:underline">打开公开分享地址：{publication.sharingUrl}</a> : null}
         {!publication.live ? <p className="text-sm text-neutral-60">此指针已撤回，链接不可用；历史制品并未因此被改写。</p> : null}

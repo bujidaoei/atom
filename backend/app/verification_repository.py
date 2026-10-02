@@ -1,5 +1,5 @@
 """Trusted verification-intent ledger, not verifier authentication or execution."""
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from dataclasses import dataclass
 import hashlib
 import hmac
@@ -187,6 +187,34 @@ class VerificationRepository:
             dispatched = db.execute('SELECT 1 FROM verification_dispatches WHERE request_id=?',
                                     (request_id,)).fetchone() is not None
             return VerificationState(request, result, dispatched)
+
+    def latest(self, *, owner: str, project_id: str) -> VerificationState | None:
+        """Find the latest owner-scoped request, then validate its complete state.
+
+        This read does not require a ready project: failed and superseded
+        verification attempts must remain visible during recovery.
+        """
+        if any(type(value) is not str or re.fullmatch(r'[A-Za-z0-9_.-]{1,128}', value) is None
+               for value in (owner, project_id)):
+            raise VerificationError('invalid_verification_request')
+        try:
+            with closing(sqlite3.connect(self.path.as_uri() + '?mode=ro', uri=True,
+                                         timeout=self.timeout)) as db:
+                db.execute('PRAGMA query_only=ON')
+                db.execute('BEGIN')
+                if db.execute('PRAGMA user_version').fetchone()[0] not in (13, 14):
+                    raise VerificationError('verifier_schema_required')
+                if db.execute('SELECT 1 FROM projects WHERE id=? AND user_id=?',
+                              (project_id, owner)).fetchone() is None:
+                    raise VerificationError('verification_not_found')
+                row = db.execute('''SELECT id FROM verification_requests
+                    WHERE project_id=? ORDER BY created_at DESC, rowid DESC LIMIT 1''',
+                    (project_id,)).fetchone()
+        except sqlite3.Error:
+            raise VerificationError('verification_unavailable') from None
+        if row is None:
+            return None
+        return self.describe(owner=owner, project_id=project_id, request_id=row[0])
 
     def reserve(self, *, owner: str, workspace_id: str, request_id: str,
                 expected_revision: str, expected_contract: str, policy_digest: str,

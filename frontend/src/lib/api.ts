@@ -174,6 +174,8 @@ export const api = {
       { intent: "inspect-verified-release", signal }),
   getVerification: (id: string, requestId: string, signal?: AbortSignal) =>
     request<VerificationStatus>(`/api/projects/${id}/verifications/${requestId}`, { signal }),
+  latestVerification: (id: string, signal?: AbortSignal) =>
+    request<{ verification: VerificationStatus | null }>(`/api/projects/${id}/verifications/latest`, { signal }),
 
   // ---- acceptance
   postAcceptance: (id: string, results: AcceptanceResult[]) =>

@@ -145,6 +145,24 @@ async def reserve_verification(project: OwnedProject, request: Request):
         _repository_error(error)
 
 
+@router.get('/{project_id}/verifications/latest')
+async def latest_verification(project: OwnedProject, request: Request):
+    require_console_host(request)
+    if request.scope.get('query_string'):
+        _deny(400, '验证查询格式不正确')
+    settings, _client = _configured(request)
+    if request.headers.getlist('origin') and request.headers.getlist('origin') != [settings.console_origin]:
+        _deny(400, '验证查询格式不正确')
+    repository = _repository(settings)
+    try:
+        state = await asyncio.to_thread(repository.latest, owner=project.user_id,
+                                        project_id=project.id)
+    except VerificationError as error:
+        _repository_error(error)
+    return JSONResponse({'verification':_view(state) if state is not None else None},
+                        headers=_HEADERS)
+
+
 @router.get('/{project_id}/verifications/{request_id}')
 async def verification_status(project: OwnedProject, request_id: str,
                               request: Request):

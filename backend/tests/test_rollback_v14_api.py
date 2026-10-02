@@ -25,9 +25,9 @@ from app.content_repository import ContentRepository
 from app.db import get_db
 from app.migrations import migrate
 from app.release_repository import ReleaseRepository
-from app.routers import releases
+from app.routers import releases, verifications
 from app.security import issue_session
-from app.verification_repository import VerificationRepository
+from app.verification_repository import VerificationError, VerificationRepository
 from app.verifier_authority import VerifierAuthority
 from test_adoption_repository import Store, prepared, snapshot
 from test_adoption_verification_repository import adopted
@@ -410,6 +410,8 @@ def test_verified_http_routes_reject_untrusted_v10_ledger(legacy, tmp_path, monk
     intent = {'policy_digest':'c' * 64, 'runner_version':'runner-1'}
     app, token, engine = _configured_api(path, Store('0' * 64, b''),
                                          intent, tmp_path, monkeypatch)
+    app.include_router(verifications.router, prefix='/api')
+    app.state.verifier_client = object()
     route = '/api/projects/project/releases'
     try:
         with TestClient(app, base_url='https://console.example.org',
@@ -417,6 +419,7 @@ def test_verified_http_routes_reject_untrusted_v10_ledger(legacy, tmp_path, monk
             current = client.get(route + '/current',
                 headers={'x-atom-intent':'inspect-verified-release'})
             assert current.status_code == 503
+            assert client.get('/api/projects/project/verifications/latest').status_code == 503
             publish = client.post(route, json={
                 'releaseId':'a' * 32, 'verificationId':'b' * 32,
                 'expectedRevision':'root', 'expectedGeneration':0,
@@ -429,3 +432,50 @@ def test_verified_http_routes_reject_untrusted_v10_ledger(legacy, tmp_path, monk
     finally:
         engine.dispose()
         get_settings.cache_clear()
+
+
+@pytest.mark.parametrize('version', [13, 14])
+def test_latest_verification_is_owner_scoped_and_survives_nonready_project(
+        http_history, tmp_path, monkeypatch, version):
+    path, store, intent, _source, _displaced = http_history
+    if version == 14:
+        migrate(path, tmp_path / 'before-v14-latest.db', target_version=14)
+    repository = VerificationRepository(path)
+    expected = repository.describe(owner='user', project_id='project', request_id='a' * 32)
+    assert repository.latest(owner='user', project_id='project') == expected
+    with pytest.raises(VerificationError, match='verification_not_found'):
+        repository.latest(owner='foreign', project_id='project')
+    with sqlite3.connect(path) as db:
+        db.execute("UPDATE projects SET status='cancelled' WHERE id='project'")
+        db.execute("UPDATE revision_workspaces SET current_revision_id='root' "
+                   "WHERE project_id='project' AND heat_id IS NULL")
+    assert repository.latest(owner='user', project_id='project') == expected
+
+    app, token, engine = _configured_api(path, store, intent, tmp_path, monkeypatch)
+    app.include_router(verifications.router, prefix='/api')
+    app.state.verifier_client = object()
+    try:
+        with TestClient(app, base_url='https://console.example.org',
+                        cookies={'__Host-atom_console':token}) as client:
+            route = '/api/projects/project/verifications/latest'
+            latest = client.get(route)
+            assert latest.status_code == 200, latest.text
+            assert latest.json()['verification'] == {
+                'requestId':'a' * 32, 'revisionId':expected.request.revision_id,
+                'contractDigest':expected.request.contract.digest, 'state':'passed',
+                'deadline':expected.request.deadline, 'total':1, 'passed':1,
+                'completedAt':expected.result.completed_at}
+            assert client.get(route + '?other=1').status_code == 400
+            assert client.get(route, headers={'origin':'https://foreign.example.org'}).status_code == 400
+            assert client.get('/api/projects/other/verifications/latest').status_code == 404
+        with TestClient(app, base_url='https://console.example.org') as anonymous:
+            assert anonymous.get(route).status_code == 401
+    finally:
+        engine.dispose()
+        get_settings.cache_clear()
+
+
+def test_latest_verification_empty_verified_history(adopted, tmp_path):
+    path, _receipt, _intent = adopted
+    migrate(path, tmp_path / 'before-v13-empty.db', target_version=13)
+    assert VerificationRepository(path).latest(owner='user', project_id='project') is None
