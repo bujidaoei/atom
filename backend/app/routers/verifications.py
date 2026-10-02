@@ -91,6 +91,13 @@ def _repository_error(error: VerificationError):
     _deny(503, '验证账本暂不可用')
 
 
+def _repository(settings):
+    try:
+        return VerificationRepository(settings.db_path)
+    except VerificationError as error:
+        _repository_error(error)
+
+
 def _view(state: VerificationState):
     request = state.request
     result = state.result
@@ -122,7 +129,7 @@ async def reserve_verification(project: OwnedProject, request: Request):
     request_id = await _request_id(request)
     if project.status != 'ready':
         _deny(409, '项目尚未准备好验证')
-    repository = VerificationRepository(settings.db_path)
+    repository = _repository(settings)
     try:
         scope = await asyncio.to_thread(repository.current_scope,
                                         owner=project.user_id, project_id=project.id)
@@ -145,7 +152,7 @@ async def verification_status(project: OwnedProject, request_id: str,
     settings, _client = _configured(request)
     if _REQUEST_ID.fullmatch(request_id) is None:
         _deny(404, '验证请求不存在')
-    repository = VerificationRepository(settings.db_path)
+    repository = _repository(settings)
     state = await _describe(repository, project.user_id, project.id, request_id)
     return JSONResponse(_view(state), headers=_HEADERS)
 
@@ -163,7 +170,7 @@ async def run_verification(project: OwnedProject, request_id: str,
         _deny(400, '验证执行不接受请求内容')
     if _REQUEST_ID.fullmatch(request_id) is None:
         _deny(404, '验证请求不存在')
-    repository = VerificationRepository(settings.db_path)
+    repository = _repository(settings)
     before = await _describe(repository, project.user_id, project.id, request_id)
     if before.result is not None:
         return JSONResponse(_view(before), headers=_HEADERS)

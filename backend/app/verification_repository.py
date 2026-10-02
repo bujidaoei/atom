@@ -1,6 +1,8 @@
 """Trusted verification-intent ledger, not verifier authentication or execution."""
 from contextlib import contextmanager
 from dataclasses import dataclass
+import hashlib
+import hmac
 import json
 from pathlib import Path
 import re
@@ -8,7 +10,7 @@ import sqlite3
 import time
 
 from .migrations import MigrationError, _schema, verify
-from .verification_contract import ContractError, VerificationContract, capture_contract, capture_report, load_contract
+from .verification_contract import ContractError, VerificationContract, capture_contract, capture_report, load_contract, load_report
 
 
 _SUPPORTED_SCHEMAS = (2, 3, 4, 5, 6, 7, 9, 10, 12, 13)
@@ -147,6 +149,37 @@ class VerificationRepository:
             request = self._decode(row)
             report = db.execute('SELECT * FROM verification_results WHERE request_id=?',
                                 (request_id,)).fetchone()
+            if report is not None:
+                if ((report['revision_id'],report['contract_digest'],report['policy_digest']) !=
+                        (request.revision_id,request.contract.digest,request.policy_digest)
+                        or type(report['total']) is not int or report['total'] < 1
+                        or type(report['passed']) is not int
+                        or not 0 <= report['passed'] <= report['total']):
+                    raise VerificationError('verification_corrupt')
+                if report['outcome'] in ('passed','failed'):
+                    try:
+                        canonical = report['report_json'].encode('utf-8')
+                        observed = load_report(request.contract, canonical)
+                    except (ContractError, UnicodeError):
+                        raise VerificationError('verification_corrupt') from None
+                    attestation = db.execute('''SELECT a.report_digest,a.observed_at FROM
+                        verification_attestations a JOIN verification_dispatches d
+                          ON d.request_id=a.request_id AND d.verifier_id=a.verifier_id
+                         AND d.environment_digest=a.environment_digest
+                         AND d.artifact_key=a.artifact_key
+                         AND d.snapshot_revision=a.snapshot_revision
+                        WHERE a.request_id=?''', (request_id,)).fetchone()
+                    if (observed.canonical != canonical or observed.total != report['total']
+                            or observed.passed != report['passed']
+                            or (report['outcome'] == 'passed') !=
+                               (report['passed'] == report['total'])
+                            or attestation is None
+                            or report['completed_at'] != attestation['observed_at']
+                            or not hmac.compare_digest(hashlib.sha256(canonical).hexdigest(),
+                                                       attestation['report_digest'])):
+                        raise VerificationError('verification_corrupt')
+                elif report['outcome'] not in ('cancelled','timed_out'):
+                    raise VerificationError('verification_corrupt')
             result = None if report is None else VerificationResult(
                 request_id, report['revision_id'], report['contract_digest'],
                 report['outcome'], report['total'], report['passed'],
