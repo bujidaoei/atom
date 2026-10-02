@@ -4,6 +4,7 @@ This is an isolated target-Linux acceptance path. It does not route public
 traffic or mutate the schema10 production databases.
 """
 from contextlib import asynccontextmanager
+import faulthandler
 import json
 import os
 from pathlib import Path
@@ -56,6 +57,7 @@ def _port():
 ])
 def test_ui_runs_real_private_verification_and_publishes(
         adopted, tmp_path, monkeypatch, viewport):
+    faulthandler.dump_traceback_later(35, file=sys.stderr)
     def stage(name):
         print(f'verifier-browser-{viewport["width"]}: {name}', flush=True)
 
@@ -212,6 +214,7 @@ def test_ui_runs_real_private_verification_and_publishes(
             context.close()
             browser.close()
     finally:
+        faulthandler.cancel_dump_traceback_later()
         if server is not None:
             server.should_exit = True
             thread.join(timeout=10)
