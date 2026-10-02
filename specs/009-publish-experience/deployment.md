@@ -23,7 +23,7 @@ Status: **not deployed**. This document separates observed production facts, reh
 
 ## Evidence still required
 
-- Source commit/PR and target image digest: pending.
+- Source branch and draft PR: `codex/009-publish-experience`, https://github.com/bujidaoei/atom/pull/2. The exact `c5fd264` rehearsal image exists on the target; final production image digest is pending.
 - Private backups and restore test: pending.
 - Linux runtime/verifier/ingress, COS transfer and content migration: pending.
 - Target owner/public production browser acceptance and rollback drill: pending.
