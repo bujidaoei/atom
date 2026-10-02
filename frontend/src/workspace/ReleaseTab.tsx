@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api, ApiError, errorMessage } from "../lib/api";
 import type { ProjectDetail, VerifiedPublication, VerificationStatus } from "../lib/types";
 import { Button } from "../components/ui/Button";
+import { ReleaseControls } from "./ReleaseControls";
 
 type ReadState<T> =
   | { kind: "loading" }
@@ -61,6 +62,12 @@ export function ReleaseTab({ project }: { project: ProjectDetail }) {
     void loadLatest();
     return () => controller.abort();
   }, [project.id, project.revisionId, refreshIndex]);
+
+  useEffect(() => {
+    if (latest.kind !== "ready" || latest.value?.state !== "running") return;
+    const timer = window.setTimeout(refresh, 3000);
+    return () => window.clearTimeout(timer);
+  }, [latest, refresh]);
 
   const publication = release.kind === "ready" ? release.value : null;
   const stale = Boolean(publication && project.revisionId !== publication.revisionId);
@@ -129,6 +136,8 @@ export function ReleaseTab({ project }: { project: ProjectDetail }) {
         {publication.live && publication.sharingUrl ? <a href={publication.sharingUrl} target="_blank" rel="noreferrer" className="block break-all text-sm text-brand-text hover:underline">打开公开分享地址：{publication.sharingUrl}</a> : null}
         {!publication.live ? <p className="text-sm text-neutral-60">此指针已撤回，链接不可用；历史制品并未因此被改写。</p> : null}
       </div> : null}
+      {release.kind === "ready" && latest.kind === "ready" ?
+        <ReleaseControls project={project} publication={release.value} latest={latest.value} onRefresh={refresh} /> : null}
     </div>
   </div>;
 }

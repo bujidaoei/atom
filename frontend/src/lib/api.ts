@@ -55,7 +55,7 @@ type RequestOptions = {
   silent401?: boolean;
   accept?: string;
   commandKey?: string;
-  intent?: "inspect-private-content" | "open-private-content" | "revoke-account-sessions" | "inspect-verified-release";
+  intent?: "inspect-private-content" | "open-private-content" | "revoke-account-sessions" | "inspect-verified-release" | "publish-verified-release" | "unpublish-verified-release";
   signal?: AbortSignal;
 };
 
@@ -176,6 +176,23 @@ export const api = {
     request<VerificationStatus>(`/api/projects/${id}/verifications/${requestId}`, { signal }),
   latestVerification: (id: string, signal?: AbortSignal) =>
     request<{ verification: VerificationStatus | null }>(`/api/projects/${id}/verifications/latest`, { signal }),
+  reserveVerification: (id: string, requestId: string) =>
+    request<VerificationStatus>(`/api/projects/${id}/verifications`,
+      { method: "POST", body: { requestId } }),
+  runVerification: (id: string, requestId: string) =>
+    request<VerificationStatus>(`/api/projects/${id}/verifications/${requestId}/run`,
+      { method: "POST" }),
+  publishVerifiedRelease: (id: string, command: {
+    releaseId: string; verificationId: string; expectedRevision: string;
+    expectedGeneration: number; audience: "owner" | "public"; slug: string;
+  }) => request<{ releaseId: string; revisionId: string; generation: number; slug: string }>(
+    `/api/projects/${id}/releases`,
+    { method: "POST", body: command, intent: "publish-verified-release" }),
+  unpublishVerifiedRelease: (id: string, releaseId: string, command: {
+    commandId: string; expectedGeneration: number;
+  }) => request<{ commandId: string; releaseId: string; generation: number }>(
+    `/api/projects/${id}/releases/${releaseId}/unpublish`,
+    { method: "POST", body: command, intent: "unpublish-verified-release" }),
 
   // ---- acceptance
   postAcceptance: (id: string, results: AcceptanceResult[]) =>
