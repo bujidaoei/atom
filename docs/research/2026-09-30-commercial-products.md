@@ -1,6 +1,6 @@
 # 商业级 AI 开发产品研究：第一轮官方证据
 
-研究日期：2026-09-30。状态：文档研究完成一轮，产品账户实测、压力/安全验证、Atom 实现与整体验收均未完成。所有事实只使用下列官方页面；“建议”是设计推论，不是产品现有能力或 Atom 已完成功能。价格与功能持续变化，本报告不固定套餐报价，不作采购排名。部分页面没有发布日期，日期代表访问日期。已读取项目 constitution；不修改 SHA-locked runtime/pi。
+研究日期：2026-09-30；2026-10-02 补充界面观察。状态：文档研究完成一轮，跨产品登录后实测、压力/安全验证、Atom 实现与整体验收均未完成。所有事实只使用下列官方页面及注明的产品界面；“建议”是设计推论，不是产品现有能力或 Atom 已完成功能。价格与功能持续变化，本报告不固定套餐报价，不作采购排名。部分页面没有发布日期，日期代表访问日期。已读取项目 constitution；不修改 SHA-locked runtime/pi。
 
 ## 1. 比较对象与流程
 
@@ -13,6 +13,10 @@
 | Lovable | 自然语言→真实应用与可编辑代码→预览迭代→发布；Git sync 接入工程流程 | 发布扫描、角色控制、发布对象控制是不同机制；安全发现默认不一定阻断发布 | 发布门槛成为确定性的服务端策略；明确“谁能修改/谁能发布/谁能访问” |
 | Bolt | 提示构建→可视/代码编辑→预览→版本历史→发布 | 主要支持 JavaScript 后端；移动端缺少版本历史等管理能力，移动端发布为公开可见 | 项目创建先做能力适配检查；所有客户端应用相同的服务端发布策略 |
 | Claude Code | 探索/规划→工具执行→验证→审查；支持权限、系统级隔离、会话恢复 | checkpoint 不跟踪 Bash 文件改动；沙箱缺失时默认可退化为无沙箱，需 failIfUnavailable 强制失败 | 恢复覆盖范围可查询；隔离不可用时失败关闭；执行后以实际产物验证恢复 |
+
+2026-10-02 实际访客界面观察：[Replit 首页](https://replit.com/)接受一个普通任务看板提示，入口展示 Website/Mobile/Design/Slides 等类型。点击 Start 后，页面明确提示“已保存提示词，创建账户后开始构建”，出现 Google/Email 注册入口；关闭弹窗后，提示词仍留在当前页面。我们未注册账户、接受条款或生成项目，因此只证明访客输入与认证门槛的可见流程，不证明提示词跨账户持久化、免费额度、规划、构建、测试或发布的实际结果。Atom 可借鉴“用户先表达意图，再明确说明认证及资源门槛”的流程，但应把草稿保存范围、费用预估和运行授权写清楚；这是设计推论，尚未实现。
+
+同日实际访客界面观察：[Bolt 首页](https://bolt.new/)接受相同的普通任务看板提示，入口有 Plan 开关、设计系统、Website/Slides/App/Prototype 以及 Figma/GitHub/团队模板起点。点击 Build now 出现创建账户对话框，提供 Google、GitHub、邮箱密码和 SSO，且明确注册表示接受服务条款；关闭后提示词仍在当前页面。我们未注册、连接第三方账户、执行代理或消耗额度。这个观察不能证明设计系统的真实应用、GitHub 导入、计划质量、模型路由或发布可靠性。Atom 的推论是把构建类型、外部导入和运行权限作为可核查的计划输入，并在开始执行前显示资源及身份门槛；不复刻 Bolt 界面。
 
 来源：[Cursor 安全](https://cursor.com/docs/cloud-agent/security)、[GitHub 风险与缓解](https://docs.github.com/en/copilot/concepts/security-governance-and-network-settings/risks-and-mitigations)、[Devin 概览](https://docs.devin.ai/get-started/devin-intro)、[Devin 发布](https://docs.devin.ai/product-guides/deployment-capabilities)、[Replit 版本控制](https://docs.replit.com/replit-workspace/workspace-features/version-control)、[Lovable 概览](https://docs.lovable.dev/introduction/welcome)、[Bolt 支持范围](https://support.bolt.new/concepts/supported-technologies)、[Claude checkpoint](https://code.claude.com/docs/en/checkpointing)。
 
