@@ -60,6 +60,7 @@ Saved version: immutable content. Functional check: version-bound observations a
 - **SC-003**: Initial publication, update and restoration serve exactly the selected content; injected failures preserve the prior live version.
 - **SC-004**: Real-browser tests verify history, restore, no console authority for public content and no horizontal overflow on desktop/mobile.
 - **SC-005**: Deployment has a traceable commit, protected backup, verified recovery path and real evidence.
+- **SC-006**: Real browsers prove that public and draft pages preserve their own native storage across reload/update/restore and cannot access console authority or another project's storage. A controlled browser check proves results belong to the exact owner-initiated saved revision and rejects forged page submissions.
 
 ## Assumptions
 - Scope is the current generated website product, not arbitrary backend hosting.
@@ -70,3 +71,5 @@ Saved version: immutable content. Functional check: version-bound observations a
 ## COS amendment
 - **FR-009**: Persist immutable publication content in configured private Tencent COS and publication metadata in the mounted server database. Secrets stay in ignored environment files; checked-in examples have empty credentials. Storage failure must not change the live publication.
 - **FR-010**: Public generated JavaScript must remain isolated from the console and other projects' browser storage. The user has no domain and prefers the server IP; deployment must establish and test a safe IP-only isolation architecture or keep public activation pending. A different port alone does not isolate HTTP cookies.
+- **FR-011**: Draft preview and functional checks must execute generated JavaScript outside the console origin. The owner must retain native scripts and browser storage in preview; an isolated server browser must collect real observations for a specific owner-initiated, version-bound check run. Generated pages cannot submit their own check results.
+- **FR-012**: When using same-IP HTTPS ports, every authenticated console API request must require a durable console-origin proof in addition to its HttpOnly session cookie. Project preview/public origins must be stable, unique and never reassigned across projects or releases; capacity exhaustion and ingress failure must leave the previous publication intact.

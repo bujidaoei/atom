@@ -25,6 +25,9 @@ Goal: plain-language current online version and retained history with preview/re
 - [x] T012a1 Guard all durable cookie-authenticated console API routes by exact HTTPS Host and unsafe-method Origin; verify ordinary project CSRF rejection and full backend regression. This is necessary but insufficient for T012a.
 - [ ] T012a2 Specify and prove per-project HTTPS origin allocation, cookie/header isolation, browser behavior and bounded ingress lifecycle for the IP-only address before production activation.
 - [ ] T012a3 Move generated draft preview and functional checking off the console origin; verify the owner preview remains usable and untrusted scripts cannot exercise console authority.
+- [ ] T012a4 Add a versioned, durable console-session proof and reject cookie-only legacy sessions at cutover; verify cross-port cookie planting, read/write denial, login and logout in the browser matrix.
+- [ ] T012a5 Reserve never-reused preview/public ports per project in a durable ledger; reconcile explicit HTTPS listeners with the ledger and test exhaustion, restart, conflict and rollback.
+- [ ] T012a6 Replace same-origin `contentDocument` acceptance with an owner-initiated isolated-browser check bound to an exact saved revision; reject forged page results and verify actual scripts and localStorage on preview/public origins.
 - [ ] T013 Rehearse protected migration and rollback, configure independent ingress in deploy/, retain private backup and deploy exact GitHub revision.
 - [ ] T014 Perform real owner/public production acceptance and synchronize specs/009-publish-experience/deployment.md and tasks.md; leave any failed gate open.
 
