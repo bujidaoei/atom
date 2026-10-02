@@ -95,7 +95,7 @@ def create_app(config: VerifierProcessConfig | None = None) -> FastAPI:
     if type(config) is not VerifierProcessConfig:
         raise VerifierStartupError('verifier_configuration_invalid')
     try:
-        if verify(config.database) not in (13, 14):
+        if verify(config.database) not in (13, 14, 15):
             raise VerifierStartupError('verifier_schema_required')
         store = ArtifactStore(config.artifacts)
         authority = VerifierAuthority(config.database)
@@ -125,7 +125,7 @@ def create_app(config: VerifierProcessConfig | None = None) -> FastAPI:
     async def health():
         try:
             await asyncio.to_thread(coordinator._require_lease)
-            if verify(config.database) not in (13, 14):
+            if verify(config.database) not in (13, 14, 15):
                 raise VerifierStartupError('verifier_schema_required')
         except (SupervisorError, MigrationError, VerifierStartupError):
             return _error('verifier_unavailable', 503)

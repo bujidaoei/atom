@@ -304,7 +304,7 @@ async def rollback_verified_release(project: OwnedProject, release_id: str, requ
     release = True
     try:
         def apply():
-            receipt = ReleaseRepository(settings.db_path, required_schema=14).rollback_verified(store,
+            receipt = ReleaseRepository(settings.db_path, required_schema='verified').rollback_verified(store,
                 owner=project.user_id, project_id=project.id,
                 command_id=command['commandId'], release_id=command['newReleaseId'],
                 source_release_id=command['sourceReleaseId'], expected_release=release_id,

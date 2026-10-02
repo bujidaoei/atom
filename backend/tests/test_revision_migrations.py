@@ -341,6 +341,66 @@ def test_failed_verification_cannot_back_release(legacy):
             db.execute("INSERT INTO release_records VALUES ('release','project',?,'root','check',?,?,'owner','user',NULL,16)", (main,'c'*64,'d'*64))
 
 
+def _migrate_to_v14(path, directory):
+    for version in range(1, 15):
+        migrate(path, directory / f'before-v{version}.db', target_version=version)
+    assert verify(path) == 14
+
+
+def test_v15_verification_index_preserves_v14_and_covers_latest(legacy, tmp_path):
+    path, _ = legacy
+    _migrate_to_v14(path, tmp_path)
+    with sqlite3.connect(path) as db:
+        journal = db.execute('SELECT version,migration_hash FROM atom_schema_migrations ORDER BY version').fetchall()
+        workspace, = db.execute('SELECT id FROM revision_workspaces WHERE heat_id IS NULL').fetchone()
+        db.execute('INSERT INTO revision_artifacts VALUES (?,?,14,1)', ('a'*64, 'b'*64))
+        db.execute("""INSERT INTO revision_records
+            (id,workspace_id,project_id,parent_revision_id,artifact_key,snapshot_revision,
+             producing_attempt_id,created_at)
+            VALUES ('root',?,'project',NULL,?,?,NULL,1)""",
+                   (workspace, 'a'*64, 'b'*64))
+        for request_id, created_at in [('a', 10), ('b', 10), ('c', 9)]:
+            db.execute('''INSERT INTO verification_requests VALUES
+                (?,?,?,'root',?,'[]',?,'runner','user',?,?)''',
+                (request_id, workspace, 'project', 'c'*64, 'd'*64, created_at, created_at+10))
+    backup = tmp_path / 'before-v15.db'
+    result = migrate(path, backup, target_version=15)
+    assert result.applied and result.version == verify(path) == 15
+    assert result.backup_sha256 == verify_backup(backup, expected_version=14)
+    with sqlite3.connect(path) as db:
+        assert db.execute('SELECT version,migration_hash FROM atom_schema_migrations ORDER BY version LIMIT 14').fetchall() == journal
+        sql = '''SELECT id FROM verification_requests
+            WHERE project_id=? ORDER BY created_at DESC, id DESC LIMIT 1'''
+        assert db.execute(sql, ('project',)).fetchone() == ('b',)
+        plan = db.execute('EXPLAIN QUERY PLAN ' + sql, ('project',)).fetchall()
+        assert any('COVERING INDEX verification_requests_project_latest' in row[3] for row in plan)
+        assert not any('TEMP B-TREE' in row[3] for row in plan)
+        assert db.execute('PRAGMA integrity_check').fetchone() == ('ok',)
+        assert db.execute('PRAGMA foreign_key_check').fetchall() == []
+    assert not migrate(path, tmp_path / 'not-created.db', target_version=15).applied
+
+
+def test_v15_ddl_failure_preserves_v14_and_backup(legacy, tmp_path, monkeypatch):
+    from app.migrations import verification_index_v15
+    path, _ = legacy
+    _migrate_to_v14(path, tmp_path)
+    original = verification_index_v15.apply
+
+    def fail(db):
+        original(db)
+        raise sqlite3.OperationalError('injected after index creation')
+
+    monkeypatch.setattr(verification_index_v15, 'apply', fail)
+    backup = tmp_path / 'before-failed-v15.db'
+    with pytest.raises(MigrationError, match='migration_failed'):
+        migrate(path, backup, target_version=15)
+    assert verify(path) == 14
+    assert verify_backup(backup, expected_version=14)
+    with sqlite3.connect(path) as db:
+        assert db.execute("SELECT 1 FROM sqlite_schema WHERE name='verification_requests_project_latest'").fetchone() is None
+        assert db.execute('PRAGMA foreign_key_check').fetchall() == []
+
+
 def test_process_death_during_release_ddl_recovers_v1(legacy, tmp_path):
     path, baseline = legacy
     migrate(path, baseline)

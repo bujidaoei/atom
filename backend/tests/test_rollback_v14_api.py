@@ -351,12 +351,15 @@ def test_verified_v13_current_withdraw_and_publish_regression(http_history, tmp_
 
 
 @pytest.mark.parametrize('real_store', [False, True])
-def test_v14_rollback_withdraw_and_subsequent_publish_http(
-        http_history, tmp_path, monkeypatch, real_store):
+@pytest.mark.parametrize('schema_version', [14, 15])
+def test_verified_rollback_withdraw_and_subsequent_publish_http(
+        http_history, tmp_path, monkeypatch, real_store, schema_version):
     path, fixture_store, intent, source, displaced = http_history
     if real_store and sys.platform != 'linux':
         pytest.skip('ArtifactStore is Linux-only')
     migrate(path, tmp_path / 'before-v14.db', target_version=14)
+    if schema_version == 15:
+        migrate(path, tmp_path / 'before-v15.db', target_version=15)
     root = tmp_path / 'artifacts'
     if real_store:
         root.mkdir(mode=0o700)
@@ -434,12 +437,14 @@ def test_verified_http_routes_reject_untrusted_v10_ledger(legacy, tmp_path, monk
         get_settings.cache_clear()
 
 
-@pytest.mark.parametrize('version', [13, 14])
+@pytest.mark.parametrize('version', [13, 14, 15])
 def test_latest_verification_is_owner_scoped_and_survives_nonready_project(
         http_history, tmp_path, monkeypatch, version):
     path, store, intent, _source, _displaced = http_history
-    if version == 14:
+    if version >= 14:
         migrate(path, tmp_path / 'before-v14-latest.db', target_version=14)
+    if version == 15:
+        migrate(path, tmp_path / 'before-v15-latest.db', target_version=15)
     repository = VerificationRepository(path)
     expected = repository.describe(owner='user', project_id='project', request_id='a' * 32)
     assert repository.latest(owner='user', project_id='project') == expected
