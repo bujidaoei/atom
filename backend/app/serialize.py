@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import timezone
+from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import select
@@ -99,6 +99,16 @@ def project_detail(session: Session, project: Project, *, catalog=None) -> dict[
     return detail
 
 
+def _utc(value: datetime) -> datetime:
+    """Persisted model times are UTC; SQLite returns them without tzinfo.
+
+    Newly committed objects retain their timezone in the identity map. Apply
+    the same time semantics before comparison and JSON serialization in both
+    cases, without interpreting naive stored values as the server's local time.
+    """
+    return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
+
+
 def acceptance_json(session: Session, project_id: str) -> dict[str, Any] | None:
     run = session.scalars(
         select(AcceptanceRun)
@@ -114,14 +124,15 @@ def acceptance_json(session: Session, project_id: str) -> dict[str, Any] | None:
         .order_by(Run.started_at.desc())
         .limit(1)
     )
-    if last_change and run.created_at < last_change:
+    created_at = _utc(run.created_at)
+    if last_change and created_at < _utc(last_change):
         return None  # Preserve historical evidence; never present it for new code.
     return {
         "id": run.id,
         "passed": run.passed,
         "total": run.total,
         "results": json.loads(run.results_json),
-        "createdAt": run.created_at.isoformat(),
+        "createdAt": created_at.isoformat(),
     }
 
 

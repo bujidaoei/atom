@@ -101,9 +101,9 @@ export function ContractTab({
       <div className="mx-auto flex max-w-[720px] flex-col gap-l p-l">
         <div className="flex flex-wrap items-center justify-between gap-m">
           <div>
-            <h2 className="text-md font-medium text-neutral-95">需求与验收条件</h2>
+            <h2 className="text-md font-medium text-neutral-95">需求与功能检查</h2>
             <p className="mt-xxs text-sm text-neutral-60">
-              每条检查都会在预览页面里真实执行，不是 Emma 自己说通过。
+              在预览中操作按钮、填写输入并检查结果，帮助你发现功能问题。
             </p>
           </div>
           <Button
@@ -114,11 +114,11 @@ export function ContractTab({
             title={canRunAcceptance ? "在预览中执行全部检查" : "先构建出可预览的页面"}
           >
             <Icon name="check" size={14} />
-            运行验收
+            检查功能
           </Button>
         </div>
 
-        {acceptanceError ? <ErrorState title="验收失败" message={acceptanceError} compact /> : null}
+        {acceptanceError ? <ErrorState title="检查未完成" message={acceptanceError} compact /> : null}
 
         {acceptance ? (
           <div
@@ -134,8 +134,9 @@ export function ContractTab({
               <span className="text-neutral-40"> / {acceptance.total}</span>
             </p>
             <div className="flex flex-col">
+              {acceptanceError ? <p className="text-xs text-neutral-60">上次已保存的检查结果</p> : null}
               <p className="text-base font-medium text-neutral-95">
-                {acceptance.passed === acceptance.total ? "全部通过" : "有检查没过"}
+                {acceptance.passed === acceptance.total ? "功能检查通过" : "发现功能问题"}
               </p>
               <p className="text-sm text-neutral-60">{formatDateTime(acceptance.createdAt)}</p>
             </div>

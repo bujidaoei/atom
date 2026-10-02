@@ -6,7 +6,7 @@ import { Badge, StatusBadge } from "../components/ui/Badge";
 import { Icon } from "../components/ui/Icon";
 import type { IconName } from "../components/ui/Icon";
 import { ErrorState, LoadingState } from "../components/ui/States";
-import { api, errorMessage, publishedUrl } from "../lib/api";
+import { api, ApiError, errorMessage, publishedUrl } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { agentMeta } from "../lib/agents";
 import { isRunningStatus } from "../lib/format";
@@ -209,7 +209,9 @@ function ProjectWorkspace({ id }: { id: string | undefined }) {
       const data = await api.postAcceptance(id, results);
       setProject((current) => (current ? { ...current, acceptance: data.acceptance } : current));
     } catch (err) {
-      setAcceptanceError(errorMessage(err));
+      setAcceptanceError(err instanceof ApiError && err.status >= 500
+        ? "检查结果暂时无法保存，请稍后重试。这不代表网页功能不合格。"
+        : errorMessage(err));
     } finally {
       setAcceptanceRunning(false);
     }
