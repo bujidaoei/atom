@@ -162,7 +162,7 @@ export type PublicationSnapshot = {
   verificationMode: "advisory" | "required";
   verificationId: string | null;
   bindingId: string;
-  previewUrl: string;
+  previewUrl: string | null;
   isLive: boolean;
   restoredFrom: string | null;
 };

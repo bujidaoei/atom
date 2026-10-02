@@ -11,11 +11,35 @@ export function ReleaseTab({ project }: { project: ProjectDetail }) {
   const [latest, setLatest] = useState<VerificationStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+  const [previewBusy, setPreviewBusy] = useState<string | null>(null);
   const [restore, setRestore] = useState<PublicationSnapshot | null>(null);
   const [refreshIndex, setRefreshIndex] = useState(0);
   const [cursor, setCursor] = useState<string | undefined>();
   const controls = useRef<HTMLDivElement>(null);
   const refresh = useCallback(() => { setCursor(undefined); setRefreshIndex(value => value + 1); }, []);
+
+  async function openSnapshot(item: PublicationSnapshot) {
+    const popup = window.open("about:blank", "_blank");
+    if (!popup) { setPreviewError("浏览器阻止了新窗口，请允许弹出窗口后重试。"); return; }
+    popup.opener = null;
+    popup.document.title = "正在打开版本预览";
+    popup.document.body.textContent = "正在打开版本预览…";
+    setPreviewBusy(item.releaseId);
+    setPreviewError(null);
+    try {
+      const handoff = await api.issueRevisionPreview(project.id, item.revisionId);
+      if (handoff.revisionId !== item.revisionId || !handoff.url.startsWith("https://")) {
+        throw new Error("预览版本暂时无法确认，请重试。");
+      }
+      popup.location.replace(handoff.url);
+    } catch (failure) {
+      popup.close();
+      setPreviewError(`无法打开版本预览：${errorMessage(failure)}`);
+    } finally {
+      setPreviewBusy(null);
+    }
+  }
 
   useEffect(() => {
     const controller = new AbortController();
@@ -63,13 +87,16 @@ export function ReleaseTab({ project }: { project: ProjectDetail }) {
           policy={data.history.publicationPolicy} restore={restore} onCancelRestore={() => setRestore(null)} onRefresh={refresh} /></div>
         <section className="space-y-m" aria-label="发布历史">
           <div><h3 className="font-medium text-neutral-95">发布历史</h3><p className="mt-xs text-sm text-neutral-60">恢复只切换网站内容，不会覆盖你正在编辑的草稿或回退业务数据。</p></div>
+          {previewError ? <p role="alert" className="text-sm text-danger-strong">{previewError}</p> : null}
           {!data.history.items.length ? <p className="rounded-xl border border-dashed border-neutral-20 p-l text-sm text-neutral-60">第一次发布后，快照会出现在这里。</p> :
             <ol className="space-y-s">{data.history.items.map(item => <li key={item.releaseId} className="rounded-xl border border-neutral-12 bg-base-default p-m">
               <div className="flex flex-wrap items-center justify-between gap-m">
                 <div><p className="text-sm font-medium text-neutral-95">版本 {item.version}{item.isLive ? " · 当前版本" : ""}</p><p className="mt-xs text-xs text-neutral-60">{timeLabel(item.createdAt)}</p>
                   <p className="mt-xs text-xs text-neutral-60">{item.restoredFrom ? "从历史版本恢复" : "发布快照"} · {item.audience === "public" ? "公开" : "仅自己可见"}</p></div>
                 <div className="flex items-center gap-m">
-                  <a href={item.previewUrl} target="_blank" rel="noreferrer" className="text-sm text-brand-text hover:underline">预览</a>
+                  {item.previewUrl ? <a href={item.previewUrl} target="_blank" rel="noreferrer" className="text-sm text-brand-text hover:underline">预览</a>
+                    : <Button size="sm" variant="secondary" loading={previewBusy === item.releaseId}
+                        disabled={previewBusy !== null} onClick={() => void openSnapshot(item)}>预览</Button>}
                   {!item.isLive ? <Button size="sm" variant="secondary" onClick={() => { setRestore(item); controls.current?.scrollIntoView({ behavior: "smooth", block: "start" }); }}>恢复此版本</Button> : null}
                 </div>
               </div>

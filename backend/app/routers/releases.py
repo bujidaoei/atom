@@ -13,6 +13,8 @@ from ..bounded_operations import OwnedJSONResponse
 from ..config import get_settings
 from ..console_auth import require_auth_origin, require_console_host
 from ..content_hosts import ContentHosts
+from ..project_origins import ProjectOriginError
+from ..project_site_url import public_project_url
 from ..deps import OwnedProject
 from ..release_repository import ReleaseRepository
 from ..release_history import publication_history
@@ -119,12 +121,24 @@ async def _rollback_command(request: Request):
     return command
 
 
-def _configured(request: Request):
+def _ip_project_url(settings, project_id: str) -> str:
+    try:
+        return public_project_url(settings.db_path, project_id=project_id,
+            address=settings.ip_preview_address,
+            first_port=settings.ip_preview_first_port,
+            last_port=settings.ip_preview_last_port)
+    except ProjectOriginError:
+        _deny(503, '项目网站地址暂不可用')
+
+
+def _configured(request: Request, project_id: str):
     settings = get_settings()
     if (settings.sandbox_mode != 'broker' or settings.session_mode != 'durable'
             or (settings.publication_verification == 'required' and settings.verifier_origin is None)
-            or settings.content_host_suffix is None):
+            or (settings.content_host_suffix is None and not settings.ip_public_enabled)):
         _deny(404, '发布服务暂未就绪')
+    if settings.ip_public_enabled:
+        _ip_project_url(settings, project_id)
     resources = getattr(request.app.state, 'execution', None)
     if resources is None:
         _deny(503, '发布服务暂不可用')
@@ -156,7 +170,7 @@ async def publish_verified_release(project: OwnedProject, request: Request):
     require_auth_origin(request)
     if request.headers.getlist('x-atom-intent') != ['publish-verified-release']:
         _deny(403, '发布意图不明确')
-    settings, store = _configured(request)
+    settings, store = _configured(request, project.id)
     command = await _command(request, settings.publication_verification)
     lifecycle = request.app.state.release_operations
     token = lifecycle.acquire()
@@ -202,7 +216,7 @@ async def publish_verified_release(project: OwnedProject, request: Request):
 
 @router.get('/{project_id}/releases/current')
 async def current_release(project: OwnedProject, request: Request):
-    settings, _store = _configured(request)
+    settings, _store = _configured(request, project.id)
     require_console_host(request)
     if (request.scope.get('query_string')
             or request.headers.getlist('x-atom-intent') != ['inspect-verified-release']
@@ -229,7 +243,15 @@ async def current_release(project: OwnedProject, request: Request):
         if pointer is None:
             result = {'publication':None}
         else:
-            hosts = ContentHosts(settings.content_host_suffix)
+            if settings.ip_public_enabled:
+                public_url = _ip_project_url(settings, project.id)
+                pinned_url = public_url if pointer.live and pointer.audience == 'public' else None
+                sharing_url = pinned_url
+            else:
+                hosts = ContentHosts(settings.content_host_suffix)
+                pinned_url = hosts.url(pointer.binding_id) if pointer.live else None
+                sharing_url = (hosts.sharing_url(pointer.slug)
+                               if pointer.live and pointer.audience == 'public' else None)
             result = {'publication':{
                 'releaseId':pointer.release_id, 'revisionId':pointer.revision_id,
                 'verificationId':pointer.verification_id,
@@ -239,9 +261,7 @@ async def current_release(project: OwnedProject, request: Request):
                 'audience':pointer.audience, 'slug':pointer.slug,
                 'generation':pointer.generation, 'live':pointer.live,
                 'bindingId':pointer.binding_id,
-                'pinnedUrl':hosts.url(pointer.binding_id) if pointer.live else None,
-                'sharingUrl':hosts.sharing_url(pointer.slug)
-                    if pointer.live and pointer.audience == 'public' else None}}
+                'pinnedUrl':pinned_url, 'sharingUrl':sharing_url}}
         response = OwnedJSONResponse(result, lifecycle, token, headers=_HEADERS)
         release = False
         return response
@@ -261,7 +281,7 @@ async def unpublish_verified_release(project: OwnedProject, release_id: str, req
     if (request.headers.getlist('x-atom-intent') != ['unpublish-verified-release']
             or _ID.fullmatch(release_id) is None):
         _deny(403, '撤销意图不明确')
-    settings, _store = _configured(request)
+    settings, _store = _configured(request, project.id)
     command = await _unpublish_command(request)
     lifecycle = request.app.state.release_operations
     token = lifecycle.acquire()
@@ -305,7 +325,7 @@ async def rollback_verified_release(project: OwnedProject, release_id: str, requ
     if (request.headers.getlist('x-atom-intent') != ['rollback-verified-release']
             or _REVISION.fullmatch(release_id) is None):
         _deny(403, '恢复请求缺少必要信息')
-    settings, store = _configured(request)
+    settings, store = _configured(request, project.id)
     command = await _rollback_command(request)
     lifecycle = request.app.state.release_operations
     token = lifecycle.acquire()
@@ -353,7 +373,7 @@ async def rollback_verified_release(project: OwnedProject, release_id: str, requ
 
 @router.get('/{project_id}/releases/history')
 async def release_history(project: OwnedProject, request: Request):
-    settings, _store = _configured(request)
+    settings, _store = _configured(request, project.id)
     require_console_host(request)
     query = request.query_params
     if (request.headers.getlist('x-atom-intent') != ['inspect-verified-release']
@@ -384,9 +404,10 @@ async def release_history(project: OwnedProject, request: Request):
             worker.add_done_callback(lambda done: _finished(done, lifecycle, token))
             raise
         result['publicationPolicy'] = settings.publication_verification
-        hosts = ContentHosts(settings.content_host_suffix)
+        hosts = None if settings.ip_public_enabled else ContentHosts(settings.content_host_suffix)
         for snapshot in result['items']:
-            snapshot['previewUrl'] = hosts.url(snapshot['bindingId']) + '_atom/bootstrap'
+            snapshot['previewUrl'] = (None if hosts is None else
+                hosts.url(snapshot['bindingId']) + '_atom/bootstrap')
         response = OwnedJSONResponse(result, lifecycle, token, headers=_HEADERS)
         release = False
         return response

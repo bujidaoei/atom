@@ -28,6 +28,7 @@ class Settings(ObjectStorageSettings):
     console_origin: str | None = None
     content_host_suffix: str | None = None
     ip_preview_enabled: bool = False
+    ip_public_enabled: bool = False
     ip_preview_address: str | None = None
     ip_preview_first_port: int | None = None
     ip_preview_last_port: int | None = None
@@ -140,6 +141,8 @@ class Settings(ObjectStorageSettings):
                 raise ValueError('invalid ip preview port range')
             if self.console_origin != f'https://{canonical}':
                 raise ValueError('ip preview must use the console IP address')
+        if self.ip_public_enabled and not self.ip_preview_enabled:
+            raise ValueError('ip public delivery requires isolated preview and console proof')
         self.sandbox_mode = self.sandbox_mode or ('broker' if self.environment == 'production' else 'local')
         if self.environment == 'production' and self.sandbox_mode != 'broker':
             raise ValueError('production requires broker execution')
