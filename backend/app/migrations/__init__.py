@@ -159,13 +159,25 @@ def _integrity(db):
         raise MigrationError("invalid_database_integrity")
 
 
-def verify_backup(path: Path, *, expected_version: int = 0) -> str:
+def verify_backup(path: Path, *, expected_version: int = 0, immutable: bool = False) -> str:
     if type(expected_version) is not int or expected_version not in (0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18):
         raise MigrationError("invalid_backup_version")
+    if type(immutable) is not bool:
+        raise MigrationError("invalid_backup_mode")
     db = None
     try:
         path = _path(path, existing=True)
-        db = _open(path, readonly=True)
+        if immutable:
+            # An immutable SQLite connection ignores WAL. Require a completed,
+            # checkpointed backup so the audit cannot silently miss writes.
+            if any(Path(str(path) + suffix).exists() for suffix in ('-wal', '-shm')):
+                raise MigrationError("backup_not_quiesced")
+            db = sqlite3.connect(path.as_uri() + '?mode=ro&immutable=1', uri=True,
+                                 timeout=3, isolation_level=None)
+            db.execute('PRAGMA foreign_keys=ON')
+            db.execute('PRAGMA query_only=ON')
+        else:
+            db = _open(path, readonly=True)
         if _schema(db) != expected_version:
             raise MigrationError("invalid_backup_version")
         _integrity(db)

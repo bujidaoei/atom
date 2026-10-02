@@ -13,10 +13,16 @@ _COUNT_TABLES = ('projects', 'revision_records', 'revision_artifacts',
                  'release_publications')
 
 
+def _static_connection(path: Path) -> sqlite3.Connection:
+    if any(Path(str(path) + suffix).exists() for suffix in ('-wal', '-shm')):
+        raise MigrationError('backup_not_quiesced')
+    return sqlite3.connect(path.as_uri() + '?mode=ro&immutable=1', uri=True,
+                           timeout=3)
+
+
 def _counts(path: Path) -> dict[str, int]:
     try:
-        with closing(sqlite3.connect(path.as_uri() + '?mode=ro', uri=True,
-                                     timeout=3)) as db:
+        with closing(_static_connection(path)) as db:
             db.execute('PRAGMA query_only=ON')
             return {table: db.execute(f'SELECT count(*) FROM {table}').fetchone()[0]
                     for table in _COUNT_TABLES}
@@ -31,18 +37,18 @@ def audit(database: Path, backup_dir: Path) -> dict:
             or database.is_symlink() or backup_dir.is_symlink()
             or not backup_dir.is_dir()):
         raise MigrationError('invalid_migration_audit_path')
-    digest = verify_backup(database, expected_version=18)
+    digest = verify_backup(database, expected_version=18, immutable=True)
     backups = {}
     for target in range(11, 19):
         predecessor = backup_dir / f'before-v{target}.db'
-        backups[target] = verify_backup(predecessor, expected_version=target - 1)
+        backups[target] = verify_backup(predecessor, expected_version=target - 1,
+                                        immutable=True)
     baseline = _counts(backup_dir / 'before-v11.db')
     current = _counts(database)
     if current != baseline:
         raise MigrationError('migration_business_counts_changed')
     try:
-        with closing(sqlite3.connect(database.as_uri() + '?mode=ro', uri=True,
-                                     timeout=3)) as db:
+        with closing(_static_connection(database)) as db:
             db.execute('PRAGMA query_only=ON')
             journal = dict(db.execute('SELECT version,backup_sha256 '
                                       'FROM atom_schema_migrations WHERE version BETWEEN 11 AND 18'))
