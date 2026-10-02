@@ -183,7 +183,8 @@ def test_authenticated_main_routes_reconcile_real_browser_result(adopted, tmp_pa
                     assert before.status_code == 200 and before.json()['state'] == 'reserved'
                     latest_reserved = await client.get(route + '/latest')
                     assert latest_reserved.status_code == 200
-                    assert latest_reserved.json()['verification'] == before.json()
+                    assert latest_reserved.json()['verification'] == {
+                        **before.json(), 'current': True}
                     result = await client.post(route + '/' + key + '/run',
                                                headers=intent_headers)
                     assert result.status_code == 200, result.text
@@ -193,7 +194,8 @@ def test_authenticated_main_routes_reconcile_real_browser_result(adopted, tmp_pa
                     assert settled.status_code == 200 and settled.json() == result.json()
                     latest_passed = await client.get(route + '/latest')
                     assert latest_passed.status_code == 200
-                    assert latest_passed.json()['verification'] == settled.json()
+                    assert latest_passed.json()['verification'] == {
+                        **settled.json(), 'current': True}
                     repeat = await client.post(route + '/' + key + '/run',
                                                headers=intent_headers)
                     assert repeat.status_code == 200 and repeat.json() == result.json()
