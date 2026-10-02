@@ -27,7 +27,7 @@ class AuditRepository:
     def __init__(self, path: Path):
         self.path = Path(path)
         try:
-            if verify(self.path) not in (5,6,7,9,10,11,12,13,14,15):
+            if verify(self.path) not in (5,6,7,9,10,11,12,13,14,15,16):
                 raise AuditReadError('audit_schema_required')
         except MigrationError:
             raise AuditReadError('audit_schema_required') from None
@@ -52,7 +52,7 @@ class AuditRepository:
             db.set_progress_handler(lambda: int(time.monotonic() >= deadline), 1000)
             db.execute('BEGIN')
             version = _schema(db)
-            if version not in (5,6,7,9,10,11,12,13,14,15):
+            if version not in (5,6,7,9,10,11,12,13,14,15,16):
                 raise AuditReadError('audit_schema_required')
             now = int(time.time())
             source = db.execute('SELECT 1 FROM console_sessions WHERE id=? AND user_id=? '
@@ -65,7 +65,7 @@ class AuditRepository:
                 if db.execute('SELECT 1 FROM projects WHERE id=? AND user_id=?',(project_id,user_id)).fetchone() is None:
                     raise AuditReadError('audit_access_denied')
                 scope_kind, scope_id = 'project', project_id
-            if version in (11,12,13,14,15):
+            if version in (11,12,13,14,15,16):
                 return self._archived_page(db, scope_kind, scope_id, after, upper, limit)
             if upper is None:
                 upper = db.execute('SELECT coalesce(max(sequence),0) FROM security_audit_events '

@@ -73,6 +73,7 @@ def _configured_api(path, active_store, intent, tmp_path, monkeypatch):
         'ATOM_DATA_DIR':str(tmp_path / 'data'), 'ATOM_DB_PATH':str(path),
         'ATOM_ARTIFACT_DIR':str(root),
         'ATOM_CONTENT_HOST_SUFFIX':'apps.example.net',
+        'ATOM_PUBLICATION_VERIFICATION':'required',
         'ATOM_VERIFIER_ORIGIN':'http://127.0.0.1:3',
         'ATOM_VERIFIER_CONTROL_TOKEN':secrets.token_urlsafe(48),
         'ATOM_VERIFIER_POLICY_DIGEST':intent['policy_digest'],

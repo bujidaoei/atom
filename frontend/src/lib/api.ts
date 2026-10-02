@@ -11,6 +11,7 @@ import type {
   Usage,
   User,
   VerifiedPublication,
+  PublicationHistory,
   VerificationStatus,
 } from "./types";
 
@@ -55,7 +56,7 @@ type RequestOptions = {
   silent401?: boolean;
   accept?: string;
   commandKey?: string;
-  intent?: "inspect-private-content" | "open-private-content" | "revoke-account-sessions" | "inspect-verified-release" | "publish-verified-release" | "unpublish-verified-release";
+  intent?: "inspect-private-content" | "open-private-content" | "revoke-account-sessions" | "inspect-verified-release" | "publish-verified-release" | "unpublish-verified-release" | "rollback-verified-release";
   signal?: AbortSignal;
 };
 
@@ -172,6 +173,9 @@ export const api = {
   currentVerifiedRelease: (id: string, signal?: AbortSignal) =>
     request<{ publication: VerifiedPublication | null }>(`/api/projects/${id}/releases/current`,
       { intent: "inspect-verified-release", signal }),
+  publicationHistory: (id: string, cursor?: string, signal?: AbortSignal) =>
+    request<PublicationHistory>(`/api/projects/${id}/releases/history${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`,
+      { intent: "inspect-verified-release", signal }),
   getVerification: (id: string, requestId: string, signal?: AbortSignal) =>
     request<VerificationStatus>(`/api/projects/${id}/verifications/${requestId}`, { signal }),
   latestVerification: (id: string, signal?: AbortSignal) =>
@@ -183,7 +187,7 @@ export const api = {
     request<VerificationStatus>(`/api/projects/${id}/verifications/${requestId}/run`,
       { method: "POST" }),
   publishVerifiedRelease: (id: string, command: {
-    releaseId: string; verificationId: string; expectedRevision: string;
+    releaseId: string; verificationId?: string; expectedRevision: string;
     expectedGeneration: number; audience: "owner" | "public"; slug: string;
   }) => request<{ releaseId: string; revisionId: string; generation: number; slug: string }>(
     `/api/projects/${id}/releases`,
@@ -193,6 +197,12 @@ export const api = {
   }) => request<{ commandId: string; releaseId: string; generation: number }>(
     `/api/projects/${id}/releases/${releaseId}/unpublish`,
     { method: "POST", body: command, intent: "unpublish-verified-release" }),
+  restorePublication: (id: string, releaseId: string, command: {
+    commandId: string; newReleaseId: string; sourceReleaseId: string;
+    expectedRevision: string; expectedGeneration: number;
+  }) => request<{ releaseId: string; generation: number }>(
+    `/api/projects/${id}/releases/${releaseId}/rollback`,
+    { method: "POST", body: command, intent: "rollback-verified-release" }),
 
   // ---- acceptance
   postAcceptance: (id: string, results: AcceptanceResult[]) =>

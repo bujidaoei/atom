@@ -16,7 +16,8 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from starlette.requests import ClientDisconnect
 
-from .artifacts import ArtifactError, ArtifactStore
+from .artifacts import ArtifactError, configured_artifact_store
+from .storage_config import ObjectStorageSettings
 from .bounded_operations import BoundedOperations, OwnedJSONResponse
 from .migrations import MigrationError, verify
 from .sandbox.daemon_lease import DaemonLeaseError
@@ -43,6 +44,7 @@ class VerifierProcessConfig:
     seccomp: Path
     verifier_id: str
     control_token: str = field(repr=False)
+    storage: ObjectStorageSettings = field(default_factory=lambda: ObjectStorageSettings(_env_file=None), repr=False)
 
     def __post_init__(self):
         if (not all(isinstance(path, Path) and path.is_absolute()
@@ -95,9 +97,9 @@ def create_app(config: VerifierProcessConfig | None = None) -> FastAPI:
     if type(config) is not VerifierProcessConfig:
         raise VerifierStartupError('verifier_configuration_invalid')
     try:
-        if verify(config.database) not in (13, 14, 15):
+        if verify(config.database) not in (13, 14, 15, 16):
             raise VerifierStartupError('verifier_schema_required')
-        store = ArtifactStore(config.artifacts)
+        store = configured_artifact_store(config.storage, config.artifacts)
         authority = VerifierAuthority(config.database)
         supervisor = VerifierSupervisor(image=config.image, seccomp_path=config.seccomp,
                                         verifier_id=config.verifier_id)
@@ -125,7 +127,7 @@ def create_app(config: VerifierProcessConfig | None = None) -> FastAPI:
     async def health():
         try:
             await asyncio.to_thread(coordinator._require_lease)
-            if verify(config.database) not in (13, 14, 15):
+            if verify(config.database) not in (13, 14, 15, 16):
                 raise VerifierStartupError('verifier_schema_required')
         except (SupervisorError, MigrationError, VerifierStartupError):
             return _error('verifier_unavailable', 503)

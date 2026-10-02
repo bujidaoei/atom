@@ -1,4 +1,4 @@
-"""Built release workbench against real owner-scoped routes and a v15 ledger.
+"""Built snapshot UI against real owner-scoped routes and a v16 ledger.
 
 The browser's test-only HTTPS origin is forwarded to isolated loopback Uvicorn.
 This deliberately tests the UI/API composition, not deployment TLS or ingress.
@@ -17,7 +17,7 @@ import time
 
 from fastapi import FastAPI
 from fastapi.responses import FileResponse
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import sync_playwright, expect
 import pytest
 import uvicorn
 
@@ -86,240 +86,199 @@ def _static(app, dist):
     pytest.param({'width': 1280, 'height': 800}, id='desktop'),
     pytest.param({'width': 390, 'height': 844}, id='mobile'),
 ])
-def test_release_workbench_real_routes_and_ledger(
+def test_snapshot_publish_restore_withdraw_and_lost_response(
         http_history, tmp_path, monkeypatch, viewport, built_dist):
-    path, store, intent, _source, displaced = http_history
-    migrate(path, tmp_path / 'before-browser-v14.db', target_version=14)
-    migrate(path, tmp_path / 'before-browser-v15.db', target_version=15)
+    from test_adoption_repository import snapshot
+    from app.release_view import materialized_release
+    from app.bounded_operations import BoundedOperations
+    from app.content_access import ContentAccessRepository
+    from app.content_bootstrap import ContentNavigation
+    from app.content_hosts import ContentHosts
+    from app.content_repository import ContentRepository
+    from app.content_service import ContentService
+    from app.routers import content_access
+    from urllib.parse import urlsplit
+    from integration.test_release_stream_browser import _certificate, _serve_https
+    path, original_store, intent, source, displaced = http_history
+    for version in (14, 15, 16):
+        migrate(path, tmp_path / f'before-browser-{version}.db', target_version=version)
+    # Storage transport is a fixture; all bytes, registration, API transactions and browser interactions are real.
+    payload, artifact = snapshot(b'<html><body>Second published version</body></html>')
+    payloads = {original_store.key: original_store.payload, artifact.key: payload}
+    store = SimpleNamespace(read=lambda key: payloads[key])
     app, token, engine = _configured_api(path, store, intent, tmp_path, monkeypatch)
+    monkeypatch.setenv('ATOM_PUBLICATION_VERIFICATION', 'advisory')
+    verifier_values = {name: os.environ[name] for name in ('ATOM_VERIFIER_ORIGIN', 'ATOM_VERIFIER_CONTROL_TOKEN', 'ATOM_VERIFIER_POLICY_DIGEST', 'ATOM_VERIFIER_RUNNER_VERSION')}
+    for name in verifier_values:
+        monkeypatch.delenv(name)
+    get_settings.cache_clear()
     app.state.execution = SimpleNamespace(store=store, repository=RevisionRepository(path))
-    app.state.verifier_client = object()
+    app.state.verifier_client = None
     app.include_router(auth.router, prefix='/api')
     app.include_router(projects.router, prefix='/api')
     app.include_router(verifications.router, prefix='/api')
+    app.include_router(content_access.router, prefix='/api')
+    app.state.content_issuer = BoundedOperations(capacity=2)
     _static(app, built_dist)
     outer = FastAPI()
     outer.mount('/atom', app)
     server, thread, port = _serve(outer)
-    failures = []
-    responses = []
+    content_app = ContentService(ContentRepository(path), store, ContentHosts('apps.example.net'),
+        access=ContentAccessRepository(path), navigation=ContentNavigation(ORIGIN, '/atom'))
+    content_responses = []
+    async def observed_content(scope, receive, send):
+        if scope['type'] == 'http':
+            headers = dict(scope['headers'])
+            if headers.get(b'host') == b'console.example.org':
+                await outer(scope, receive, send)
+                return
+            assert b'__Host-atom_console' not in headers.get(b'cookie', b'')
+            async def observed_send(message):
+                if message['type'] == 'http.response.start':
+                    content_responses.append((message['status'], scope['path']))
+                await send(message)
+            await content_app(scope, receive, observed_send)
+        else:
+            await content_app(scope, receive, send)
+    key, cert = _certificate(tmp_path)
+    content_server, content_thread, content_listener, _ = _serve_https(observed_content, key, cert)
+    failures, responses = [], []
+    drop = [False]
     try:
         with sync_playwright() as playwright:
-            browser = playwright.chromium.launch()
-            context = browser.new_context(viewport=viewport, service_workers='block')
-            context.add_cookies([{'name': '__Host-atom_console', 'value': token,
-                'url': ORIGIN, 'secure': True, 'httpOnly': True, 'sameSite': 'Lax'}])
-
+            browser = playwright.chromium.launch(args=['--host-resolver-rules=MAP *.apps.example.net 127.0.0.1, MAP console.example.org 127.0.0.1', '--no-proxy-server'])
+            context = browser.new_context(viewport=viewport, service_workers='block', ignore_https_errors=True)
+            context.add_cookies([{'name':'__Host-atom_console', 'value':token,
+                'url':ORIGIN, 'secure':True, 'httpOnly':True, 'sameSite':'Lax'}])
             def bridge(route):
                 request = route.request
-                assert request.url.startswith(ORIGIN + '/atom/')
                 if '/events?' in request.url:
                     route.abort('blockedbyclient')
                     return
-                headers = request.headers | {'host': 'console.example.org',
-                    'x-forwarded-proto': 'https', 'accept-encoding': 'identity'}
-                response = route.fetch(url=f'http://127.0.0.1:{port}' + request.url[len(ORIGIN):],
-                    headers=headers, timeout=10000)
-                route.fulfill(status=response.status,
-                    headers={key: value for key, value in response.headers.items()
-                        if key.lower() not in ('content-encoding', 'content-length', 'transfer-encoding')},
-                    body=response.body())
-
-            context.route('https://console.example.org/atom/**', bridge)
+                headers = request.headers | {'host':'console.example.org', 'x-forwarded-proto':'https', 'accept-encoding':'identity'}
+                response = route.fetch(url=f'http://127.0.0.1:{port}' + request.url[len(ORIGIN):], headers=headers, timeout=10000)
+                if drop[0] and request.method == 'POST' and request.url.endswith('/unpublish'):
+                    drop[0] = False
+                    assert response.status == 200
+                    route.abort('failed')
+                    return
+                route.fulfill(status=response.status, headers={key:value for key,value in response.headers.items()
+                    if key.lower() not in ('content-encoding','content-length','transfer-encoding')}, body=response.body())
+            context.route(ORIGIN + '/atom/**', bridge)
             page = context.new_page()
             page.on('pageerror', lambda error: failures.append(str(error)))
-            page.on('response', lambda response: responses.append((response.status, response.url)))
-            page.goto(ORIGIN + '/atom/app/p/project', wait_until='domcontentloaded')
-            page.get_by_role('tab', name='发布', exact=True).click()
-            panel = page.get_by_label('发布工作台')
-            panel.get_by_text('最近一次可信验证').wait_for()
-            bounds = panel.bounding_box()
-            assert bounds is not None and bounds['y'] < viewport['height'] / 2
+            page.on('response', lambda response: responses.append((response.status,response.url)))
+            def open_release():
+                page.goto(ORIGIN + '/atom/app/p/project', wait_until='domcontentloaded')
+                page.get_by_role('tab', name='发布', exact=True).click()
+                panel = page.get_by_label('发布与历史', exact=True)
+                panel.get_by_role('heading', name='当前已发布', exact=True).wait_for()
+                return panel
+            panel = open_release()
+            assert panel.get_by_role('button', name='发布更新', exact=True).is_enabled()
+            assert not any('/verifications/' in url for _,url in responses)
+            assert panel.get_by_text(displaced.release_id, exact=True).count() == 0
+            assert panel.get_by_label('发布历史').get_by_role('listitem').count() == 2
             assert page.get_by_label('对话').is_hidden() == (viewport['width'] < 768)
-            panel.get_by_role('heading', name='线上版本', exact=True).wait_for()
-            panel.get_by_text('passed', exact=False).first.wait_for()
-            assert panel.get_by_text('passed', exact=False).count() >= 1
-            assert panel.get_by_text(displaced.release_id, exact=True).count() == 1
-            assert panel.get_by_text('暂无已登记的发布指针').count() == 0
-            for suffix in ('/api/auth/me', '/api/projects/project',
-                           '/api/projects/project/releases/current',
-                           '/api/projects/project/verifications/latest'):
-                assert (200, ORIGIN + '/atom' + suffix) in responses, suffix
-            page.reload(wait_until='domcontentloaded')
-            page.get_by_role('tab', name='发布', exact=True).click()
-            page.get_by_label('发布工作台').get_by_text(displaced.release_id, exact=True).wait_for()
-
-            app.state.verifier_client = None
-            panel.get_by_role('button', name='刷新状态').click()
-            panel.get_by_text('验证状态无法确认：', exact=False).wait_for()
-            assert panel.get_by_text('当前项目没有验证记录').count() == 0
-            assert panel.get_by_label('可信发布操作').count() == 0
-            app.state.verifier_client = object()
-
-            live_execution = app.state.execution
-            app.state.execution = None
-            panel.get_by_role('button', name='刷新状态').click()
-            panel.get_by_text('发布状态无法确认：', exact=False).wait_for()
-            assert panel.get_by_text('暂无已登记的发布指针').count() == 0
-            assert panel.get_by_label('可信发布操作').count() == 0
-            app.state.execution = live_execution
-
-            verifier_keys = ('ATOM_VERIFIER_ORIGIN', 'ATOM_VERIFIER_CONTROL_TOKEN',
-                'ATOM_VERIFIER_POLICY_DIGEST', 'ATOM_VERIFIER_RUNNER_VERSION')
-            verifier_settings = {key: os.environ[key] for key in verifier_keys}
-            for key in verifier_keys:
-                monkeypatch.delenv(key)
-            get_settings.cache_clear()
-            panel.get_by_role('button', name='刷新状态').click()
-            panel.get_by_text('可信验证服务尚未启用。').wait_for()
-            panel.get_by_text('可信发布尚未启用').wait_for()
-            assert panel.get_by_label('可信发布操作').count() == 0
-            for key, value in verifier_settings.items():
-                monkeypatch.setenv(key, value)
-            get_settings.cache_clear()
-
+            # Register distinct new draft bytes through the revision repository.
             with sqlite3.connect(path) as db:
                 db.execute("UPDATE projects SET active_run_id='run' WHERE id='project'")
             revisions = RevisionRepository(path)
             workspace = revisions.find_workspace('user', 'project', None)
-            current = revisions.current_revision('user', workspace)
-            revisions.reserve('user', workspace, 'run', 'browser-new-revision',
-                'browser-grant', int(time.time()) + 120)
+            revisions.reserve('user', workspace, 'run', 'browser-new-revision', 'browser-grant', int(time.time()) + 120)
             revisions.bind('user', 'browser-new-revision', 'browser-container')
-            newer = revisions.register('user', 'browser-new-revision', 'browser-container',
-                'browser-grant', current.artifact)
-            assert newer.revision_id != displaced.revision_id
+            newer = revisions.register('user', 'browser-new-revision', 'browser-container', 'browser-grant', artifact)
+            revisions.observe_termination('user', 'browser-new-revision', confirmed=True, outcome='succeeded')
+            with sqlite3.connect(path) as db:
+                db.execute("UPDATE projects SET active_run_id=NULL,status='ready' WHERE id='project'")
+            panel = open_release()
+            panel.get_by_text('你有尚未发布的编辑。', exact=False).wait_for()
+            # Explicit strict policy still blocks the new unverified revision.
+            for name, value in verifier_values.items():
+                monkeypatch.setenv(name, value)
+            monkeypatch.setenv('ATOM_PUBLICATION_VERIFICATION', 'required')
+            get_settings.cache_clear()
+            app.state.verifier_client = object()
+            panel.get_by_role('button', name='刷新', exact=True).click()
+            panel.get_by_text('此项目启用了发布前检查', exact=False).wait_for()
+            assert panel.get_by_role('button', name='发布更新', exact=True).is_disabled()
+            app.state.verifier_client = None
+            panel.get_by_role('button', name='刷新', exact=True).click()
+            panel.get_by_text('暂时无法读取发布状态：', exact=False).wait_for()
+            assert panel.get_by_label('发布操作').count() == 0
+            monkeypatch.setenv('ATOM_PUBLICATION_VERIFICATION', 'advisory')
+            for name in verifier_values:
+                monkeypatch.delenv(name)
+            get_settings.cache_clear()
+            panel.get_by_role('button', name='刷新', exact=True).click()
+            panel.get_by_text('功能检查可按需运行', exact=False).wait_for()
+            panel.get_by_role('button', name='发布更新', exact=True).click()
+            panel.get_by_text('当前编辑与已发布版本一致。', exact=False).wait_for()
+            repository = ReleaseRepository(path)
+            current = repository.current(owner='user', project_id='project')
+            assert current.revision_id == newer.revision_id and current.verification_id is None
+            with materialized_release(repository, store, slug=intent['slug']) as view:
+                assert (view.path / 'index.html').read_bytes() == b'<html><body>Second published version</body></html>'
+            anonymous = browser.new_context(ignore_https_errors=True, service_workers='block')
+            public_page = anonymous.new_page()
+            public_url = ContentHosts('apps.example.net').url(current.binding_id)
+            assert public_page.goto(public_url).status == 200
+            public_page.get_by_text('Second published version', exact=True).wait_for()
+            assert public_page.evaluate("localStorage.setItem('preview-check','ok'); localStorage.getItem('preview-check')") == 'ok'
+            assert not any(cookie['name'] == '__Host-atom_console' for cookie in anonymous.cookies())
+            panel.get_by_role('button', name='恢复此版本').first.click()
+            panel.get_by_role('button', name='确认恢复', exact=True).click()
+            panel.get_by_text('你有尚未发布的编辑。', exact=False).wait_for()
+            restored = repository.current(owner='user', project_id='project')
+            assert restored.revision_id == displaced.revision_id
+            assert revisions.current_revision('user', workspace).revision_id == newer.revision_id
+            with materialized_release(repository, store, slug=intent['slug']) as view:
+                assert (view.path / 'index.html').read_bytes() == b'<html>heat</html>'
+            drop[0] = True
+            panel.get_by_role('button', name='停止发布', exact=True).click()
+            panel.get_by_role('button', name='确认停止发布', exact=True).click()
+            panel.get_by_text('结果暂时无法确认：', exact=False).wait_for()
+            assert repository.current(owner='user', project_id='project').live is False
+            generation = repository.current(owner='user', project_id='project').generation
             page.reload(wait_until='domcontentloaded')
             page.get_by_role('tab', name='发布', exact=True).click()
-            panel = page.get_by_label('发布工作台')
-            panel.get_by_text('当前修订与线上版本不同。', exact=False).wait_for()
-            panel.get_by_text('该验证属于旧修订', exact=False).wait_for()
-            assert panel.get_by_text(displaced.release_id, exact=True).count() == 1
+            panel.get_by_role('button', name='重试本次操作', exact=True).click()
+            panel.get_by_role('heading', name='网站已停止发布', exact=True).wait_for()
+            assert repository.current(owner='user', project_id='project').generation == generation
+            assert public_page.goto(public_url).status == 404
+            anonymous.close()
+            expect(panel.get_by_label('发布历史').get_by_role('listitem')).to_have_count(4)
+            assert all(link.get_attribute('href').endswith('/_atom/bootstrap') for link in panel.get_by_role('link', name='预览', exact=True).all())
+            with context.expect_page() as opened:
+                panel.get_by_role('link', name='预览', exact=True).first.click()
+            preview = opened.value
+            try:
+                preview.get_by_role('button', name='确认并打开', exact=True).click(timeout=10000)
+            except Exception:
+                pytest.fail(f'Preview navigation failed: {urlsplit(preview.url).path}; '
+                            f'{content_responses}; {preview.locator("body").inner_text()[:700]}')
+            preview.wait_for_url(re.compile(r'https://r-[0-9a-f]{32}\.apps\.example\.net/'))
+            preview.get_by_text('heat', exact=True).wait_for()
+            assert preview.evaluate('document.cookie') == ''
+            preview.close()
+            # A read failure must not look like an empty publication, or expose actions.
+            live_execution = app.state.execution
+            app.state.execution = None
+            panel.get_by_role('button', name='刷新', exact=True).click()
+            panel.get_by_text('暂时无法读取发布状态：', exact=False).wait_for()
+            assert panel.get_by_label('发布操作').count() == 0
+            app.state.execution = live_execution
+            panel.get_by_role('button', name='刷新', exact=True).click()
+            panel.get_by_role('heading', name='网站已停止发布', exact=True).wait_for()
             assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
             assert not failures, failures
-            page.screenshot(path=str(tmp_path / f'workbench-{viewport["width"]}.png'), full_page=True)
+            page.screenshot(path=str(tmp_path / f'snapshots-{viewport["width"]}.png'), full_page=True)
             context.close()
             browser.close()
     finally:
-        server.should_exit = True
-        thread.join(timeout=5)
-        engine.dispose()
-        get_settings.cache_clear()
-
-
-@pytest.mark.parametrize('viewport', [
-    pytest.param({'width': 1280, 'height': 800}, id='desktop'),
-    pytest.param({'width': 390, 'height': 844}, id='mobile'),
-])
-def test_release_workbench_real_withdraw_publish_and_lost_response(
-        http_history, tmp_path, monkeypatch, viewport, built_dist):
-    path, store, intent, _source, displaced = http_history
-    migrate(path, tmp_path / 'before-control-v14.db', target_version=14)
-    migrate(path, tmp_path / 'before-control-v15.db', target_version=15)
-    app, token, engine = _configured_api(path, store, intent, tmp_path, monkeypatch)
-    app.state.execution = SimpleNamespace(store=store, repository=RevisionRepository(path))
-    app.state.verifier_client = object()
-    app.include_router(auth.router, prefix='/api')
-    app.include_router(projects.router, prefix='/api')
-    app.include_router(verifications.router, prefix='/api')
-    _static(app, built_dist)
-    outer = FastAPI()
-    outer.mount('/atom', app)
-    server, thread, port = _serve(outer)
-    failures = []
-    dropped = [False]
-    try:
-        with sync_playwright() as playwright:
-            browser = playwright.chromium.launch()
-            context = browser.new_context(viewport=viewport, service_workers='block')
-            context.add_cookies([{'name': '__Host-atom_console', 'value': token,
-                'url': ORIGIN, 'secure': True, 'httpOnly': True, 'sameSite': 'Lax'}])
-
-            def bridge(route):
-                request = route.request
-                if '/events?' in request.url:
-                    route.abort('blockedbyclient')
-                    return
-                headers = request.headers | {'host': 'console.example.org',
-                    'x-forwarded-proto': 'https', 'accept-encoding': 'identity'}
-                response = route.fetch(url=f'http://127.0.0.1:{port}' + request.url[len(ORIGIN):],
-                    headers=headers, timeout=10000)
-                if dropped[0] and request.method == 'POST' and request.url.endswith('/unpublish'):
-                    dropped[0] = False
-                    assert response.status == 200
-                    route.abort('failed')
-                    return
-                route.fulfill(status=response.status,
-                    headers={key: value for key, value in response.headers.items()
-                        if key.lower() not in ('content-encoding', 'content-length', 'transfer-encoding')},
-                    body=response.body())
-
-            context.route('https://console.example.org/atom/**', bridge)
-            page = context.new_page()
-            page.on('pageerror', lambda error: failures.append(str(error)))
-            page.goto(ORIGIN + '/atom/app/p/project', wait_until='domcontentloaded')
-            page.get_by_role('tab', name='发布', exact=True).click()
-            panel = page.get_by_label('发布工作台')
-            controls = panel.get_by_label('可信发布操作')
-            controls.get_by_text('当前修订已有完整通过的可信验证。').wait_for()
-            controls.get_by_role('button', name='更新可信发布').is_disabled()
-
-            controls.get_by_role('checkbox').last.check()
-            controls.get_by_role('button', name='撤回线上版本').click()
-            panel.get_by_role('heading', name='已撤回的版本').wait_for()
-            assert ReleaseRepository(path).current(owner='user', project_id='project').live is False
-
-            controls = panel.get_by_label('可信发布操作')
-            controls.get_by_role('combobox', name='发布受众').select_option('public')
-            assert controls.get_by_role('textbox', name='发布短链接').input_value() == 'trusted-site'
-            assert controls.get_by_role('textbox', name='发布短链接').is_disabled()
-            controls.get_by_role('checkbox').first.check()
-            controls.get_by_role('button', name='发布经验证版本').click()
-            panel.get_by_role('heading', name='线上版本', exact=True).wait_for()
-            panel.get_by_role('link', name=re.compile('公开分享地址')).wait_for()
-            current = ReleaseRepository(path).current(owner='user', project_id='project')
-            assert current is not None and current.live and current.generation == displaced.generation + 2
-            assert current.audience == 'public' and current.slug == 'trusted-site'
-            assert current.release_id != displaced.release_id
-
-            page.reload(wait_until='domcontentloaded')
-            page.get_by_role('tab', name='发布', exact=True).click()
-            panel = page.get_by_label('发布工作台')
-            panel.get_by_text(current.release_id, exact=True).wait_for()
-            controls = panel.get_by_label('可信发布操作')
-            dropped[0] = True
-            controls.get_by_role('checkbox').last.check()
-            controls.get_by_role('button', name='撤回线上版本').click()
-            controls.get_by_text('命令尚未确认', exact=False).wait_for()
-            deadline = time.monotonic() + 5
-            while ReleaseRepository(path).current(owner='user', project_id='project').live:
-                assert time.monotonic() < deadline, 'withdrawal did not commit before response loss'
-                time.sleep(0.02)
-            assert ReleaseRepository(path).current(owner='user', project_id='project').live is False
-            controls.get_by_role('button', name='查询账本').click()
-            panel.get_by_role('heading', name='已撤回的版本').wait_for()
-            assert panel.get_by_role('button', name='查询账本').count() == 0
-
-            controls.get_by_role('button', name='预约当前修订验证').click()
-            controls.get_by_role('button', name='执行已预约验证').wait_for()
-            reserved = VerificationRepository(path).latest(owner='user', project_id='project')
-            assert reserved is not None and reserved.result is None and not reserved.dispatched
-            page.reload(wait_until='domcontentloaded')
-            page.get_by_role('tab', name='发布', exact=True).click()
-            controls = page.get_by_label('可信发布操作')
-            controls.get_by_role('button', name='执行已预约验证').wait_for()
-            page.evaluate("sessionStorage.setItem('atom.release.pending.project', '{broken')")
-            page.reload(wait_until='domcontentloaded')
-            page.get_by_role('tab', name='发布', exact=True).click()
-            controls = page.get_by_label('可信发布操作')
-            controls.get_by_text('操作已锁定', exact=False).wait_for()
-            assert controls.get_by_role('button', name='执行已预约验证').is_disabled()
-            assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
-            assert not failures, failures
-            page.screenshot(path=str(tmp_path / f'control-{viewport["width"]}.png'), full_page=True)
-            context.close()
-            browser.close()
-    finally:
+        content_server.should_exit = True
+        content_thread.join(timeout=5)
+        content_listener.close()
         server.should_exit = True
         thread.join(timeout=5)
         engine.dispose()

@@ -49,7 +49,7 @@ def test_legacy_owner_reads_disabled_release_without_origin_error(legacy, tmp_pa
         owner = {'Cookie': 'atom_session=' + issue_session('user')}
         anonymous = TestClient(app, base_url='https://159.75.231.98')
         for suffix, detail in (
-            ('releases/current', '可信发布尚未启用'),
+            ('releases/current', '发布服务暂未就绪'),
             ('verifications/latest', '验证服务尚未启用'),
         ):
             route = '/api/projects/project/' + suffix

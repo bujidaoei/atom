@@ -36,7 +36,7 @@ class AuditGovernanceRepository:
     def __init__(self, path):
         self.path = Path(path)
         try:
-            if verify(self.path) not in (7,9,10,13,14,15):
+            if verify(self.path) not in (7,9,10,13,14,15,16):
                 raise AuditGovernanceError('audit_governance_schema_required')
         except MigrationError:
             raise AuditGovernanceError('audit_governance_schema_required') from None
@@ -52,7 +52,7 @@ class AuditGovernanceRepository:
             deadline = time.monotonic()+5
             db.set_progress_handler(lambda: int(time.monotonic() >= deadline), 1000)
             db.execute('BEGIN' if read_only else 'BEGIN IMMEDIATE')
-            if _schema(db) not in (7,9,10,13,14,15):
+            if _schema(db) not in (7,9,10,13,14,15,16):
                 raise AuditGovernanceError('audit_governance_schema_required')
             db.row_factory = sqlite3.Row
             yield db

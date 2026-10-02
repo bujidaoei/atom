@@ -10,7 +10,10 @@ from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-class Settings(BaseSettings):
+from .storage_config import ObjectStorageSettings
+
+
+class Settings(ObjectStorageSettings):
     """Process configuration. Every key is overridable via an ``ATOM_`` env var."""
 
     model_config = SettingsConfigDict(
@@ -23,6 +26,7 @@ class Settings(BaseSettings):
     session_mode: Literal["legacy", "durable"] = "legacy"
     console_origin: str | None = None
     content_host_suffix: str | None = None
+    publication_verification: Literal['advisory', 'required'] = 'advisory'
     cookie_secure: bool = False
     cookie_path: str = "/"
     session_days: int = Field(default=14, ge=1, le=90)
@@ -33,7 +37,6 @@ class Settings(BaseSettings):
     # --- storage --------------------------------------------------------
     data_dir: Path = Path("./data")
     db_path: Path = Path("./data/atom.db")
-
     # --- model gateway --------------------------------------------------
     llm_base_url: str = "https://ai-gateway.skg.com/v1"
     llm_api_key: str = Field(default="", repr=False)

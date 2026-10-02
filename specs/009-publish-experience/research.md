@@ -1,0 +1,31 @@
+# Research: publication and checks
+Reviewed 2026-10-02; official documentation research delegated per speckit-plan Phase 0. No competitor authenticated deployment was performed.
+
+## Observed defect
+Target application log: POST /api/projects/<id>/acceptance HTTP500, serialize.py:117, TypeError: cannot compare offset-naive and offset-aware datetimes. SQLAlchemy sessions retain committed objects; SQLite reloads UTC timestamps without tzinfo. Comparing a newly inserted aware check time with a reloaded naive generation time fails. Fix timestamp semantics explicitly and cover fresh/loaded objects, stale results and API save/reload.
+
+## Official product evidence
+- Atoms: Publish/Update separates edits from published content; Publish Anyway exists. https://help.atoms.dev/en/articles/12129577-publish-your-project
+- Lovable: background security scanning; findings do not block publication by default; organizations can require critical issues resolved. https://docs.lovable.dev/features/publish
+- Bolt: built-in Publish/Update; history preview and restore do not restore external database state. https://support.bolt.new/cloud/hosting/publish and https://support.bolt.new/building/using-bolt/rollback-backup
+- Replit: publication snapshots files/dependencies and runs separately from development. https://docs.replit.com/learn/projects-and-artifacts/replit-deployments
+- v0: deployment progress, build logs and contextual repair actions. https://v0.app/docs/deployments
+- Vercel: optional checks and retained-deployment rollback. https://vercel.com/docs/deployment-checks and https://vercel.com/docs/instant-rollback
+The requested Atoms my-projects URL was inaccessible to the research tool; no claim of inspecting its authenticated UI.
+
+## Decisions and alternatives
+1. Default functional checks are advisory. Reject the current universal passing-evidence gate for ordinary publication; preserve explicit strict enterprise policy.
+2. Reuse immutable artifact/revision and publication infrastructure. Do not re-enable mutable-workspace copying or manufacture verification reports.
+3. Main interface is current online version plus chronological published snapshots, preview and restore. Keep draft unchanged on live restoration. Diagnostic IDs are disclosure-only.
+4. Distinctive product value: explain each publication through content/version, check state and recoverability without forcing internal machinery onto the creator. Not a claim of novelty over all competitors.
+5. Normalize existing UTC timestamps at serialization boundaries; do not migrate stored timestamp values for the check defect.
+6. Public content requires an independently configured site and real ingress acceptance. Production currently has only IP console ingress; domain availability is requested while independent implementation proceeds. Do not improvise a shared-cookie publication origin.
+
+## Existing architecture constraints
+Production remains schema10, legacy sessions; verified publication requires later schema, durable sessions, content host and verifier. Existing release schema requires non-null verification and a passing-evidence trigger. Therefore direct publication needs a deliberate versioned policy/schema change, not removing a frontend disabled attribute. Existing original-checkout release history work remains untouched.
+
+## COS storage amendment (2026-10-02)
+User selected an existing Tencent COS bucket and requested private .env configuration. Store release records in the mounted server database and immutable snapshot bytes in an Atom-specific child prefix under the supplied prefix. Never make the shared bucket public or expose credentials to generated pages. Public URL is unset; object storage alone is not website ingress. Official default-domain preview restriction: https://cloud.tencent.com/document/api/436/9512 . Bucket age and website configuration are not yet verified. A bounded verified storage adapter and actual COS round-trip/failure evidence are required before completion.
+# IP-only publishing constraint (2026-10-02)
+
+The owner has no domain and requests use of the server IP. Official references: [Let's Encrypt IP certificates](https://letsencrypt.org/2026/01/15/6day-and-ip-general-availability) are generally available but require automated six-day renewal; [MDN same-origin policy](https://developer.mozilla.org/en-US/docs/Web/Security/Defenses/Same-origin_policy) isolates different ports for scripts and Web Storage; [RFC 6265 section 8.5](https://www.rfc-editor.org/rfc/rfc6265#section-8.5) explicitly says cookies do **not** isolate by port and warns against mutually distrusting services on different ports using security-sensitive cookies. Thus one IP with a separate publication port is not equivalent to a dedicated content host for arbitrary generated JavaScript. Paths also share origin/storage. A safe enterprise public browser cutover needs a separate hostname/site or a different authentication architecture plus per-project browser-origin design; an IP certificate alone does not solve the host or cross-project isolation. Do not silently enable untrusted public pages on the console IP. Revisit ingress after concrete safe isolation is designed and browser-tested.

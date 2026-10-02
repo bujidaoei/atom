@@ -57,7 +57,7 @@ with sync_playwright() as p:
     previous_acceptance = (detail.get("acceptance") or {}).get("id")
     page.reload(wait_until="domcontentloaded")
     page.get_by_role("tab", name="契约", exact=True).click()
-    page.get_by_role("button", name="运行验收", exact=False).click()
+    page.get_by_role("button", name="检查功能", exact=False).click()
     for _ in range(30):
         page.wait_for_timeout(1000)
         detail = context.request.get(base + f"/api/projects/{pid}").json()["project"]

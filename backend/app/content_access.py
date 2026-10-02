@@ -71,7 +71,11 @@ class ContentAccessRepository(AccessRepository):
             JOIN release_records r ON r.id=b.release_id AND r.project_id=b.project_id
             JOIN release_publications p ON p.project_id=b.project_id
             JOIN projects o ON o.id=b.project_id WHERE b.id=?''',(binding_id,)).fetchone()
-        if (row is None or not row['live'] or (viewer is not None and row['user_id']!=viewer)
+        # A bootstrap is only a browser challenge, never content authority.
+        # v16 allows a fresh owner handoff for retained, withdrawn snapshots;
+        # generation checks still revoke every previously issued capability.
+        retained = db.execute('PRAGMA user_version').fetchone()[0] == 16
+        if (row is None or (not row['live'] and not retained) or (viewer is not None and row['user_id']!=viewer)
                 or (generation is not None and row['generation']!=generation)):
             raise AccessError('content_access_denied')
         return row['generation']
@@ -109,13 +113,13 @@ class ContentAccessRepository(AccessRepository):
             if db.execute('SELECT 1 FROM content_handoffs WHERE bootstrap_hash=?',(challenge,)).fetchone():
                 raise AccessError('access_conflict')
             row=db.execute('SELECT b.project_id,b.release_id,r.revision_id,r.audience,r.created_at,'
-                'o.title,p.release_id AS current_release_id FROM content_bindings b '
+                'o.title,p.release_id AS current_release_id,p.live FROM content_bindings b '
                 'JOIN release_records r ON r.id=b.release_id AND r.project_id=b.project_id '
                 'JOIN projects o ON o.id=b.project_id JOIN release_publications p ON p.project_id=b.project_id '
                 'WHERE b.id=?',(binding_id,)).fetchone()
             return {'binding':binding_id,'projectId':row['project_id'],'projectTitle':row['title'],
                     'releaseId':row['release_id'],'revisionId':row['revision_id'],'audience':row['audience'],
-                    'releaseCreatedAt':row['created_at'],'isCurrentRelease':row['release_id']==row['current_release_id'],
+                    'releaseCreatedAt':row['created_at'],'isCurrentRelease':bool(row['live'] and row['release_id']==row['current_release_id']),
                     'publicationGeneration':generation,'expiresAt':min(bootstrap['expires_at'],source['expires_at'])}
 
     def issue_handoff(self,*,viewer_id: str,source_session_id: str,binding_id: str,challenge: str) -> AccessCredential:
@@ -135,7 +139,7 @@ class ContentAccessRepository(AccessRepository):
             secret=secrets.token_hex(32)
             db.execute('INSERT INTO content_handoffs VALUES (?,?,?,?,?,?,?,?,NULL)',
                 (_hash('handoff',secret),challenge,binding_id,viewer_id,source_session_id,generation,now,expires))
-            if db.execute('PRAGMA user_version').fetchone()[0] in (5,6,7,9,10,13,14,15):
+            if db.execute('PRAGMA user_version').fetchone()[0] in (5,6,7,9,10,13,14,15,16):
                 record_content_transition(db,kind='content.handoff.issued',user_id=viewer_id,
                     source_session_id=source_session_id,binding_id=binding_id,generation=generation,occurred_at=now)
             return AccessCredential(secret,expires)
@@ -162,7 +166,7 @@ class ContentAccessRepository(AccessRepository):
             db.execute('UPDATE content_handoffs SET consumed_at=? WHERE token_hash=?',(now,handoff_hash))
             db.execute('INSERT INTO content_sessions VALUES (?,?,?,?,?,?,?,?,NULL)',
                 (_hash('session',secret),handoff_hash,binding_id,row['viewer_id'],row['source_session_id'],row['publication_generation'],now,expires))
-            if db.execute('PRAGMA user_version').fetchone()[0] in (5,6,7,9,10,13,14,15):
+            if db.execute('PRAGMA user_version').fetchone()[0] in (5,6,7,9,10,13,14,15,16):
                 record_content_transition(db,kind='content.session.created',user_id=row['viewer_id'],
                     source_session_id=row['source_session_id'],binding_id=binding_id,
                     generation=row['publication_generation'],occurred_at=now)

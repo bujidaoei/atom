@@ -15,6 +15,7 @@ from ..console_auth import require_auth_origin, require_console_host
 from ..content_hosts import ContentHosts
 from ..deps import OwnedProject
 from ..release_repository import ReleaseRepository
+from ..release_history import publication_history
 from ..verification_repository import VerificationError
 
 
@@ -71,13 +72,17 @@ async def _json_command(request: Request):
     return command
 
 
-async def _command(request: Request):
+async def _command(request: Request, verification_mode='required'):
     command = await _json_command(request)
+    fields = {'releaseId', 'expectedRevision', 'expectedGeneration', 'audience', 'slug'}
+    expected_fields = fields | {'verificationId'} if verification_mode == 'required' else fields
+    if verification_mode == 'advisory' and command.get('verificationId') is None:
+        command.pop('verificationId', None)
     if (type(command) is not dict
-            or set(command) != {'releaseId', 'verificationId', 'expectedRevision',
-                                'expectedGeneration', 'audience', 'slug'}
-            or any(type(command[key]) is not str or _ID.fullmatch(command[key]) is None
-                   for key in ('releaseId', 'verificationId'))
+            or set(command) != expected_fields
+            or type(command['releaseId']) is not str or _ID.fullmatch(command['releaseId']) is None
+            or (verification_mode == 'required' and
+                (type(command['verificationId']) is not str or _ID.fullmatch(command['verificationId']) is None))
             or type(command['expectedRevision']) is not str
             or _REVISION.fullmatch(command['expectedRevision']) is None
             or type(command['expectedGeneration']) is not int
@@ -110,15 +115,16 @@ async def _rollback_command(request: Request):
                    for key in ('sourceReleaseId', 'expectedRevision'))
             or type(command['expectedGeneration']) is not int
             or not 1 <= command['expectedGeneration'] < 2**63-1):
-        _deny(400, '回滚请求格式不正确')
+        _deny(400, '恢复请求格式不正确')
     return command
 
 
 def _configured(request: Request):
     settings = get_settings()
     if (settings.sandbox_mode != 'broker' or settings.session_mode != 'durable'
-            or settings.verifier_origin is None or settings.content_host_suffix is None):
-        _deny(404, '可信发布尚未启用')
+            or (settings.publication_verification == 'required' and settings.verifier_origin is None)
+            or settings.content_host_suffix is None):
+        _deny(404, '发布服务暂未就绪')
     resources = getattr(request.app.state, 'execution', None)
     if resources is None:
         _deny(503, '发布服务暂不可用')
@@ -151,7 +157,7 @@ async def publish_verified_release(project: OwnedProject, request: Request):
     if request.headers.getlist('x-atom-intent') != ['publish-verified-release']:
         _deny(403, '发布意图不明确')
     settings, store = _configured(request)
-    command = await _command(request)
+    command = await _command(request, settings.publication_verification)
     lifecycle = request.app.state.release_operations
     token = lifecycle.acquire()
     if token is None:
@@ -159,13 +165,16 @@ async def publish_verified_release(project: OwnedProject, request: Request):
     release = True
     try:
         def apply():
-            receipt = ReleaseRepository(settings.db_path, required_schema='verified').publish_verified(store,
+            required = settings.publication_verification == 'required'
+            receipt = ReleaseRepository(settings.db_path,
+                required_schema='verified' if required else 16).publish_snapshot(store,
+                verification_mode=settings.publication_verification,
                 owner=project.user_id, project_id=project.id,
-                release_id=command['releaseId'], verification_id=command['verificationId'],
+                release_id=command['releaseId'], verification_id=command.get('verificationId'),
                 expected_revision=command['expectedRevision'],
                 expected_generation=command['expectedGeneration'],
-                policy_digest=settings.verifier_policy_digest,
-                runner_version=settings.verifier_runner_version,
+                policy_digest=settings.verifier_policy_digest if required else None,
+                runner_version=settings.verifier_runner_version if required else None,
                 audience=command['audience'], slug=command['slug'])
             return {'releaseId':receipt.release_id, 'revisionId':receipt.revision_id,
                     'generation':receipt.generation, 'slug':receipt.slug}
@@ -182,7 +191,7 @@ async def publish_verified_release(project: OwnedProject, request: Request):
         release = False
         return response
     except (VerificationError, ArtifactError) as error:
-        response = OwnedJSONResponse({'detail':'无法确认可信发布'}, lifecycle, token,
+        response = OwnedJSONResponse({'detail':'发布结果暂时无法确认'}, lifecycle, token,
                                      status_code=_status(error), headers=_HEADERS)
         release = False
         return response
@@ -224,6 +233,7 @@ async def current_release(project: OwnedProject, request: Request):
             result = {'publication':{
                 'releaseId':pointer.release_id, 'revisionId':pointer.revision_id,
                 'verificationId':pointer.verification_id,
+                'verificationMode':pointer.verification_mode,
                 'contractDigest':pointer.contract_digest,
                 'policyDigest':pointer.policy_digest,
                 'audience':pointer.audience, 'slug':pointer.slug,
@@ -280,7 +290,7 @@ async def unpublish_verified_release(project: OwnedProject, release_id: str, req
         release = False
         return response
     except VerificationError as error:
-        response = OwnedJSONResponse({'detail':'无法确认可信撤销'}, lifecycle, token,
+        response = OwnedJSONResponse({'detail':'停止发布的结果暂时无法确认'}, lifecycle, token,
                                      status_code=_status(error), headers=_HEADERS)
         release = False
         return response
@@ -294,7 +304,7 @@ async def rollback_verified_release(project: OwnedProject, release_id: str, requ
     require_auth_origin(request)
     if (request.headers.getlist('x-atom-intent') != ['rollback-verified-release']
             or _REVISION.fullmatch(release_id) is None):
-        _deny(403, '回滚意图不明确')
+        _deny(403, '恢复请求缺少必要信息')
     settings, store = _configured(request)
     command = await _rollback_command(request)
     lifecycle = request.app.state.release_operations
@@ -304,14 +314,17 @@ async def rollback_verified_release(project: OwnedProject, release_id: str, requ
     release = True
     try:
         def apply():
-            receipt = ReleaseRepository(settings.db_path, required_schema='verified').rollback_verified(store,
+            required = settings.publication_verification == 'required'
+            receipt = ReleaseRepository(settings.db_path,
+                required_schema='verified' if required else 16).restore_snapshot(store,
+                verification_mode=settings.publication_verification,
                 owner=project.user_id, project_id=project.id,
                 command_id=command['commandId'], release_id=command['newReleaseId'],
                 source_release_id=command['sourceReleaseId'], expected_release=release_id,
                 expected_generation=command['expectedGeneration'],
                 expected_revision=command['expectedRevision'],
-                policy_digest=settings.verifier_policy_digest,
-                runner_version=settings.verifier_runner_version)
+                policy_digest=settings.verifier_policy_digest if required else None,
+                runner_version=settings.verifier_runner_version if required else None)
             return {'releaseId':receipt.release_id,
                     'sourceReleaseId':receipt.source_release_id,
                     'displacedReleaseId':receipt.displaced_release_id,
@@ -329,8 +342,57 @@ async def rollback_verified_release(project: OwnedProject, release_id: str, requ
         release = False
         return response
     except (VerificationError, ArtifactError) as error:
-        response = OwnedJSONResponse({'detail':'无法确认可信回滚'}, lifecycle, token,
+        response = OwnedJSONResponse({'detail':'恢复结果暂时无法确认'}, lifecycle, token,
                                      status_code=_status(error), headers=_HEADERS)
+        release = False
+        return response
+    finally:
+        if release:
+            lifecycle.release(token)
+
+
+@router.get('/{project_id}/releases/history')
+async def release_history(project: OwnedProject, request: Request):
+    settings, _store = _configured(request)
+    require_console_host(request)
+    query = request.query_params
+    if (request.headers.getlist('x-atom-intent') != ['inspect-verified-release']
+            or (request.headers.getlist('origin')
+                and request.headers.getlist('origin') != [settings.console_origin])
+            or any(key not in ('limit', 'cursor') for key in query)
+            or any(len(query.getlist(key)) != 1 for key in query)
+            or re.fullmatch(r'[0-9]{1,2}', query.get('limit', '20')) is None):
+        _deny(400, '版本历史查询格式不正确')
+    limit = int(query.get('limit', '20'))
+    if not 1 <= limit <= 50:
+        _deny(400, '每次最多读取 50 个发布版本')
+    lifecycle = request.app.state.release_operations
+    token = lifecycle.acquire()
+    if token is None:
+        _deny(503, '版本历史暂时繁忙，请稍后重试')
+    release = True
+    try:
+        worker = asyncio.create_task(asyncio.to_thread(publication_history,
+            settings.db_path, owner=project.user_id, project_id=project.id,
+            limit=limit, cursor=query.get('cursor')))
+        _WORKERS.add(worker)
+        worker.add_done_callback(_WORKERS.discard)
+        try:
+            result = await asyncio.shield(worker)
+        except asyncio.CancelledError:
+            release = False
+            worker.add_done_callback(lambda done: _finished(done, lifecycle, token))
+            raise
+        result['publicationPolicy'] = settings.publication_verification
+        hosts = ContentHosts(settings.content_host_suffix)
+        for snapshot in result['items']:
+            snapshot['previewUrl'] = hosts.url(snapshot['bindingId']) + '_atom/bootstrap'
+        response = OwnedJSONResponse(result, lifecycle, token, headers=_HEADERS)
+        release = False
+        return response
+    except VerificationError as error:
+        response = OwnedJSONResponse({'detail': '暂时无法读取版本历史'}, lifecycle, token,
+            status_code=400 if str(error) == 'invalid_release_request' else _status(error), headers=_HEADERS)
         release = False
         return response
     finally:

@@ -129,6 +129,7 @@ def test_authenticated_main_routes_reconcile_real_browser_result(adopted, tmp_pa
             'ATOM_DATA_DIR':str(tmp_path / 'data'), 'ATOM_DB_PATH':str(path),
             'ATOM_ARTIFACT_DIR':str(root),
             'ATOM_CONTENT_HOST_SUFFIX':'apps.example.net',
+            'ATOM_PUBLICATION_VERIFICATION':'required',
             'ATOM_VERIFIER_ORIGIN':f'http://127.0.0.1:{port}',
             'ATOM_VERIFIER_CONTROL_TOKEN':token,
             'ATOM_VERIFIER_POLICY_DIGEST':'c' * 64,

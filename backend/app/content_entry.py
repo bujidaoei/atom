@@ -1,10 +1,11 @@
 """Isolated content-process factory; launch with ``uvicorn --factory``."""
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import os
 from pathlib import Path
 
 from .access_repository import AccessError
-from .artifacts import ArtifactError, ArtifactStore
+from .artifacts import ArtifactError, configured_artifact_store
+from .storage_config import ObjectStorageSettings
 from .content_access import ContentAccessRepository
 from .content_bootstrap import ContentNavigation
 from .content_hosts import ContentHostError, ContentHosts
@@ -23,13 +24,15 @@ class ContentProcessConfig:
     artifacts: Path
     host_suffix: str
     console_origin: str
+    console_base_path: str = ''
+    storage: ObjectStorageSettings = field(default_factory=lambda: ObjectStorageSettings(_env_file=None), repr=False)
 
     def __post_init__(self):
         if (not isinstance(self.database, Path) or not self.database.is_absolute()
                 or not isinstance(self.artifacts, Path) or not self.artifacts.is_absolute()):
             raise ContentStartupError('content_absolute_paths_required')
         try:
-            navigation = ContentNavigation(self.console_origin)
+            navigation = ContentNavigation(self.console_origin, self.console_base_path)
             navigation.validate_content_hosts(ContentHosts(self.host_suffix))
         except (ValueError, ContentHostError):
             raise ContentStartupError('content_origin_configuration_invalid') from None
@@ -42,7 +45,8 @@ class ContentProcessConfig:
             database, artifacts, suffix, console = (os.environ[name] for name in names)
         except KeyError:
             raise ContentStartupError('content_configuration_missing') from None
-        return cls(Path(database), Path(artifacts), suffix, console)
+        return cls(Path(database), Path(artifacts), suffix, console,
+                   os.environ.get('ATOM_CONTENT_CONSOLE_BASE_PATH', ''))
 
 
 def create_app(config: ContentProcessConfig | None = None) -> ContentService:
@@ -52,13 +56,13 @@ def create_app(config: ContentProcessConfig | None = None) -> ContentService:
     if type(config) is not ContentProcessConfig:
         raise ContentStartupError('content_configuration_invalid')
     try:
-        if verify(config.database) not in (13, 14, 15):
+        if verify(config.database) not in (13, 14, 15, 16):
             raise ContentStartupError('content_verified_schema_required')
-        store = ArtifactStore(config.artifacts)
+        store = configured_artifact_store(config.storage, config.artifacts)
         repository = ContentRepository(config.database)
         access = ContentAccessRepository(config.database)
         hosts = ContentHosts(config.host_suffix)
-        navigation = ContentNavigation(config.console_origin)
+        navigation = ContentNavigation(config.console_origin, config.console_base_path)
         return ContentService(repository, store, hosts, access=access, navigation=navigation)
     except (MigrationError, ArtifactError, AccessError):
         raise ContentStartupError('content_startup_unavailable') from None

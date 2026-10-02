@@ -140,9 +140,10 @@ export type ProjectDetail = ProjectSummary & {
 export type VerifiedPublication = {
   releaseId: string;
   revisionId: string;
-  verificationId: string;
-  contractDigest: string;
-  policyDigest: string;
+  verificationId: string | null;
+  verificationMode: "advisory" | "required";
+  contractDigest: string | null;
+  policyDigest: string | null;
   audience: "owner" | "public";
   slug: string;
   generation: number;
@@ -150,6 +151,26 @@ export type VerifiedPublication = {
   bindingId: string;
   pinnedUrl: string | null;
   sharingUrl: string | null;
+};
+
+export type PublicationSnapshot = {
+  releaseId: string;
+  version: number;
+  revisionId: string;
+  createdAt: string;
+  audience: "owner" | "public";
+  verificationMode: "advisory" | "required";
+  verificationId: string | null;
+  bindingId: string;
+  previewUrl: string;
+  isLive: boolean;
+  restoredFrom: string | null;
+};
+
+export type PublicationHistory = {
+  items: PublicationSnapshot[];
+  nextCursor: string | null;
+  publicationPolicy: "advisory" | "required";
 };
 
 export type VerificationStatus = {

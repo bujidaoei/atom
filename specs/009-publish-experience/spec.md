@@ -1,0 +1,72 @@
+# Feature Specification: Publish snapshots and optional functional checks
+
+**Feature Branch**: `codex/009-publish-experience`
+**Created**: 2026-10-02
+**Status**: Specified; implementation and acceptance pending
+**Input**: Repair check HTTP500, restore simple publication, make publishing a comprehensible history of restorable published snapshots; retain Atom runtime.
+
+## User Scenarios & Testing
+### User Story 1 - Run understandable functional checks (Priority: P1)
+Creators can check the actual generated page and distinguish feature failures from service failures.
+**Why this priority**: Ordinary generated projects currently encounter HTTP500.
+**Independent Test**: Run checks after generation, save and reload actual observations.
+**Acceptance Scenarios**:
+1. Given generation history, completed checks save and reload without HTTP500.
+2. Given newer saved content, old results are not presented as current evidence.
+3. A service failure says checking did not finish, not that the application failed.
+
+### User Story 2 - Publish directly (Priority: P1)
+Owners publish a saved website without separately completing functional acceptance.
+**Why this priority**: Isolated-workspace mode currently blocks publication.
+**Independent Test**: Publish an existing saved page without passing checks and compare the public page to the selected saved content.
+**Acceptance Scenarios**:
+1. Default publication succeeds with one primary action and no mandatory functional-check step.
+2. Failed or unavailable optional checks do not block publication or become a false verified claim.
+3. Concurrent edits and failed publication preserve the previous live version.
+4. Anonymous and foreign owners cannot change publication; public application content cannot exercise console authority.
+
+### User Story 3 - Browse and restore published snapshots (Priority: P1)
+Owners see the current live version and a chronological publication history, preview any retained historical publication and restore it.
+**Why this priority**: The user explicitly defines the publication page as a snapshot and recovery experience.
+**Independent Test**: Publish two distinct versions, preview and restore the first, reload and compare the live page and history.
+**Acceptance Scenarios**:
+1. Every publication creates a durable saved version, timestamp and public link.
+2. The main page uses plain Chinese states such as current online, unpublished and unpublished changes; hashes and internal infrastructure terminology are not primary content.
+3. Restoring a historical publication switches the live content without overwriting the editing draft, and creates a new traceable history event.
+4. Unpublish removes public access; retained history remains available to the owner.
+5. Missing/corrupt historical content is clearly identified and cannot replace a healthy live version.
+
+### Edge Cases
+Missing entry page, corrupt artifacts, active edits, double clicks, stale selections, interrupted requests, unavailable checker, old evidence, historical projects and public URLs, failed migration, unsafe content and cross-owner requests.
+
+## Requirements
+### Functional Requirements
+- **FR-001**: Explain functional checks in plain Chinese; distinguish unfinished checking from failed assertions.
+- **FR-002**: Default publication must not require passing optional functional checks; retain mandatory ownership, content integrity and isolation.
+- **FR-003**: Publish exactly the selected saved version, never a stale working directory.
+- **FR-004**: Provide chronological published snapshots, historical previews, live restoration and unpublish with concurrent-change protection.
+- **FR-005**: Prioritize the public link, current online version, publish update and history; hide internal IDs and diagnostic details behind optional disclosure.
+- **FR-006**: Preserve project data, editing drafts and SHA-locked Atom runtime.
+- **FR-007**: Keep research, design, tasks and real evidence synchronized in Spec Kit; never mark untested delivery accepted.
+- **FR-008**: Back up before deployment, test failure recovery and verify actual public delivery on desktop and mobile.
+
+### Key Entities
+Saved version: immutable content. Functional check: version-bound observations and outcome. Publication snapshot: owner, saved version, publication time and address. History event: publish, restore or unpublish with durable ordering. Policy: optional functional quality versus mandatory safety.
+
+## Success Criteria
+### Measurable Outcomes
+- **SC-001**: A regression reproduces the reported HTTP500 and proves results save and reload after correction.
+- **SC-002**: An owner publishes a saved page using one primary action without manual prerequisite checks.
+- **SC-003**: Initial publication, update and restoration serve exactly the selected content; injected failures preserve the prior live version.
+- **SC-004**: Real-browser tests verify history, restore, no console authority for public content and no horizontal overflow on desktop/mobile.
+- **SC-005**: Deployment has a traceable commit, protected backup, verified recovery path and real evidence.
+
+## Assumptions
+- Scope is the current generated website product, not arbitrary backend hosting.
+- Restoring a publication changes the public version and preserves the editing draft. It does not roll back browser-local or external service data.
+- Existing feature-008 uncommitted work stays in the original checkout; this isolated checkout starts from committed source.
+- Broader feature-008 infrastructure tasks remain separately open; this feature does not claim all enterprise work complete.
+
+## COS amendment
+- **FR-009**: Persist immutable publication content in configured private Tencent COS and publication metadata in the mounted server database. Secrets stay in ignored environment files; checked-in examples have empty credentials. Storage failure must not change the live publication.
+- **FR-010**: Public generated JavaScript must remain isolated from the console and other projects' browser storage. The user has no domain and prefers the server IP; deployment must establish and test a safe IP-only isolation architecture or keep public activation pending. A different port alone does not isolate HTTP cookies.

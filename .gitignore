@@ -9,6 +9,7 @@ runtime/node_modules
 
 # build output
 frontend/dist
+/browser-snapshots*/
 __pycache__/
 .pytest_cache/
 *.pyc

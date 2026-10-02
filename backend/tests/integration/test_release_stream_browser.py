@@ -99,6 +99,7 @@ def test_release_workbench_keeps_real_event_stream_and_recovers(
     migrate(path, tmp_path / 'before-stream-v13.db', target_version=13)
     migrate(path, tmp_path / 'before-stream-v14.db', target_version=14)
     migrate(path, tmp_path / 'before-stream-v15.db', target_version=15)
+    migrate(path, tmp_path / 'before-stream-v16.db', target_version=16)
     payload, artifact = snapshot(b'<html>heat</html>')
     assert artifact == receipt.artifact
     root = tmp_path / 'artifacts'
@@ -161,7 +162,7 @@ def test_release_workbench_keeps_real_event_stream_and_recovers(
                 if '/api/projects/project/events?' in response.url else None)
             page.goto(origin + '/atom/app/p/project', wait_until='domcontentloaded')
             page.get_by_role('tab', name='发布', exact=True).click()
-            page.get_by_label('发布工作台').get_by_text('暂无已登记的发布指针').wait_for()
+            page.get_by_label('发布与历史', exact=True).get_by_text('准备好分享你的作品了吗？').wait_for()
             page.get_by_role('button', name='连接中断，点击重连').wait_for(
                 state='hidden', timeout=15000)
             deadline = time.monotonic() + 10
