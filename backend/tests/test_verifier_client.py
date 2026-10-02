@@ -18,11 +18,18 @@ class _Chunks(httpx.AsyncByteStream):
         pass
 
 
-def test_requires_literal_loopback_origin_and_distinct_sized_token():
+def test_requires_literal_loopback_or_exact_private_service_and_distinct_sized_token():
+    private = VerifierClient('http://atom-verifier:8765', 'x' * 48)
+    assert private._origin == 'http://atom-verifier:8765'
+    asyncio.run(private.close())
     for origin in ('http://localhost:8123', 'http://0.0.0.0:8123',
                    'http://127.0.0.1', 'https://127.0.0.1:8123',
                    'http://127.0.0.1:8123/path',
-                   'http://user@127.0.0.1:8123', 'http://127.0.0.1:8123/?x=1'):
+                   'http://user@127.0.0.1:8123', 'http://127.0.0.1:8123/?x=1',
+                   'http://atom-verifier:8766', 'http://atom-verifier.evil:8765',
+                   'http://user@atom-verifier:8765',
+                   'http://atom-verifier:8765/path',
+                   'https://atom-verifier:8765'):
         with pytest.raises(VerifierClientError, match='invalid_verifier_client_configuration'):
             VerifierClient(origin, 'x' * 48)
     with pytest.raises(VerifierClientError, match='invalid_verifier_client_configuration'):

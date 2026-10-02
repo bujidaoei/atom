@@ -1,7 +1,8 @@
 # Trusted host-side verifier coordinator. It starts before the console and
 # creates only network-disabled, resource-bounded Chromium workers. The Docker
 # socket is a host-level privilege: never connect this service to public ports
-# or run generated page bytes in this process.
+# or run generated page bytes in this process. Attach only the console and this
+# service to ATOM_VERIFIER_NETWORK; it must be separate from Caddy's bridge.
 name: atom-ip-verifier
 
 services:
@@ -74,4 +75,4 @@ services:
 networks:
   private:
     external: true
-    name: ${ATOM_PROXY_NETWORK:?set the existing private Docker bridge}
+    name: ${ATOM_VERIFIER_NETWORK:?set the dedicated console-verifier bridge}
