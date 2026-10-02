@@ -4,6 +4,8 @@ Status: **not deployed**. This document separates observed production facts, reh
 
 The private verifier now has `deploy/compose.ip-verifier.yml`. At cutover, supply exact application and worker image IDs, a durable verifier identity, a host-visible seccomp path, the host Docker CLI path, the authoritative data directory and existing private bridge through a root-private Compose environment. Load the same root-private COS settings as the application plus a separate mode0600 verifier control-token file; configure the console with the matching private `ATOM_VERIFIER_ORIGIN` and token only after the coordinator is healthy. The coordinator gets the Docker socket as a trusted host capability and publishes no host port. Disposable target Compose rehearsals passed against database copies, including one real registered private COS snapshot and nine browser checks with durable attestation. This is not production activation or a substitute for real owner/public acceptance.
 
+Latest traceable target candidate: Git `eeebe090742226f10a1c5baeef8a05129aca858b`, matched source tar SHA256 `3d1fe4a21efbae49c1d6f23e0a2ffd5e5a00ebe18e7b7003527d7f50fe07b0b5`, application image `sha256:1319521f153220f571805c1641d82732d6d6d9f5bb463c8f2ce68ffb25b10068`, verifier worker `sha256:f864e79ca6e269fd2bbc58a22c79215a97aec7836195d806c26ee7145f16e151`. The new image passed read-only schema18 migration audit and isolated private-verifier health. These are candidate checks only; running production remains on its prior healthy image and schema10.
+
 ## Production inventory, read only
 
 - Server: `159.75.231.98`, existing `atom-candidate` container; mounted application volume `/home/ubuntu/atom-staging/94bfcd7/data` → `/data`.
