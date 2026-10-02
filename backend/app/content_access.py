@@ -74,7 +74,7 @@ class ContentAccessRepository(AccessRepository):
         # A bootstrap is only a browser challenge, never content authority.
         # v16 allows a fresh owner handoff for retained, withdrawn snapshots;
         # generation checks still revoke every previously issued capability.
-        retained = db.execute('PRAGMA user_version').fetchone()[0] == 16
+        retained = db.execute('PRAGMA user_version').fetchone()[0] in (16, 17)
         if (row is None or (not row['live'] and not retained) or (viewer is not None and row['user_id']!=viewer)
                 or (generation is not None and row['generation']!=generation)):
             raise AccessError('content_access_denied')
@@ -139,7 +139,7 @@ class ContentAccessRepository(AccessRepository):
             secret=secrets.token_hex(32)
             db.execute('INSERT INTO content_handoffs VALUES (?,?,?,?,?,?,?,?,NULL)',
                 (_hash('handoff',secret),challenge,binding_id,viewer_id,source_session_id,generation,now,expires))
-            if db.execute('PRAGMA user_version').fetchone()[0] in (5,6,7,9,10,13,14,15,16):
+            if db.execute('PRAGMA user_version').fetchone()[0] in (5,6,7,9,10,13,14,15,16, 17):
                 record_content_transition(db,kind='content.handoff.issued',user_id=viewer_id,
                     source_session_id=source_session_id,binding_id=binding_id,generation=generation,occurred_at=now)
             return AccessCredential(secret,expires)
@@ -166,7 +166,7 @@ class ContentAccessRepository(AccessRepository):
             db.execute('UPDATE content_handoffs SET consumed_at=? WHERE token_hash=?',(now,handoff_hash))
             db.execute('INSERT INTO content_sessions VALUES (?,?,?,?,?,?,?,?,NULL)',
                 (_hash('session',secret),handoff_hash,binding_id,row['viewer_id'],row['source_session_id'],row['publication_generation'],now,expires))
-            if db.execute('PRAGMA user_version').fetchone()[0] in (5,6,7,9,10,13,14,15,16):
+            if db.execute('PRAGMA user_version').fetchone()[0] in (5,6,7,9,10,13,14,15,16, 17):
                 record_content_transition(db,kind='content.session.created',user_id=row['viewer_id'],
                     source_session_id=row['source_session_id'],binding_id=binding_id,
                     generation=row['publication_generation'],occurred_at=now)

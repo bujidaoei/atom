@@ -40,7 +40,7 @@ class TransferReceipt:
 def _inventory(database: Path, *, maximum: int) -> tuple[tuple[Artifact, ...], int, str]:
     try:
         version = verify(database)
-        if version not in (10, 11, 12, 13, 14, 15, 16):
+        if version not in (10, 11, 12, 13, 14, 15, 16, 17):
             raise TransferError('unsupported_transfer_schema')
         with closing(sqlite3.connect(database.as_uri() + '?mode=ro', uri=True,
                                      timeout=3, isolation_level=None)) as db:

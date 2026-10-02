@@ -30,12 +30,17 @@ The first IP-only security increment enforces the configured HTTPS console host 
 
 The next versioned migration must reserve stable, never-reused preview/public origins per project. A purpose-separated HMAC proof derived from the active durable session supplies a second console-origin credential without a new secret-bearing table. The API verifies cookie plus proof for reads and writes; existing cookie-only sessions reauthenticate at cutover. Draft preview moves off the console origin, and an owner-initiated isolated browser checks an exact saved revision; generated pages cannot submit their own results. An ingress reconciler renders explicit IP:port TLS listeners from the committed ledger, validates/reloads Caddy and probes the listener before publication becomes live. The database and Caddy cannot share a transaction, so restart reconciliation and rollback are mandatory. The concrete contract and still-open acceptance cases are in ip-only-design.md and T012a2–T012a6; do not activate intermediate code in production.
 
+Schema17 now implements the immutable port ledger and transactional, bounded allocator in `backend/app/migrations/project_origins_v17.py` and `backend/app/project_origins.py`. Existing schema16 publication behavior is preserved on schema17, including release history and durable sessions; the offline rehearsal advances schema10 copies through schema17. This is foundation only. The serving layer still needs to resolve a port to an exact project and role, obtain owner preview authority, reconcile Caddy, verify external reachability and keep publication atomic across ingress failure.
+
 ## Delivery Sequence
 1. Reproduce and fix actual 500; check save/reload regression.
 2. Review policy/schema extension against all release/content invariants; record exact migration contract before coding it.
 3. Implement publication, history and restore with failure tests.
 4. Integrate UI using existing design tokens and real API states; desktop/mobile browser tests.
-5. Full applicable gates, protected deployment, public smoke/owner acceptance and evidence reconciliation.
+5. Risk-based targeted gates, protected deployment, public smoke/owner acceptance and evidence reconciliation.
+
+## Testing strategy amendment (owner direction, 2026-10-03)
+Do not repeat the complete backend regression suite. The last complete source checkpoint passed 2,843 tests with 286 environment-specific skips. From this point, select tests by changed module and security boundary, run type/build checks for affected frontend code, and use focused Docker/browser/fault checks where those behaviors change. Record exact selected suites and omissions; do not infer overall acceptance from focused results. Production cutover still requires protected migration, target ingress, owner/public browser and rollback evidence.
 
 ## Complexity Tracking
 No exception to constitution. Exact schema/interface amendments are a mandatory task before US2 implementation; do not treat architectural intent as implemented functionality.

@@ -72,7 +72,7 @@ class CurrentRelease:
 
 class ReleaseRepository:
     def __init__(self, path, *, lock_timeout=3, required_schema=None):
-        if required_schema not in (None, 13, 14, 15, 16, 'verified'):
+        if required_schema not in (None, 13, 14, 15, 16, 17, 'verified'):
             raise VerificationError('invalid_release_configuration')
         self._required_schema = required_schema
         self._ledger = VerificationRepository(path, lock_timeout=lock_timeout)
@@ -80,7 +80,8 @@ class ReleaseRepository:
     def _allows_schema(self, version: int) -> bool:
         return (self._required_schema is None
                 or version == self._required_schema
-                or (self._required_schema == 'verified' and version in (13, 14, 15, 16)))
+                or (self._required_schema == 16 and version == 17)
+                or (self._required_schema == 'verified' and version in (13, 14, 15, 16, 17)))
 
     def current(self, *, owner: str, project_id: str) -> CurrentRelease | None:
         """Read the owner-scoped verified pointer without reserving the writer lock."""
@@ -94,13 +95,13 @@ class ReleaseRepository:
                 db.execute('PRAGMA query_only=ON')
                 db.execute('BEGIN')
                 version = db.execute('PRAGMA user_version').fetchone()[0]
-                if version not in (13, 14, 15, 16) or not self._allows_schema(version):
+                if version not in (13, 14, 15, 16, 17) or not self._allows_schema(version):
                     raise VerificationError('verified_release_schema_required')
                 project = db.execute('SELECT 1 FROM projects WHERE id=? AND user_id=?',
                                      (project_id, owner)).fetchone()
                 if project is None:
                     raise VerificationError('release_not_found')
-                mode_sql = 'r.verification_mode' if version == 16 else "'required'"
+                mode_sql = 'r.verification_mode' if version in (16, 17) else "'required'"
                 row = db.execute(f'''SELECT {mode_sql} AS verification_mode,p.release_id,p.slug,p.generation,p.live,
                     r.revision_id,r.verification_id,r.contract_digest,r.policy_digest,
                     r.audience,b.id AS binding_id FROM release_publications p
@@ -137,7 +138,7 @@ class ReleaseRepository:
                 FROM release_publications p JOIN release_records r ON r.id=p.release_id AND r.project_id=p.project_id
                 JOIN projects o ON o.id=p.project_id WHERE p.slug=?''',(slug,)).fetchone()
             retained_owner = (current is not None and viewer == current['user_id']
-                              and db.execute('PRAGMA user_version').fetchone()[0] == 16)
+                              and db.execute('PRAGMA user_version').fetchone()[0] in (16, 17))
             if (current is None or (not current['live'] and not retained_owner)
                     or (current['audience']!='public' and viewer!=current['user_id'])):
                 raise VerificationError('release_not_found')
@@ -255,9 +256,9 @@ class ReleaseRepository:
                                             separators=(',', ':')).encode()).hexdigest()
         with self._ledger._transaction() as db:
             schema_version = db.execute('PRAGMA user_version').fetchone()[0]
-            if schema_version not in (14, 15, 16):
+            if schema_version not in (14, 15, 16, 17):
                 raise VerificationError('verified_rollback_schema_required')
-            if verification_mode == 'advisory' and schema_version != 16:
+            if verification_mode == 'advisory' and schema_version not in (16, 17):
                 raise VerificationError('publication_policy_schema_required')
             if not self._allows_schema(schema_version):
                 raise VerificationError('verified_rollback_schema_required')
@@ -301,7 +302,7 @@ class ReleaseRepository:
                                  (project_id,)).fetchone()
             if (pointer is None or pointer['release_id'] != expected_release
                     or pointer['generation'] != expected_generation
-                    or (schema_version != 16 and pointer['live'] != 1)):
+                    or (schema_version not in (16, 17) and pointer['live'] != 1)):
                 raise VerificationError('release_conflict')
             workspace = db.execute('SELECT * FROM revision_workspaces '
                                    'WHERE project_id=? AND heat_id IS NULL',
@@ -316,10 +317,10 @@ class ReleaseRepository:
             displaced = db.execute('SELECT * FROM release_records WHERE id=? AND project_id=?',
                                    (expected_release, project_id)).fetchone()
             if (source is None or displaced is None
-                    or (schema_version != 16 and source_release_id == expected_release)
+                    or (schema_version not in (16, 17) and source_release_id == expected_release)
                     or release_id in (source_release_id, expected_release)
                     or source['workspace_id'] != workspace['id']
-                    or (schema_version != 16 and source['audience'] != displaced['audience'])
+                    or (schema_version not in (16, 17) and source['audience'] != displaced['audience'])
                     or (verification_mode == 'required' and source['policy_digest'] != policy_digest)):
                 raise VerificationError('release_conflict')
             descriptor = db.execute('''SELECT a.key,a.revision,a.size FROM revision_records v
@@ -388,7 +389,7 @@ class ReleaseRepository:
                       source['verification_id'] if required else None,
                       source['contract_digest'] if required else None,
                       policy_digest,source['audience'],owner,expected_release,created_at]
-            if schema_version == 16:
+            if schema_version in (16, 17):
                 columns += ',verification_mode,publication_generation'
                 values.extend((verification_mode, expected_generation + 1))
             db.execute(f"INSERT INTO release_records ({columns}) VALUES ({','.join('?' for _ in values)})", values)
@@ -445,9 +446,9 @@ class ReleaseRepository:
             schema_version = db.execute('PRAGMA user_version').fetchone()[0]
             if not self._allows_schema(schema_version):
                 raise VerificationError('verified_release_schema_required')
-            if verification_mode == 'advisory' and schema_version != 16:
+            if verification_mode == 'advisory' and schema_version not in (16, 17):
                 raise VerificationError('publication_policy_schema_required')
-            if schema_version in (13, 14, 15, 16) and not (_preflight or _expected_artifact is not None):
+            if schema_version in (13, 14, 15, 16, 17) and not (_preflight or _expected_artifact is not None):
                 raise VerificationError('verified_release_required')
             project = db.execute('SELECT * FROM projects WHERE id=? AND user_id=?',(project_id,owner)).fetchone()
             if project is None:
@@ -467,7 +468,7 @@ class ReleaseRepository:
             workspace = db.execute('SELECT * FROM revision_workspaces WHERE project_id=? AND heat_id IS NULL',(project_id,)).fetchone()
             if (workspace is None or workspace['current_revision_id'] != expected_revision
                 or workspace['active_attempt_id'] is not None or project['active_run_id'] is not None
-                or (schema_version in (13, 14, 15, 16) and project['status'] != 'ready')):
+                or (schema_version in (13, 14, 15, 16, 17) and project['status'] != 'ready')):
                 raise VerificationError('release_conflict')
             pointer = db.execute('SELECT * FROM release_publications WHERE project_id=?',(project_id,)).fetchone()
             if (pointer['generation'] if pointer else 0) != expected_generation or (pointer and pointer['slug'] != slug):
@@ -489,7 +490,7 @@ class ReleaseRepository:
                     raise VerificationError('invalid_stored_contract') from None
                 if contract.digest != evidence['contract_digest']:
                     raise VerificationError('release_stale_evidence')
-                if schema_version in (13, 14, 15, 16):
+                if schema_version in (13, 14, 15, 16, 17):
                     attestation = db.execute('''SELECT d.project_id,d.workspace_id,d.revision_id,
                         d.contract_digest,d.policy_digest,d.runner_version,d.artifact_key,
                         d.snapshot_revision,d.artifact_size,t.verifier_id,t.environment_digest,
@@ -522,7 +523,7 @@ class ReleaseRepository:
                 if row is None:
                     raise VerificationError('release_artifact_required')
                 artifact = Artifact(row['key'],row['revision'],row['size'])
-                if verification_mode == 'required' and schema_version in (13, 14, 15, 16) and (artifact.key,artifact.revision,artifact.size) != (
+                if verification_mode == 'required' and schema_version in (13, 14, 15, 16, 17) and (artifact.key,artifact.revision,artifact.size) != (
                         attestation['artifact_key'],attestation['snapshot_revision'],attestation['artifact_size']):
                     raise VerificationError('release_untrusted_evidence')
                 if _preflight:
@@ -533,11 +534,11 @@ class ReleaseRepository:
             values = [release_id,project_id,workspace['id'],expected_revision,verification_id,
                       contract_digest,policy_digest,audience,owner,
                       pointer['release_id'] if pointer else None,int(time.time())]
-            if schema_version == 16:
+            if schema_version in (16, 17):
                 columns += ',verification_mode,publication_generation'
                 values.extend((verification_mode, expected_generation + 1))
             db.execute(f"INSERT INTO release_records ({columns}) VALUES ({','.join('?' for _ in values)})", values)
-            if schema_version in (3, 4, 5, 6, 7, 9, 10, 12, 13, 14, 15, 16):
+            if schema_version in (3, 4, 5, 6, 7, 9, 10, 12, 13, 14, 15, 16, 17):
                 # The verified v3 schema supports serving identity. Allocate it
                 # before promotion so binding, release, pointer and receipt are
                 # committed together or all rolled back on any failure.
@@ -549,7 +550,7 @@ class ReleaseRepository:
             receipt = ReleaseReceipt(release_id,expected_revision,generation,slug)
             db.execute('INSERT INTO command_receipts(project_id,key,digest,response_json,created_at) VALUES (?,?,?,?,?)',
                 (project_id,key,digest,json.dumps(receipt.__dict__,sort_keys=True,separators=(',',':')),datetime.now(timezone.utc).isoformat()))
-            if schema_version in (5,6,7,9,10,12,13,14,15,16):
+            if schema_version in (5,6,7,9,10,12,13,14,15,16, 17):
                 record_release_transition(db,kind='release.published',user_id=owner,project_id=project_id,
                     release_id=release_id,operation_id=release_id,generation=generation,occurred_at=int(time.time()))
             return receipt
@@ -567,7 +568,7 @@ class ReleaseRepository:
         key = 'unpublish:' + command_id
         with self._ledger._transaction() as db:
             schema_version = db.execute('PRAGMA user_version').fetchone()[0]
-            if ((require_verified_schema and schema_version not in (13, 14, 15, 16))
+            if ((require_verified_schema and schema_version not in (13, 14, 15, 16, 17))
                     or not self._allows_schema(schema_version)):
                 raise VerificationError('release_schema_required')
             if db.execute('SELECT 1 FROM projects WHERE id=? AND user_id=?',(project_id,owner)).fetchone() is None:
@@ -592,7 +593,7 @@ class ReleaseRepository:
                        (receipt.generation,project_id))
             db.execute('INSERT INTO command_receipts(project_id,key,digest,response_json,created_at) VALUES (?,?,?,?,?)',
                 (project_id,key,digest,json.dumps(receipt.__dict__,sort_keys=True,separators=(',',':')),datetime.now(timezone.utc).isoformat()))
-            if db.execute('PRAGMA user_version').fetchone()[0] in (5,6,7,9,10,12,13,14,15,16):
+            if db.execute('PRAGMA user_version').fetchone()[0] in (5,6,7,9,10,12,13,14,15,16, 17):
                 record_release_transition(db,kind='release.unpublished',user_id=owner,project_id=project_id,
                     release_id=expected_release,operation_id=command_id,generation=receipt.generation,occurred_at=int(time.time()))
             return receipt
