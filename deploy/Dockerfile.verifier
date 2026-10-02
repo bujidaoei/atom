@@ -1,6 +1,7 @@
 FROM mcr.microsoft.com/playwright/python:v1.58.0-noble-amd64@sha256:cd8493e380df200a471821e2690b710eab8d793dde3c0946fd0a39a961022914
 
-RUN python -m pip install --no-cache-dir playwright==1.58.0 \
+ARG PYPI_INDEX=https://pypi.org/simple
+RUN python -m pip install --index-url "$PYPI_INDEX" --no-cache-dir playwright==1.58.0 \
     && useradd --create-home --uid 10001 verifier
 
 WORKDIR /srv
