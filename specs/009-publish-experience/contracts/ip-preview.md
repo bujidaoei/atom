@@ -1,0 +1,19 @@
+# IP-only owner preview contract
+
+Status: schema18, transactional capability repository and byte-verified preview materialization implemented and locally tested; HTTP exchange, content process, console issuance, browser checks and production acceptance remain open. The same-IP browser origin includes its TCP port. Every project keeps one immutable preview port, separate from its public port and the console on 443. A preview port may serve only a revision belonging to that exact project after a fresh owner authorization.
+
+## Console-issued capability
+
+An authenticated console POST selects either the current saved workspace revision or a retained publication revision. The request is protected by the durable cookie, console-origin proof, exact Host and Origin, and owner scope. The server verifies the registered artifact descriptor, active source console session and committed port reservation before issuing a random one-use 256-bit handoff. It stores only a purpose-separated hash, exact project/revision identity, source session, creation and expiry; the immutable revision ledger resolves the artifact descriptor. The response is a `no-store` URL on the project's preview port with the handoff in the fragment; no generated page receives a console proof or artifact-store key.
+
+Successful issuance and exchange each write an append-only, content-free preview audit event in the same transaction. Audit writes must succeed for the capability to succeed; the event includes project/revision/source identities but no token, cookie or generated page bytes.
+
+## Service-owned exchange and content
+
+The preview process first serves a service-owned exchange document at `/_atom/open`; it removes the fragment and POSTs the handoff to the same preview origin. Exchange is atomic and one-use, validates the exact Host/port/project and active source session, then creates a short-lived preview session. Its HttpOnly Secure cookie name is unique to that immutable preview port so another project's preview does not overwrite it. The secret is stored only as a purpose-separated hash; the cookie contains no revision or console credential. Failed exchange does not set a session cookie.
+
+Subsequent GET/HEAD requests require the exact port-specific preview session. The server rechecks project existence, source session revocation, owner and revision scope, then reads the exact registered snapshot from the configured private store. It verifies archive digest, revision and size before serving a file. A saved revision remains pinned for that session even after editing or publication changes; logout, expiry or project deletion revoke access. Generated routes under `/_atom/` cannot override control endpoints. Unknown hosts, public ports, malformed/duplicate cookies and private requests without a valid session fail closed. Preview responses never expose COS or console credentials and do not grant credentialed cross-origin CORS.
+
+## Acceptance and release boundary
+
+Real browsers must prove native scripts and `localStorage` on the preview port, persistence across reload, separation from public/other project origins, and denial of console read/write even with same-IP cookies. A hostile page cannot mint a handoff, read the HttpOnly preview cookie, forge a check result or reach another project's revision. Concurrent exchange, replay, expired/revoked session, changed draft, deleted project, corrupt COS bytes and response cancellation need targeted failure evidence. The existing console-origin `/preview/` HTML route is removed only in the protected paired cutover after both normal preview and the isolated owner-initiated checker pass. The checker runs in a server-controlled browser against the exact saved revision and persists its own observations; it never accepts page-submitted success.

@@ -58,7 +58,7 @@ def create_app(config: ContentProcessConfig | None = None) -> ContentService:
     if type(config) is not ContentProcessConfig:
         raise ContentStartupError('content_configuration_invalid')
     try:
-        if verify(config.database) not in (13, 14, 15, 16, 17):
+        if verify(config.database) not in (13, 14, 15, 16, 17, 18):
             raise ContentStartupError('content_verified_schema_required')
         store = configured_artifact_store(config.storage, config.artifacts)
         repository = ContentRepository(config.database)

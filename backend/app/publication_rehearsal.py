@@ -69,7 +69,7 @@ def rehearse(source: Path, destination: Path, *, expected_version: int = 10) -> 
                 raise RehearsalError('rehearsal_journal_unavailable')
         if verify(copy) != expected_version or _counts(copy) != source_counts:
             raise RehearsalError('rehearsal_copy_mismatch')
-        for version in range(expected_version + 1, 18):
+        for version in range(expected_version + 1, 19):
             backup = destination / f'before-v{version}.db'
             result = migrate(copy, backup, target_version=version)
             if not result.applied or verify(copy) != version or\
@@ -78,18 +78,18 @@ def rehearse(source: Path, destination: Path, *, expected_version: int = 10) -> 
             if _counts(copy) != source_counts:
                 raise RehearsalError('rehearsal_data_changed')
         replay_backup = destination / 'replay-should-not-exist.db'
-        replay = migrate(copy, replay_backup, target_version=17)
-        if replay.applied or replay.version != 17 or replay_backup.exists():
+        replay = migrate(copy, replay_backup, target_version=18)
+        if replay.applied or replay.version != 18 or replay_backup.exists():
             raise RehearsalError('rehearsal_replay_mismatch')
         if verify(source) != expected_version:
             raise RehearsalError('rehearsal_source_schema_changed')
-        return RehearsalReceipt(expected_version, 17, *source_counts, 7)
+        return RehearsalReceipt(expected_version, 18, *source_counts, 8)
     except (sqlite3.Error, OSError, MigrationError):
         raise RehearsalError('rehearsal_unavailable') from None
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description='Rehearse schema 10 to 17 on a private SQLite copy')
+    parser = argparse.ArgumentParser(description='Rehearse schema 10 to 18 on a private SQLite copy')
     parser.add_argument('--source', type=Path, required=True)
     parser.add_argument('--destination', type=Path, required=True)
     arguments = parser.parse_args()

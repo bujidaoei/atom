@@ -32,7 +32,7 @@ class AccessRepository:
         self.path, self.timeout = Path(path), lock_timeout
         self.active_sessions_per_user = active_sessions_per_user
         try:
-            if verify(self.path) not in (4,5,6,7,9,10,13,14,15,16, 17):
+            if verify(self.path) not in (4,5,6,7,9,10,13,14,15,16, 17, 18):
                 raise AccessError('access_schema_required')
         except MigrationError:
             raise AccessError('access_schema_required') from None
@@ -45,7 +45,7 @@ class AccessRepository:
             db.execute('PRAGMA foreign_keys=ON')
             db.execute('PRAGMA synchronous=FULL')
             db.execute('BEGIN IMMEDIATE')
-            if _schema(db) not in (4,5,6,7,9,10,13,14,15,16, 17):
+            if _schema(db) not in (4,5,6,7,9,10,13,14,15,16, 17, 18):
                 raise AccessError('access_schema_required')
             db.row_factory=sqlite3.Row
             yield db
@@ -75,7 +75,7 @@ class AccessRepository:
 
     @staticmethod
     def _audit(db, **event):
-        if db.execute('PRAGMA user_version').fetchone()[0] in (5,6,7,9,10,13,14,15,16, 17):
+        if db.execute('PRAGMA user_version').fetchone()[0] in (5,6,7,9,10,13,14,15,16, 17, 18):
             record_console_transition(db, **event)
 
     def create_console_session(self, *, user_id: str, lifetime_seconds: int) -> ConsoleSession:

@@ -37,7 +37,7 @@ class ProjectOriginRepository:
         self.path = Path(path)
         self.first_port, self.last_port, self.timeout = first_port, last_port, lock_timeout
         try:
-            if verify(self.path) != 17:
+            if verify(self.path) not in (17, 18):
                 raise ProjectOriginError('origin_schema_required')
         except MigrationError:
             raise ProjectOriginError('origin_schema_required') from None
@@ -59,7 +59,7 @@ class ProjectOriginRepository:
             db.execute('PRAGMA foreign_keys=ON')
             db.execute('PRAGMA synchronous=FULL')
             db.execute('BEGIN IMMEDIATE' if write else 'BEGIN')
-            if _schema(db) != 17:
+            if _schema(db) not in (17, 18):
                 raise ProjectOriginError('origin_schema_required')
             yield db
             db.execute('COMMIT')

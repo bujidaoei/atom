@@ -51,7 +51,7 @@ class VerifierAssignment:
 class VerifierAuthority:
     def __init__(self, path, *, lock_timeout=3):
         try:
-            if verify(path) not in (13, 14, 15, 16, 17):
+            if verify(path) not in (13, 14, 15, 16, 17, 18):
                 raise VerificationError('verifier_schema_required')
         except MigrationError:
             raise VerificationError('verifier_schema_required') from None
@@ -77,7 +77,7 @@ class VerifierAuthority:
                 or (artifact is not None and type(artifact) is not Artifact)):
             raise VerificationError('invalid_verifier_dispatch')
         with self._ledger._transaction() as db:
-            if db.execute('PRAGMA user_version').fetchone()[0] not in (13, 14, 15, 16, 17):
+            if db.execute('PRAGMA user_version').fetchone()[0] not in (13, 14, 15, 16, 17, 18):
                 raise VerificationError('verifier_schema_required')
             row = db.execute('''SELECT q.* FROM verification_requests q
                 JOIN projects p ON p.id=q.project_id AND p.user_id=?
@@ -135,7 +135,7 @@ class VerifierAuthority:
                 or len(credential) != 32):
             raise VerificationError('verifier_unauthorized')
         with self._ledger._transaction() as db:
-            if db.execute('PRAGMA user_version').fetchone()[0] not in (13, 14, 15, 16, 17):
+            if db.execute('PRAGMA user_version').fetchone()[0] not in (13, 14, 15, 16, 17, 18):
                 raise VerificationError('verifier_schema_required')
             dispatch = db.execute('SELECT * FROM verification_dispatches WHERE request_id=?',
                                   (request_id,)).fetchone()

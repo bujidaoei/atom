@@ -13,7 +13,7 @@ from .migrations import MigrationError, _schema, verify
 from .verification_contract import ContractError, VerificationContract, capture_contract, capture_report, load_contract, load_report
 
 
-_SUPPORTED_SCHEMAS = (2, 3, 4, 5, 6, 7, 9, 10, 12, 13, 14, 15, 16, 17)
+_SUPPORTED_SCHEMAS = (2, 3, 4, 5, 6, 7, 9, 10, 12, 13, 14, 15, 16, 17, 18)
 
 
 class VerificationError(RuntimeError):
@@ -111,7 +111,7 @@ class VerificationRepository:
                for value in (owner, project_id)):
             raise VerificationError('invalid_verification_request')
         with self._transaction() as db:
-            if db.execute('PRAGMA user_version').fetchone()[0] not in (13, 14, 15, 16, 17):
+            if db.execute('PRAGMA user_version').fetchone()[0] not in (13, 14, 15, 16, 17, 18):
                 raise VerificationError('verifier_schema_required')
             row = db.execute('''SELECT w.id,w.current_revision_id,w.active_attempt_id,p.active_run_id,p.status
                 FROM revision_workspaces w JOIN projects p ON p.id=w.project_id
@@ -139,7 +139,7 @@ class VerificationRepository:
                for value in (owner, project_id, request_id)):
             raise VerificationError('invalid_verification_request')
         with self._transaction() as db:
-            if db.execute('PRAGMA user_version').fetchone()[0] not in (13, 14, 15, 16, 17):
+            if db.execute('PRAGMA user_version').fetchone()[0] not in (13, 14, 15, 16, 17, 18):
                 raise VerificationError('verifier_schema_required')
             row = db.execute('''SELECT v.* FROM verification_requests v
                 JOIN projects p ON p.id=v.project_id AND p.user_id=?
@@ -202,7 +202,7 @@ class VerificationRepository:
                                          timeout=self.timeout)) as db:
                 db.execute('PRAGMA query_only=ON')
                 db.execute('BEGIN')
-                if db.execute('PRAGMA user_version').fetchone()[0] not in (13, 14, 15, 16, 17):
+                if db.execute('PRAGMA user_version').fetchone()[0] not in (13, 14, 15, 16, 17, 18):
                     raise VerificationError('verifier_schema_required')
                 if db.execute('SELECT 1 FROM projects WHERE id=? AND user_id=?',
                               (project_id, owner)).fetchone() is None:
@@ -241,7 +241,7 @@ class VerificationRepository:
                 return self._decode(previous)
             if (scope['current_revision_id'] != expected_revision
                     or scope['active_attempt_id'] is not None or scope['active_run_id'] is not None
-                    or (db.execute('PRAGMA user_version').fetchone()[0] in (13, 14, 15, 16, 17)
+                    or (db.execute('PRAGMA user_version').fetchone()[0] in (13, 14, 15, 16, 17, 18)
                         and scope['status'] != 'ready')):
                 raise VerificationError('verification_conflict')
             rows = db.execute('SELECT key,title,detail,checks_json FROM requirements WHERE project_id=? ORDER BY position,id LIMIT 129', (scope['project_id'],)).fetchall()
@@ -269,7 +269,7 @@ class VerificationRepository:
                for value in (owner, request_id)):
             raise VerificationError('invalid_verification_request')
         with self._transaction() as db:
-            if db.execute('PRAGMA user_version').fetchone()[0] in (13, 14, 15, 16, 17):
+            if db.execute('PRAGMA user_version').fetchone()[0] in (13, 14, 15, 16, 17, 18):
                 raise VerificationError('verified_registration_required')
             row = db.execute('''SELECT v.* FROM verification_requests v
                 JOIN projects p ON p.id=v.project_id WHERE v.id=? AND p.user_id=?''',

@@ -53,7 +53,7 @@ class AdoptionRepository:
             raise AdoptionError('invalid_adoption_configuration')
         self.path, self.timeout = Path(path), lock_timeout
         try:
-            if verify(self.path) not in (12, 13, 14, 15, 16, 17):
+            if verify(self.path) not in (12, 13, 14, 15, 16, 17, 18):
                 raise AdoptionError('adoption_schema_required')
         except MigrationError:
             raise AdoptionError('adoption_schema_required') from None
@@ -67,7 +67,7 @@ class AdoptionRepository:
             db.execute('PRAGMA foreign_keys=ON')
             db.execute('PRAGMA synchronous=FULL')
             db.execute('BEGIN IMMEDIATE')
-            if _schema(db) not in (12, 13, 14, 15, 16, 17):
+            if _schema(db) not in (12, 13, 14, 15, 16, 17, 18):
                 raise AdoptionError('adoption_schema_required')
             db.row_factory = sqlite3.Row
             yield db
