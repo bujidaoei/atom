@@ -23,17 +23,22 @@ pytestmark = pytest.mark.skipif(not IMAGE or not os.environ.get('ATOM_TEST_DOCKE
 
 _OUTCOME_CASES = [(True,None),(False,None),(None,None),(False,'cancel'),(False,'deadline'),
                   (False,'deadline_checkpoint')]
-_CASES = [pytest.param(version,valid,interrupt,False,
+_CASES = [pytest.param(version,valid,interrupt,False,False,
     id=f'schema-v{version}-{valid}-{interrupt or "normal"}')
     for version in (1,4,5,6,7,9,10,13) for valid,interrupt in _OUTCOME_CASES]
-_CASES.append(pytest.param(13,True,None,True,id='schema-v13-configured-verifier',
+_CASES.append(pytest.param(13,True,None,True,False,id='schema-v13-configured-verifier',
     marks=pytest.mark.skipif(not os.environ.get('ATOM_VERIFIER_TEST_IMAGE_DIGEST') or
         not os.environ.get('ATOM_TEST_VERIFIER_SECCOMP_HOST_PATH'),
         reason='requires pinned Chromium and host-visible seccomp profile')))
+_CASES.append(pytest.param(13,True,None,True,True,id='schema-v13-isolated-verifier',
+    marks=pytest.mark.skipif(not os.environ.get('ATOM_VERIFIER_TEST_IMAGE_DIGEST') or
+        not os.environ.get('ATOM_TEST_VERIFIER_SECCOMP_HOST_PATH') or
+        not os.environ.get('ATOM_TEST_VERIFIER_SOURCE_HOST_PATH'),
+        reason='requires pinned Chromium and host-visible source and seccomp profile')))
 
 
-@pytest.mark.parametrize('schema_version,valid,interrupt,verify_output',_CASES)
-def test_actual_orchestrator_leases_and_validates_registered_output(tmp_path, valid, interrupt, schema_version, verify_output):
+@pytest.mark.parametrize('schema_version,valid,interrupt,verify_output,isolate_verifier',_CASES)
+def test_actual_orchestrator_leases_and_validates_registered_output(tmp_path, valid, interrupt, schema_version, verify_output, isolate_verifier):
     assert re.fullmatch(r'sha256:[0-9a-f]{64}', IMAGE)
     root=Path(__file__).resolve().parents[3]
     archive=io.BytesIO()
@@ -42,11 +47,25 @@ def test_actual_orchestrator_leases_and_validates_registered_output(tmp_path, va
             bundle.write(path,'app/'+path.relative_to(root/'backend/app').as_posix())
     name='atom-orchestration-test-'+uuid.uuid4().hex
     observed=[]
+    sidecar_commands={}
+    control_token=uuid.uuid4().hex
     # Measured Docker Desktop clock lead: retain strict production grant checks.
     with running_broker(tmp_path/'broker.db', provision_delay=1) as (lifecycle,broker,runner,config):
         class Relay(BaseHTTPRequestHandler):
             def log_message(self,*args): pass
             def do_POST(self):
+                if self.path.startswith('/verifier-control/'):
+                    if self.headers.get('x-atom-test-control')!=control_token:
+                        self.send_response(403);self.end_headers();return
+                    command=sidecar_commands.get(self.path)
+                    if command is None:
+                        self.send_response(404);self.end_headers();return
+                    code,out,err=run_bounded(command,timeout=25)
+                    payload=out if code==0 else err
+                    self.send_response(200 if code==0 else 500)
+                    self.send_header('Content-Length',str(len(payload)))
+                    self.end_headers();self.wfile.write(payload)
+                    return
                 if self.path.endswith('/cancel'):
                     self.send_response(200);self.end_headers();return
                 body=json.loads(self.rfile.read(int(self.headers['Content-Length'])))
@@ -77,7 +96,10 @@ data=json.loads(sys.stdin.buffer.read())
 code=Path('/tmp/code');code.mkdir()
 with zipfile.ZipFile(io.BytesIO(base64.b64decode(data['code']))) as z:z.extractall(code)
 sys.path.insert(0,str(code))
-Path('/tmp/artifacts').mkdir(mode=0o700)
+Path('/tmp/artifacts').mkdir(mode=0o700,exist_ok=True)
+Path('/tmp/artifacts').chmod(0o700)
+if data['isolate_verifier']:
+    assert not Path('/var/run/docker.sock').exists()
 os.environ.update(ATOM_ENVIRONMENT='production',ATOM_SANDBOX_MODE='broker',ATOM_COOKIE_SECURE='true',
     ATOM_SECRET='synthetic-session-key-32-characters-long',ATOM_RUNTIME_TOKEN='synthetic-runtime-key-32-characters-long',
     ATOM_DATA_DIR='/tmp/data',ATOM_DB_PATH='/tmp/data/api.db',ATOM_ARTIFACT_DIR='/tmp/artifacts',
@@ -134,22 +156,33 @@ if data['interrupt']:
     (legacy/'index.html').write_text('<h1>saved before interruption</h1>')
 async def main():
     global verifier_process
-    async def start_verifier():
+    async def start_verifier(*, restart=False):
         global verifier_process
-        with open('/tmp/verifier.log','w') as log:
-            verifier_process=subprocess.Popen([sys.executable,'-c',
-                "import sys;sys.path.insert(0,'/tmp/code');import uvicorn;from app.verifier_service import create_app;uvicorn.run(create_app(),host='127.0.0.1',port=8799,log_level='error')"],
-                env=os.environ.copy(),stdout=subprocess.DEVNULL,stderr=log)
+        if data['isolate_verifier']:
+            path='restart' if restart else 'start'
+            async with httpx.AsyncClient(trust_env=False,timeout=30) as control:
+                response=await control.post('http://host.docker.internal:'+str(data['runtime'])+
+                                            '/verifier-control/'+path,
+                                            headers={'x-atom-test-control':data['control_token']})
+                assert response.status_code==200,response.text
+        else:
+            with open('/tmp/verifier.log','w') as log:
+                verifier_process=subprocess.Popen([sys.executable,'-c',
+                    "import sys;sys.path.insert(0,'/tmp/code');import uvicorn;from app.verifier_service import create_app;uvicorn.run(create_app(),host='127.0.0.1',port=8799,log_level='error')"],
+                    env=os.environ.copy(),stdout=subprocess.DEVNULL,stderr=log)
         async with httpx.AsyncClient(base_url='http://127.0.0.1:8799',
                                      trust_env=False,timeout=2) as probe:
             deadline=time.monotonic()+20
             while True:
-                assert verifier_process.poll() is None,Path('/tmp/verifier.log').read_text()
+                if not data['isolate_verifier']:
+                    assert verifier_process.poll() is None,Path('/tmp/verifier.log').read_text()
                 try:
                     assert (await probe.get('/health')).json()=={'ok':True}
                     return
                 except httpx.ConnectError:
-                    assert time.monotonic()<deadline,Path('/tmp/verifier.log').read_text()
+                    assert time.monotonic()<deadline,(
+                        'verifier_start_timeout' if data['isolate_verifier']
+                        else Path('/tmp/verifier.log').read_text())
                     await asyncio.sleep(.05)
     async def proxy(port):
         async def relay(reader,writer):
@@ -262,25 +295,48 @@ async def main():
                 running=asyncio.create_task(client.post(route+'/'+interrupted_key+'/run',headers=headers))
                 deadline=time.monotonic()+15
                 while True:
-                    inventory=await asyncio.to_thread(subprocess.run,
-                        ['docker','ps','-q','--filter','label=atom.verifier.owner='+data['verifier_id']],
-                        capture_output=True,check=True,timeout=3)
-                    if inventory.stdout.strip():break
+                    if data['isolate_verifier']:
+                        async with httpx.AsyncClient(trust_env=False,timeout=5) as control:
+                            inventory=await control.post('http://host.docker.internal:'+str(data['runtime'])+
+                                                         '/verifier-control/worker',
+                                                         headers={'x-atom-test-control':data['control_token']})
+                        assert inventory.status_code==200,inventory.text
+                        observed_worker=inventory.content.strip()
+                    else:
+                        inventory=await asyncio.to_thread(subprocess.run,
+                            ['docker','ps','-q','--filter','label=atom.verifier.owner='+data['verifier_id']],
+                            capture_output=True,check=True,timeout=3)
+                        observed_worker=inventory.stdout.strip()
+                    if observed_worker:break
                     assert not running.done() and time.monotonic()<deadline
                     await asyncio.sleep(.05)
-                verifier_process.kill()
-                await asyncio.to_thread(verifier_process.wait,10)
+                if data['isolate_verifier']:
+                    async with httpx.AsyncClient(trust_env=False,timeout=30) as control:
+                        stopped=await control.post('http://host.docker.internal:'+str(data['runtime'])+
+                                                   '/verifier-control/kill',
+                                                   headers={'x-atom-test-control':data['control_token']})
+                        assert stopped.status_code==200,stopped.text
+                else:
+                    verifier_process.kill()
+                    await asyncio.to_thread(verifier_process.wait,10)
                 unknown=await running
                 assert unknown.status_code==202 and unknown.json()['state'] in ('running','unresolved'),unknown.text
-                await start_verifier()
+                await start_verifier(restart=True)
                 after=await client.get(route+'/'+interrupted_key,headers=headers)
                 assert after.status_code==200 and after.json()==unknown.json()
                 no_replay=await client.post(route+'/'+interrupted_key+'/run',headers=headers)
                 assert no_replay.status_code==202 and no_replay.json()==after.json()
-                inventory=await asyncio.to_thread(subprocess.run,
-                    ['docker','ps','-aq','--filter','label=atom.verifier.owner='+data['verifier_id']],
-                    capture_output=True,check=True,timeout=3)
-                assert not inventory.stdout.strip()
+                if data['isolate_verifier']:
+                    async with httpx.AsyncClient(trust_env=False,timeout=5) as control:
+                        inventory=await control.post('http://host.docker.internal:'+str(data['runtime'])+
+                                                     '/verifier-control/inventory',
+                                                     headers={'x-atom-test-control':data['control_token']})
+                    assert inventory.status_code==200 and not inventory.content.strip()
+                else:
+                    inventory=await asyncio.to_thread(subprocess.run,
+                        ['docker','ps','-aq','--filter','label=atom.verifier.owner='+data['verifier_id']],
+                        capture_output=True,check=True,timeout=3)
+                    assert not inventory.stdout.strip()
             with sqlite3.connect(settings.db_path) as db:
                 assert db.execute('SELECT outcome FROM verification_results WHERE request_id=?',(key,)).fetchone()==('passed',)
                 assert db.execute('SELECT count(*) FROM verification_attestations').fetchone()==(1,)
@@ -312,8 +368,12 @@ finally:
         parameters={'code':base64.b64encode(archive.getvalue()).decode(),'admin':config.admin_token,
             'key':config.grant_key,'broker':int(broker._origin.rsplit(':',1)[1]),'runtime':relay.server_port,
             'valid':valid,'interrupt':interrupt,'schema_version':schema_version,
-            'verify_output':verify_output}
+            'verify_output':verify_output,'isolate_verifier':isolate_verifier,
+            'control_token':control_token}
         extra=[]
+        test_volumes=[]
+        created_volumes=[]
+        sidecar_name=name+'-verifier'
         if verify_output:
             seccomp=Path(os.environ['ATOM_TEST_VERIFIER_SECCOMP_HOST_PATH'])
             assert seccomp.is_absolute() and seccomp.is_file()
@@ -321,12 +381,50 @@ finally:
             assert re.fullmatch(r'sha256:[0-9a-f]{64}',verifier_image)
             parameters.update(verifier_image=verifier_image,seccomp=str(seccomp),
                               verifier_id='orchestrated-'+uuid.uuid4().hex)
-            # This is a test-only nested container: the separate verifier process
-            # needs the daemon socket to run the real pinned Chromium worker.
-            extra=['--user','0:0','--volume','/var/run/docker.sock:/var/run/docker.sock',
-                   '--volume','/usr/bin/docker:/usr/bin/docker:ro',
-                   '--volume',f'{seccomp}:{seccomp}:ro']
+            if isolate_verifier:
+                source=Path(os.environ['ATOM_TEST_VERIFIER_SOURCE_HOST_PATH'])
+                assert source.is_absolute() and (source/'backend/app/verifier_service.py').is_file()
+                test_volumes=[name+'-data',name+'-artifacts']
+                extra=['--user','0:0','--mount',f'type=volume,source={test_volumes[0]},target=/tmp/data',
+                       '--mount',f'type=volume,source={test_volumes[1]},target=/tmp/artifacts']
+                sidecar_commands.update({
+                    '/verifier-control/start':['docker','run','-d','--name',sidecar_name,
+                        '--network','container:'+name,'--volumes-from',name,
+                        '--volume','/var/run/docker.sock:/var/run/docker.sock',
+                        '--volume','/usr/bin/docker:/usr/bin/docker:ro',
+                        '--volume',f'{seccomp}:{seccomp}:ro',
+                        '--volume',f'{source}:{source}:ro',
+                        '--user','0:0','--cap-drop','ALL','--security-opt','no-new-privileges',
+                        '--workdir',str(source/'backend'),
+                        '-e','PYTHONPATH='+str(source/'backend'),
+                        '-e','ATOM_VERIFIER_DB_PATH=/tmp/data/api.db',
+                        '-e','ATOM_VERIFIER_ARTIFACT_DIR=/tmp/artifacts',
+                        '-e','ATOM_VERIFIER_IMAGE='+verifier_image,
+                        '-e','ATOM_VERIFIER_SECCOMP_PATH='+str(seccomp),
+                        '-e','ATOM_VERIFIER_ID='+parameters['verifier_id'],
+                        '-e','ATOM_VERIFIER_CONTROL_TOKEN=synthetic-verifier-control-key-32-characters',
+                        IMAGE,'/app/backend/.venv/bin/python','-m','uvicorn',
+                        'app.verifier_service:create_app','--factory','--app-dir',str(source/'backend'),
+                        '--host','127.0.0.1',
+                        '--port','8799','--log-level','error'],
+                    '/verifier-control/kill':['docker','kill',sidecar_name],
+                    '/verifier-control/restart':['docker','start',sidecar_name],
+                    '/verifier-control/worker':['docker','ps','-q','--filter',
+                        'label=atom.verifier.owner='+parameters['verifier_id']],
+                    '/verifier-control/inventory':['docker','ps','-aq','--filter',
+                        'label=atom.verifier.owner='+parameters['verifier_id']]})
+            else:
+                # Earlier service-behavior harness; the new isolated case keeps
+                # the API's daemon socket absent throughout the same workflow.
+                extra=['--user','0:0','--volume','/var/run/docker.sock:/var/run/docker.sock',
+                       '--volume','/usr/bin/docker:/usr/bin/docker:ro',
+                       '--volume',f'{seccomp}:{seccomp}:ro']
         try:
+            for volume in test_volumes:
+                code,out,err=run_bounded(['docker','volume','create','--label',
+                    'atom.test.owner='+name,volume])
+                assert code==0,err.decode()
+                created_volumes.append(volume)
             process=subprocess.run(['docker','run','--name',name,'--network=bridge',
                 '--add-host','host.docker.internal:host-gateway','--read-only',
                 *([] if verify_output else ['--user','1000:1000']),
@@ -334,14 +432,23 @@ finally:
                 '--tmpfs','/tmp:rw,nosuid,nodev,size=256m,mode=1777','--publish','127.0.0.1::8767',
                 *extra,'--workdir','/tmp','-i',IMAGE,'/app/backend/.venv/bin/python','-I','-c',script],
                 input=json.dumps(parameters).encode(),capture_output=True,
-                timeout=150 if verify_output else 55,check=False)
+                timeout=180 if verify_output else 55,check=False)
             assert len(process.stdout)+len(process.stderr)<=256*1024
+            if process.returncode!=0 and isolate_verifier:
+                code,logs,err=run_bounded(['docker','logs',sidecar_name],output_limit=8192)
+                assert process.returncode==0,process.stderr.decode()+'\nverifier logs: '+(
+                    logs+err).decode(errors='replace')
             assert process.returncode==0,process.stderr.decode()
             assert json.loads(process.stdout)['status']==('cancelled' if interrupt=='cancel' else 'timed_out' if interrupt else 'done' if valid else 'failed')
             assert len(observed)==(2 if valid else 1)
         finally:
             relay.shutdown();relay.server_close();worker.join(timeout=3)
+            if isolate_verifier:
+                run_bounded(['docker','rm','-f',sidecar_name])
             run_bounded(['docker','rm','-f',name])
+            for volume in created_volumes:
+                code,out,err=run_bounded(['docker','volume','rm',volume])
+                assert code==0,err.decode()
             if verify_output:
                 code,out,err=run_bounded(['docker','ps','-aq','--filter',
                     'label=atom.verifier.owner='+parameters['verifier_id']])
