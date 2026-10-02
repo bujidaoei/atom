@@ -55,6 +55,8 @@ def assignment(adopted, tmp_path, request):
                    (json.dumps(requirement['checks']), 'project'))
     intent['expected_contract'] = capture_contract([requirement]).digest
     migrate(path, tmp_path / 'before-v13.db', target_version=13)
+    if getattr(request, 'param', None) == 'v14':
+        migrate(path, tmp_path / 'before-v14.db', target_version=14)
     request = VerificationRepository(path).reserve(**intent)
     authority = VerifierAuthority(path)
     supervisor = VerifierSupervisor(image=IMAGE, seccomp_path=PROFILE, verifier_id='worker-1')
@@ -66,9 +68,10 @@ def assignment(adopted, tmp_path, request):
     return path, supervisor, authority, dispatched, Store(artifact.key, payload)
 
 
+@pytest.mark.parametrize('schema_version', [13, 14])
 @pytest.mark.skipif(sys.platform != 'linux' or not os.environ.get('ATOM_VERIFIER_TEST_REAL_STORE'),
                     reason='requires target Linux Docker daemon and real ArtifactStore')
-def test_private_verifier_process_owns_browser_and_registers_real_result(adopted, tmp_path):
+def test_private_verifier_process_owns_browser_and_registers_real_result(adopted, tmp_path, schema_version):
     path, receipt, intent = adopted
     with sqlite3.connect(path) as db:
         db.execute('UPDATE requirements SET checks_json=? WHERE project_id=?',
@@ -78,6 +81,8 @@ def test_private_verifier_process_owns_browser_and_registers_real_result(adopted
         'checks':[{'type':'exists','selector':'body'}]}]).digest
     migrate(path, tmp_path / 'before-v13.db', target_version=13)
     reserved = VerificationRepository(path).reserve(**intent)
+    if schema_version == 14:
+        migrate(path, tmp_path / 'before-v14.db', target_version=14)
     payload, artifact = snapshot(b'<html>heat</html>')
     assert artifact == receipt.artifact
     root = tmp_path / 'artifacts'
@@ -86,7 +91,7 @@ def test_private_verifier_process_owns_browser_and_registers_real_result(adopted
     token = secrets.token_urlsafe(48)
     config = VerifierProcessConfig(path, root, IMAGE, PROFILE, 'service-worker', token)
     assert config.verifier_id == 'service-worker'
-    with pytest.raises(VerifierStartupError, match='verifier_schema_v13_required'):
+    with pytest.raises(VerifierStartupError, match='verifier_schema_required'):
         create_verifier_app(VerifierProcessConfig(tmp_path / 'before-v13.db', root,
             IMAGE, PROFILE, 'service-worker', token))
     with pytest.raises(VerifierStartupError, match='verifier_configuration_invalid'):
@@ -222,6 +227,7 @@ def test_actual_isolated_browser_registers_one_v13_result(assignment):
         assert db.execute('SELECT count(*) FROM verification_results').fetchone() == (1,)
 
 
+@pytest.mark.parametrize('assignment', ['v13', 'v14'], indirect=True)
 @pytest.mark.skipif(sys.platform != 'linux' or not os.environ.get('ATOM_VERIFIER_TEST_REAL_STORE'),
                     reason='requires target Linux Docker daemon and real ArtifactStore')
 def test_actual_browser_attestation_publishes_exact_pinned_store_bytes(assignment, tmp_path):
