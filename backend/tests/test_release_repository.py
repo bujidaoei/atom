@@ -121,6 +121,19 @@ def test_unpublish_replay_cannot_disable_later_release(release):
     with pytest.raises(VerificationError): repository.unpublish(**(command | {'owner':'foreign'}))
 
 
+def test_verified_withdrawal_refuses_legacy_schema_without_mutation(release):
+    path, repository, args = release
+    first = repository.publish(**args)
+    command = dict(owner='user', project_id='project', command_id='verified-off',
+                   expected_release=first.release_id, expected_generation=1,
+                   require_verified_schema=True)
+    with pytest.raises(VerificationError, match='release_schema_required'):
+        repository.unpublish(**command)
+    with sqlite3.connect(path) as db:
+        assert db.execute('SELECT release_id,live,generation FROM release_publications').fetchone() == ('release',1,1)
+        assert db.execute("SELECT count(*) FROM command_receipts WHERE key='unpublish:verified-off'").fetchone() == (0,)
+
+
 def test_publish_and_unpublish_compete_for_one_generation(release):
     path,repository,args = release
     repository.publish(**args)

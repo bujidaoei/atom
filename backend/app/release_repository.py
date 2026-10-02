@@ -282,7 +282,8 @@ class ReleaseRepository:
                     release_id=release_id,operation_id=release_id,generation=generation,occurred_at=int(time.time()))
             return receipt
 
-    def unpublish(self, *, owner, project_id, command_id, expected_release, expected_generation) -> UnpublishReceipt:
+    def unpublish(self, *, owner, project_id, command_id, expected_release, expected_generation,
+                  require_verified_schema=False) -> UnpublishReceipt:
         for value in (owner,project_id,command_id,expected_release):
             if not isinstance(value,str) or re.fullmatch(r'[A-Za-z0-9_.-]{1,100}',value) is None:
                 raise VerificationError('invalid_release_request')
@@ -293,6 +294,8 @@ class ReleaseRepository:
         digest = hashlib.sha256(json.dumps(intent,sort_keys=True,separators=(',',':')).encode()).hexdigest()
         key = 'unpublish:' + command_id
         with self._ledger._transaction() as db:
+            if require_verified_schema and db.execute('PRAGMA user_version').fetchone()[0] != 13:
+                raise VerificationError('release_schema_required')
             if db.execute('SELECT 1 FROM projects WHERE id=? AND user_id=?',(project_id,owner)).fetchone() is None:
                 raise VerificationError('release_not_found')
             prior = db.execute('SELECT digest,response_json FROM command_receipts WHERE project_id=? AND key=?',(project_id,key)).fetchone()

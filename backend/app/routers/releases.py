@@ -249,7 +249,8 @@ async def unpublish_verified_release(project: OwnedProject, release_id: str, req
             receipt = ReleaseRepository(settings.db_path).unpublish(
                 owner=project.user_id, project_id=project.id,
                 command_id=command['commandId'], expected_release=release_id,
-                expected_generation=command['expectedGeneration'])
+                expected_generation=command['expectedGeneration'],
+                require_verified_schema=True)
             return {'commandId': receipt.command_id, 'releaseId': receipt.release_id,
                     'generation': receipt.generation}
         worker = asyncio.create_task(asyncio.to_thread(apply))
