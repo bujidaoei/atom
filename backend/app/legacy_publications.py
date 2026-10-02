@@ -4,18 +4,27 @@ Run only against a quiesced database and published-file backup. A mismatch fails
 closed: importing a draft that differs from the old public bytes would silently
 change an existing URL.
 """
+import argparse
 from contextlib import closing
 from dataclasses import dataclass
 import hashlib
 import io
+import json
 from pathlib import Path
 import sqlite3
+import ssl
 import stat
+import sys
 import uuid
 
-from .artifacts import SnapshotStore
+from .artifacts import ArtifactError, SnapshotStore
+from .cos_artifacts import CosArtifactStore
+from .ip_ingress import IngressError, probe_ip_routes
+from .project_origins import OriginRoute, ProjectOriginError, ProjectOriginRepository
 from .release_repository import ReleaseRepository, ReleaseReceipt
-from .snapshots import verify_snapshot
+from .snapshots import SnapshotError, verify_snapshot
+from .storage_config import ObjectStorageSettings
+from .verification_repository import VerificationError
 
 
 class LegacyPublicationError(RuntimeError):
@@ -98,3 +107,72 @@ def import_live_legacy(database: Path, published_root: Path, store: SnapshotStor
         store, owner=candidate.owner, project_id=project_id, release_id=uuid.uuid4().hex,
         expected_revision=candidate.revision_id, expected_generation=0,
         audience='public', slug=slug, readiness=readiness)
+
+
+def _readiness(database: Path, project_id: str, address: str,
+               first_port: int, last_port: int, ca_file: Path | None):
+    origins = ProjectOriginRepository(database, first_port=first_port,
+                                      last_port=last_port)
+    pair = origins.for_project(project_id)
+    if pair is None:
+        raise LegacyPublicationError('legacy_import_origin_required')
+    context = ssl.create_default_context(cafile=str(ca_file) if ca_file else None)
+
+    def check():
+        probe_ip_routes((OriginRoute(project_id, 'preview', pair.preview_port),
+                         OriginRoute(project_id, 'public', pair.public_port)),
+                        address, tls_context=context, timeout_seconds=3)
+    return check
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description='Inspect or import an exact legacy publication')
+    parser.add_argument('--database', required=True, type=Path)
+    parser.add_argument('--published-root', required=True, type=Path)
+    parser.add_argument('--project-id', required=True)
+    parser.add_argument('--slug', required=True)
+    parser.add_argument('--apply', action='store_true')
+    parser.add_argument('--expect-revision')
+    parser.add_argument('--expect-artifact')
+    parser.add_argument('--address')
+    parser.add_argument('--first-port', type=int)
+    parser.add_argument('--last-port', type=int)
+    parser.add_argument('--ca-file', type=Path)
+    args = parser.parse_args(argv)
+    if (not args.database.is_absolute() or not args.published_root.is_absolute()
+            or (args.apply and (not args.expect_revision or not args.expect_artifact
+                or not args.address or args.first_port is None or args.last_port is None))):
+        parser.error('absolute paths and exact revision/artifact/ingress inputs are required')
+    if args.apply and args.ca_file is not None and not args.ca_file.is_absolute():
+        parser.error('CA path must be absolute')
+    try:
+        settings = ObjectStorageSettings()
+        if settings.storage_backend != 'cos':
+            raise LegacyPublicationError('legacy_import_cos_required')
+        store = CosArtifactStore(settings)
+        candidate = inspect_live_legacy(args.database, args.published_root, store,
+                                        project_id=args.project_id, slug=args.slug)
+        if not args.apply:
+            print(json.dumps(candidate.__dict__, sort_keys=True))
+            return 0
+        if (candidate.revision_id != args.expect_revision
+                or candidate.artifact_key != args.expect_artifact):
+            raise LegacyPublicationError('legacy_import_expectation_changed')
+        readiness = _readiness(args.database, args.project_id, args.address,
+                               args.first_port, args.last_port, args.ca_file)
+        receipt = import_live_legacy(args.database, args.published_root, store,
+                                     project_id=args.project_id, slug=args.slug,
+                                     readiness=readiness)
+        print(json.dumps(receipt.__dict__, sort_keys=True))
+        return 0
+    except (LegacyPublicationError, ProjectOriginError, IngressError, ArtifactError,
+            VerificationError, SnapshotError, OSError, ValueError, sqlite3.Error) as error:
+        code = (str(error) if isinstance(error, (LegacyPublicationError, ProjectOriginError,
+                                                 IngressError, ArtifactError, VerificationError,
+                                                 SnapshotError)) else 'legacy_import_unavailable')
+        print(json.dumps({'error': code}), file=sys.stderr)
+        return 1
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())
