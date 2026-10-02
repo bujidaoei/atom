@@ -71,7 +71,7 @@ def test_actual_orchestrator_leases_and_validates_registered_output(tmp_path, va
         relay=ThreadingHTTPServer((os.environ.get('ATOM_TEST_BROKER_BIND_HOST','127.0.0.1'),0),Relay)
         worker=threading.Thread(target=relay.serve_forever,daemon=True);worker.start()
         script=r'''
-import asyncio,base64,io,json,os,sys,zipfile,sqlite3,subprocess,time
+import asyncio,base64,io,json,os,sys,zipfile,sqlite3,subprocess,time,httpx
 from pathlib import Path
 data=json.loads(sys.stdin.buffer.read())
 code=Path('/tmp/code');code.mkdir()
@@ -134,6 +134,23 @@ if data['interrupt']:
     (legacy/'index.html').write_text('<h1>saved before interruption</h1>')
 async def main():
     global verifier_process
+    async def start_verifier():
+        global verifier_process
+        with open('/tmp/verifier.log','w') as log:
+            verifier_process=subprocess.Popen([sys.executable,'-c',
+                "import sys;sys.path.insert(0,'/tmp/code');import uvicorn;from app.verifier_service import create_app;uvicorn.run(create_app(),host='127.0.0.1',port=8799,log_level='error')"],
+                env=os.environ.copy(),stdout=subprocess.DEVNULL,stderr=log)
+        async with httpx.AsyncClient(base_url='http://127.0.0.1:8799',
+                                     trust_env=False,timeout=2) as probe:
+            deadline=time.monotonic()+20
+            while True:
+                assert verifier_process.poll() is None,Path('/tmp/verifier.log').read_text()
+                try:
+                    assert (await probe.get('/health')).json()=={'ok':True}
+                    return
+                except httpx.ConnectError:
+                    assert time.monotonic()<deadline,Path('/tmp/verifier.log').read_text()
+                    await asyncio.sleep(.05)
     async def proxy(port):
         async def relay(reader,writer):
             upstream=None;tasks=[]
@@ -161,20 +178,7 @@ async def main():
             env=absent_env,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
         _unused,errors=await asyncio.wait_for(absent.communicate(),25)
         assert absent.returncode!=0 and b'verifier_unavailable' in errors,errors.decode()
-        verifier_process=subprocess.Popen([sys.executable,'-c',
-            "import sys;sys.path.insert(0,'/tmp/code');import uvicorn;from app.verifier_service import create_app;uvicorn.run(create_app(),host='127.0.0.1',port=8799,log_level='error')"],
-            env=os.environ.copy(),stdout=subprocess.DEVNULL,stderr=open('/tmp/verifier.log','w'))
-        import httpx
-        with httpx.Client(base_url='http://127.0.0.1:8799',trust_env=False,timeout=2) as probe:
-            deadline=time.monotonic()+20
-            while True:
-                assert verifier_process.poll() is None,Path('/tmp/verifier.log').read_text()
-                try:
-                    assert probe.get('/health').json()=={'ok':True}
-                    break
-                except httpx.ConnectError:
-                    assert time.monotonic()<deadline,Path('/tmp/verifier.log').read_text()
-                    time.sleep(.05)
+        await start_verifier()
     orchestrator._client=RuntimeClient()
     server=uvicorn.Server(uvicorn.Config(app,host='0.0.0.0',port=8767,log_level='error',access_log=False))
     serving=asyncio.create_task(server.serve())
@@ -234,7 +238,7 @@ async def main():
                 assert db.execute('SELECT count(*) FROM revision_records').fetchone()[0]==1+int(registered)
         if data['valid']: assert [entry['path'] for entry in listing['files']]==['index.html','notes.txt']
         if data['verify_output']:
-            import httpx,secrets
+            import secrets
             route='http://127.0.0.1:8767/api/projects/p/verifications'
             headers={'origin':'https://console.example.org','host':'console.example.org',
                      'x-forwarded-proto':'https'}
@@ -249,9 +253,39 @@ async def main():
                 assert result.json()['state']=='passed' and result.json()['total']==result.json()['passed']==1
                 settled=await client.get(route+'/'+key,headers=headers)
                 assert settled.status_code==200 and settled.json()==result.json()
+                with sqlite3.connect(settings.db_path) as db:
+                    db.execute('UPDATE requirements SET checks_json=? WHERE project_id=?',
+                        (json.dumps([{'type':'flow','selector':'#missing','expect':'body'}]),'p'))
+                interrupted_key=secrets.token_hex(16)
+                new_request=await client.post(route,json={'requestId':interrupted_key},headers=headers)
+                assert new_request.status_code==200,new_request.text
+                running=asyncio.create_task(client.post(route+'/'+interrupted_key+'/run',headers=headers))
+                deadline=time.monotonic()+15
+                while True:
+                    inventory=await asyncio.to_thread(subprocess.run,
+                        ['docker','ps','-q','--filter','label=atom.verifier.owner='+data['verifier_id']],
+                        capture_output=True,check=True,timeout=3)
+                    if inventory.stdout.strip():break
+                    assert not running.done() and time.monotonic()<deadline
+                    await asyncio.sleep(.05)
+                verifier_process.kill()
+                await asyncio.to_thread(verifier_process.wait,10)
+                unknown=await running
+                assert unknown.status_code==202 and unknown.json()['state'] in ('running','unresolved'),unknown.text
+                await start_verifier()
+                after=await client.get(route+'/'+interrupted_key,headers=headers)
+                assert after.status_code==200 and after.json()==unknown.json()
+                no_replay=await client.post(route+'/'+interrupted_key+'/run',headers=headers)
+                assert no_replay.status_code==202 and no_replay.json()==after.json()
+                inventory=await asyncio.to_thread(subprocess.run,
+                    ['docker','ps','-aq','--filter','label=atom.verifier.owner='+data['verifier_id']],
+                    capture_output=True,check=True,timeout=3)
+                assert not inventory.stdout.strip()
             with sqlite3.connect(settings.db_path) as db:
                 assert db.execute('SELECT outcome FROM verification_results WHERE request_id=?',(key,)).fetchone()==('passed',)
                 assert db.execute('SELECT count(*) FROM verification_attestations').fetchone()==(1,)
+                assert db.execute('SELECT count(*) FROM verification_dispatches').fetchone()==(2,)
+                assert db.execute('SELECT count(*) FROM verification_results').fetchone()==(1,)
         if data['schema_version'] in (4,5,6,7,9,10,13):
             codec=credentials();source=codec.authenticate(console_token)
             assert source and source.user_id=='owner'
@@ -300,7 +334,7 @@ finally:
                 '--tmpfs','/tmp:rw,nosuid,nodev,size=256m,mode=1777','--publish','127.0.0.1::8767',
                 *extra,'--workdir','/tmp','-i',IMAGE,'/app/backend/.venv/bin/python','-I','-c',script],
                 input=json.dumps(parameters).encode(),capture_output=True,
-                timeout=100 if verify_output else 55,check=False)
+                timeout=150 if verify_output else 55,check=False)
             assert len(process.stdout)+len(process.stderr)<=256*1024
             assert process.returncode==0,process.stderr.decode()
             assert json.loads(process.stdout)['status']==('cancelled' if interrupt=='cancel' else 'timed_out' if interrupt else 'done' if valid else 'failed')
