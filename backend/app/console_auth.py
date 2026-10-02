@@ -56,3 +56,12 @@ def require_auth_origin(request):
     require_console_host(request)
     if request.headers.getlist('origin') != [settings.console_origin]:
         raise HTTPException(403, '请求来源无效')
+
+
+def require_authenticated_console_request(request):
+    """Keep cookie-authenticated API authority on the configured console origin."""
+    if get_settings().session_mode != 'durable':
+        return
+    require_console_host(request)
+    if request.method not in ('GET', 'HEAD', 'OPTIONS'):
+        require_auth_origin(request)

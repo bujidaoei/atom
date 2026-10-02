@@ -110,6 +110,20 @@ def test_missing_or_duplicate_origin_denies_authenticated_logout(durable_client)
     assert client.get('/api/auth/me').status_code==200
 
 
+def test_cookie_authenticated_project_routes_reject_foreign_origin_and_host(durable_client):
+    client,path=durable_client
+    assert client.post('/api/auth/register',json=LOGIN).status_code==200
+    token=client.cookies.get(DURABLE_COOKIE)
+    assert token
+    for headers in ({'Origin':'https://foreign.example'}, {'Origin':''},
+                    {'Host':'foreign.example','Origin':ORIGIN}):
+        response=client.post('/api/projects',json={'prompt':'Build a website'},headers=headers)
+        assert response.status_code==403
+    assert client.get('/api/projects',headers={'Host':'foreign.example'}).status_code==403
+    with sqlite3.connect(path) as db:
+        assert db.execute('SELECT count(*) FROM projects').fetchone()==(0,)
+
+
 def test_durable_schema_failure_is_unavailable_not_anonymous(durable_client):
     client,path=durable_client
     assert client.post('/api/auth/register',json=LOGIN).status_code==200

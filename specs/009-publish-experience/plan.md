@@ -26,6 +26,8 @@ US2 reuses immutable registered artifacts and content policy checks. Introduce a
 US3 list retained publications newest first with bounded pagination, timestamps, current-live marker and optional check details. Restore creates a new publication event from retained exact content, preserves draft head and uses expected generation to reject races. Historical preview remains owner-authorized unless deliberately published.
 Content delivery reuses independent-site binding and host-only console sessions. The owner has no domain and requests IP-only access. Although IP TLS certificates now exist, different ports do not isolate cookies and one port for all projects would share browser storage. A safe IP-only design requires further work; no production activation until its cross-project and console isolation, migration and rollback tests pass. The private COS bucket supplies bytes, not an isolated browser origin.
 
+The first IP-only security increment enforces the configured HTTPS console host on every durable cookie-authenticated API request and the exact console `Origin` on all unsafe methods, including ordinary project/settings routes that previously relied on a valid cookie alone. This closes one cross-port CSRF path; it does not isolate cookie namespace, supply per-project ports or constitute a public ingress design. Keep T012a open until native Web Storage, cookie behavior, direct navigation, control-plane denial and port lifecycle are proven together.
+
 ## Delivery Sequence
 1. Reproduce and fix actual 500; check save/reload regression.
 2. Review policy/schema extension against all release/content invariants; record exact migration contract before coding it.
