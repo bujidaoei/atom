@@ -15,7 +15,7 @@ from app.preview_view import materialized_preview
 from app.release_repository import ReleaseRepository
 from app.revisions import RevisionRepository
 from app.verification_repository import VerificationRepository
-from test_adoption_repository import prepared
+from test_adoption_repository import Store, prepared
 from test_adoption_verification_repository import adopted
 from test_revision_migrations import legacy
 from test_rollback_v14_repository import historical
@@ -144,6 +144,23 @@ def test_owner_preview_handoff_is_one_use_project_bound_and_revoked_on_logout(hi
     AccessRepository(path).revoke_console_session(user_id='user', session_id=source.id)
     with pytest.raises(PreviewAccessError, match='preview_access_denied'):
         access.authorize(project_id='project', session_secret=session.secret)
+
+
+@pytest.mark.parametrize('prepared', [12], indirect=True)
+def test_current_saved_race_heat_opens_on_isolated_preview_origin(prepared, tmp_path):
+    path, _main, _heat, heat_payload, heat_artifact = prepared
+    for version in range(13, 19):
+        migrate(path, tmp_path / f'before-v{version}.db', target_version=version)
+    ProjectOriginRepository(path, first_port=20000, last_port=20003).reserve('project')
+    source = AccessRepository(path).create_console_session(user_id='user', lifetime_seconds=900)
+    access = PreviewAccessRepository(path)
+    grant = access.issue(owner_id='user', source_session_id=source.id,
+                         project_id='project', revision_id='heat-root')
+    session = access.exchange(project_id='project', handoff=grant.secret)
+    with materialized_preview(access, Store(heat_artifact.key, heat_payload),
+                              project_id='project', session_secret=session.secret) as view:
+        assert view.revision.revision_id == 'heat-root'
+        assert (view.path / 'index.html').read_bytes() == b'<html>heat</html>'
 
 
 def _exchange_result(access, handoff):

@@ -6,6 +6,7 @@ import { EmptyState, ErrorState, LoadingState } from "../components/ui/States";
 import { Spinner } from "../components/ui/Spinner";
 import { api, errorMessage, withBase } from "../lib/api";
 import { formatBytes, formatElapsed, formatNumber } from "../lib/format";
+import { openRevisionPreview } from "../lib/previewAccess";
 import type { RaceHeat, RaceSummary } from "../lib/types";
 import type { HeatActivity } from "./useProjectStream";
 
@@ -297,8 +298,11 @@ function HeatCard({
 }) {
   const [adopting, setAdopting] = useState(false);
   const [adoptError, setAdoptError] = useState<string | null>(null);
+  const [openingPreview, setOpeningPreview] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
   const status = HEAT_STATUS[heat.status];
   const incompleteSaved = Boolean(heat.incompleteSavedRevisionId);
+  const previewRevisionId = heat.incompleteSavedRevisionId ?? heat.revisionId;
   const retryLabel = incompleteSaved ? '从已保存版本继续生成'
     : heat.revisionId ? '基于已有版本重新生成' : '重新生成此赛道';
 
@@ -333,7 +337,9 @@ function HeatCard({
         ) : (
           <div className="flex h-full items-center justify-center px-m text-center">
             <p className="text-sm text-neutral-40">
-              {isolatedPreview && heat.previewUrl
+              {isolatedPreview && previewRevisionId
+                ? "打开已保存版本，在独立窗口查看这条赛道。"
+                : isolatedPreview && heat.previewUrl
                 ? "赛道预览需要先成为已保存版本，避免在工作区执行生成的脚本。"
                 : !["queued", "running", "done"].includes(heat.status)
                 ? (heat.error ?? "这一路失败了")
@@ -362,11 +368,29 @@ function HeatCard({
         </p>
       ) : null}
 
+      {previewError ? (
+        <p className="border-t border-neutral-8 px-m py-xs text-xs text-danger-strong" role="alert">
+          {previewError}
+        </p>
+      ) : null}
+
       {heat.error && !["running", "queued", "done"].includes(heat.status) ? (
         <p className="border-t border-neutral-8 px-m py-s text-xs text-neutral-60">{heat.error}。可在上方调整时间上限后{retryLabel}；未完成版本尚未通过验收，不能采用或发布。</p>
       ) : null}
 
-      <footer className="mt-auto flex items-center gap-s border-t border-neutral-8 px-m py-s">
+      <footer className="mt-auto flex flex-wrap items-center gap-s border-t border-neutral-8 px-m py-s">
+        {isolatedPreview && previewRevisionId ? (
+          <Button size="sm" variant="secondary" loading={openingPreview}
+            onClick={() => {
+              setOpeningPreview(true);
+              setPreviewError(null);
+              void openRevisionPreview(projectId, previewRevisionId)
+                .catch((error: unknown) => setPreviewError(errorMessage(error)))
+                .finally(() => setOpeningPreview(false));
+            }}>
+            预览已保存版本
+          </Button>
+        ) : null}
         {!["running", "queued", "done"].includes(heat.status) ? (
           <Button size="sm" variant="secondary" loading={adopting} disabled={raceRunning}
             onClick={() => {
