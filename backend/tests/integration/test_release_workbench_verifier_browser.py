@@ -167,6 +167,10 @@ def test_ui_runs_real_private_verification_and_publishes(
             page = context.new_page()
             stage('page-created')
             page.on('pageerror', lambda error: failures.append(str(error)))
+            page.on('console', lambda message: failures.append(message.text)
+                    if message.type == 'error' else None)
+            page.on('requestfailed', lambda request: failures.append(
+                'request_failed: ' + request.url + ' ' + str(request.failure)))
             page.on('response', lambda response: responses.append((response.status, response.url)))
             try:
                 page.goto(ORIGIN + '/atom/app/p/project', wait_until='domcontentloaded',
@@ -174,8 +178,13 @@ def test_ui_runs_real_private_verification_and_publishes(
             except Exception as error:
                 raise AssertionError((type(error).__name__, requests, responses, failures)) from error
             stage('page-loaded')
-            assert page.get_by_role('tab', name='发布', exact=True).count() == 1, (
-                page.url, requests, responses, failures, page.locator('body').inner_text()[:600])
+            try:
+                page.get_by_role('tab', name='发布', exact=True).wait_for(timeout=8000)
+            except Exception:
+                stage('tab-missing ' + repr((page.url, requests, responses, failures)))
+                context.close()
+                browser.close()
+                raise
             page.get_by_role('tab', name='发布', exact=True).click()
             stage('release-tab-open')
             panel = page.get_by_label('发布工作台')
