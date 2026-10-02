@@ -16,6 +16,7 @@ from ..errors import AtomError
 from ..events import bus
 from ..revision_http import project_revision_view, project_catalog
 from ..models import AcceptanceRun, Message, Project, Race, RaceHeat, Requirement
+from ..project_origins import ProjectOriginError, ProjectOriginRepository
 from ..serialize import acceptance_json, project_detail, project_summary, race_json
 from ..services.orchestrator import orchestrator
 from ..services.parsing import fallback_title
@@ -91,9 +92,27 @@ def create_project(
     body: CreateProject, user: CurrentUser, session: DbSession, request: Request
 ) -> dict[str, object]:
     prompt = body.prompt.strip()
+    settings = get_settings()
+    origins = None
+    if settings.ip_preview_enabled:
+        try:
+            origins = ProjectOriginRepository(settings.db_path,
+                first_port=settings.ip_preview_first_port,
+                last_port=settings.ip_preview_last_port)
+        except ProjectOriginError:
+            raise HTTPException(503, '项目地址服务暂不可用') from None
     project = Project(user_id=user.id, prompt=prompt, title=fallback_title(prompt))
     session.add(project)
     session.flush()
+    if origins is not None:
+        try:
+            origins.reserve_in_transaction(session.connection().connection.driver_connection,
+                                           project.id)
+        except ProjectOriginError as error:
+            session.rollback()
+            raise HTTPException(409 if str(error) == 'origin_capacity' else 503,
+                                '项目地址容量已满' if str(error) == 'origin_capacity'
+                                else '项目地址服务暂不可用') from None
     session.add(Message(project_id=project.id, role="user", content=prompt))
     session.commit()
     storage.ensure_project_dirs(project.id)

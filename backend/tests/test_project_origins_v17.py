@@ -149,6 +149,53 @@ def test_origin_reservation_is_atomic_stable_and_bounded(v16, tmp_path):
     assert 'https://192.0.2.10:20000 {' in retired
 
 
+def test_existing_project_port_migration_is_all_or_nothing(v16, tmp_path):
+    migrate(v16, tmp_path / 'before-existing-origins.db', target_version=17)
+    engine = create_engine('sqlite:///' + v16.as_posix())
+    with Session(engine) as session:
+        session.add_all([Project(id=identity, user_id='user', prompt=identity, title=identity)
+                         for identity in ('other', 'third')])
+        session.commit()
+    engine.dispose()
+    short = ProjectOriginRepository(v16, first_port=20000, last_port=20003)
+    with pytest.raises(ProjectOriginError, match='origin_capacity'):
+        short.reserve_existing()
+    with sqlite3.connect(v16) as db:
+        assert db.execute('SELECT count(*) FROM project_origin_ports').fetchone() == (0,)
+    enough = ProjectOriginRepository(v16, first_port=20000, last_port=20005)
+    assigned = enough.reserve_existing()
+    assert [(item.project_id, item.preview_port, item.public_port) for item in assigned] == [
+        ('other', 20000, 20001), ('project', 20002, 20003), ('third', 20004, 20005)]
+    assert enough.reserve_existing() == assigned
+    with sqlite3.connect(v16) as db:
+        assert db.execute('SELECT count(*) FROM project_origin_ports').fetchone() == (6,)
+        db.execute('PRAGMA foreign_keys=ON')
+        db.execute("DELETE FROM projects WHERE id='other'")
+    assert [(item.project_id, item.preview_port) for item in enough.reserve_existing()] == [
+        ('project', 20002), ('third', 20004)]
+    assert enough.route(20000) is None
+    expanded = ProjectOriginRepository(v16, first_port=20000, last_port=20007)
+    engine = create_engine('sqlite:///' + v16.as_posix())
+    with Session(engine) as session:
+        session.add(Project(id='fourth', user_id='user', prompt='fourth', title='Fourth'))
+        session.flush()
+        ports = expanded.reserve_in_transaction(
+            session.connection().connection.driver_connection, 'fourth')
+        assert (ports.preview_port, ports.public_port) == (20006, 20007)
+        session.commit()
+    with Session(engine) as session:
+        session.add(Project(id='fifth', user_id='user', prompt='fifth', title='Fifth'))
+        session.flush()
+        with pytest.raises(ProjectOriginError, match='origin_capacity'):
+            expanded.reserve_in_transaction(
+                session.connection().connection.driver_connection, 'fifth')
+        session.rollback()
+    with Session(engine) as session:
+        assert session.get(Project, 'fifth') is None
+    engine.dispose()
+    assert expanded.for_project('fourth') == ports
+
+
 def test_v17_preserves_existing_release_and_session_consumers(v15_history, tmp_path):
     path = v15_history
     migrate(path, tmp_path / 'before-policy-v16.db', target_version=16)
