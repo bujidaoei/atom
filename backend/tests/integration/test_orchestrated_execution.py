@@ -125,20 +125,6 @@ if data['verify_output']:
         db.execute('INSERT INTO requirements VALUES (?,?,?,?,?,?,?)',
                    ('page-check','p','page','Page','',
                     json.dumps([{'type':'exists','selector':'body'}]),0))
-    verifier_process=subprocess.Popen([sys.executable,'-c',
-        "import sys;sys.path.insert(0,'/tmp/code');import uvicorn;from app.verifier_service import create_app;uvicorn.run(create_app(),host='127.0.0.1',port=8799,log_level='error')"],
-        env=os.environ.copy(),stdout=subprocess.DEVNULL,stderr=open('/tmp/verifier.log','w'))
-    import httpx
-    with httpx.Client(base_url='http://127.0.0.1:8799',trust_env=False,timeout=2) as probe:
-        deadline=time.monotonic()+20
-        while True:
-            assert verifier_process.poll() is None,Path('/tmp/verifier.log').read_text()
-            try:
-                assert probe.get('/health').json()=={'ok':True}
-                break
-            except httpx.ConnectError:
-                assert time.monotonic()<deadline,Path('/tmp/verifier.log').read_text()
-                time.sleep(.05)
 if data['schema_version'] in (4,5,6,7,9,10,13):
     from app.security import issue_session
     from app.console_auth import credentials
@@ -147,6 +133,7 @@ if data['interrupt']:
     legacy=settings.projects_dir/'p'/'workspace';legacy.mkdir(parents=True)
     (legacy/'index.html').write_text('<h1>saved before interruption</h1>')
 async def main():
+    global verifier_process
     async def proxy(port):
         async def relay(reader,writer):
             upstream=None;tasks=[]
@@ -164,6 +151,30 @@ async def main():
     broker=await proxy(data['broker']);runtime=await proxy(data['runtime'])
     settings.broker_origin='http://127.0.0.1:'+str(broker.sockets[0].getsockname()[1])
     settings.runtime_url='http://127.0.0.1:'+str(runtime.sockets[0].getsockname()[1])
+    if data['verify_output']:
+        # A distinct main process must fail startup while its configured
+        # verifier is absent, even though the real broker is ready.
+        absent_env=dict(os.environ,ATOM_BROKER_ORIGIN=settings.broker_origin,
+                        ATOM_RUNTIME_URL=settings.runtime_url)
+        absent=await asyncio.create_subprocess_exec(sys.executable,'-c',
+            "import sys;sys.path.insert(0,'/tmp/code');import uvicorn;from app.main import app;uvicorn.run(app,host='127.0.0.1',port=8768,log_level='error')",
+            env=absent_env,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+        _unused,errors=await asyncio.wait_for(absent.communicate(),25)
+        assert absent.returncode!=0 and b'verifier_unavailable' in errors,errors.decode()
+        verifier_process=subprocess.Popen([sys.executable,'-c',
+            "import sys;sys.path.insert(0,'/tmp/code');import uvicorn;from app.verifier_service import create_app;uvicorn.run(create_app(),host='127.0.0.1',port=8799,log_level='error')"],
+            env=os.environ.copy(),stdout=subprocess.DEVNULL,stderr=open('/tmp/verifier.log','w'))
+        import httpx
+        with httpx.Client(base_url='http://127.0.0.1:8799',trust_env=False,timeout=2) as probe:
+            deadline=time.monotonic()+20
+            while True:
+                assert verifier_process.poll() is None,Path('/tmp/verifier.log').read_text()
+                try:
+                    assert probe.get('/health').json()=={'ok':True}
+                    break
+                except httpx.ConnectError:
+                    assert time.monotonic()<deadline,Path('/tmp/verifier.log').read_text()
+                    time.sleep(.05)
     orchestrator._client=RuntimeClient()
     server=uvicorn.Server(uvicorn.Config(app,host='0.0.0.0',port=8767,log_level='error',access_log=False))
     serving=asyncio.create_task(server.serve())
