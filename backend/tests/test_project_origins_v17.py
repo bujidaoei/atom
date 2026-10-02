@@ -15,8 +15,9 @@ from app.content_service import ContentService
 from app.content_hosts import ContentHostError
 from app.content_entry import ContentStartupError, IpPublicContentConfig, create_ip_public_app
 from app.models import Project
-from app.project_origins import ProjectOriginError, ProjectOriginRepository
+from app.project_origins import OriginRoute, ProjectOriginError, ProjectOriginRepository
 from app.project_public_hosts import ProjectPublicHosts
+from app.ip_ingress import IngressError, IpIngressConfig, render_ip_caddyfile, render_ip_routes
 from app.release_history import publication_history
 from app.release_repository import ReleaseRepository
 from app.revisions import RevisionRepository
@@ -102,6 +103,26 @@ def test_origin_reservation_is_atomic_stable_and_bounded(v16, tmp_path):
     assert repository.route(20001).purpose == 'public'
     assert repository.route(20002) is None
     assert len(repository.active_routes()) == 2
+    ingress = IpIngressConfig('192.0.2.10', 'atom-preview:8000', 'atom-public:8000',
+                              'https://acme.example.test/directory')
+    base = 'https://192.0.2.10 {\n  respond "console"\n}\n'
+    rendered = render_ip_caddyfile(base, repository, ingress)
+    assert rendered.count('https://192.0.2.10:20000 {') == 1
+    assert rendered.count('https://192.0.2.10:20001 {') == 1
+    assert 'reverse_proxy atom-preview:8000' in rendered
+    assert 'reverse_proxy atom-public:8000' in rendered
+    assert render_ip_caddyfile(base, repository, ingress) == rendered
+    with pytest.raises(IngressError, match='invalid_base_caddyfile'):
+        render_ip_caddyfile(rendered, repository, ingress)
+    with pytest.raises(IngressError, match='invalid_ingress_upstream'):
+        IpIngressConfig('192.0.2.10', 'atom-preview:8000\nrespond "unsafe"',
+                        'atom-public:8000', 'https://acme.example.test/directory')
+    with pytest.raises(IngressError, match='invalid_acme_directory'):
+        IpIngressConfig('192.0.2.10', 'atom-preview:8000', 'atom-public:8000',
+                        'https://acme.example.test:bad/directory')
+    with pytest.raises(IngressError, match='invalid_origin_route'):
+        render_ip_routes(base, (OriginRoute('project', 'preview', 20000),
+                                OriginRoute('other', 'public', 20000)), ingress)
     with pytest.raises(ProjectOriginError, match='origin_range_changed'):
         ProjectOriginRepository(v16, first_port=20002, last_port=20005)
 
@@ -123,6 +144,9 @@ def test_origin_reservation_is_atomic_stable_and_bounded(v16, tmp_path):
             db.execute("INSERT INTO projects (id,user_id,prompt,title) VALUES ('other','user','reuse','Reuse')")
     assert repository.route(20002) is None
     assert len(repository.active_routes()) == 2
+    retired = render_ip_caddyfile(base, repository, ingress)
+    assert 'https://192.0.2.10:20002 {' not in retired
+    assert 'https://192.0.2.10:20000 {' in retired
 
 
 def test_v17_preserves_existing_release_and_session_consumers(v15_history, tmp_path):
