@@ -1,4 +1,5 @@
 from dataclasses import replace
+from concurrent.futures import ThreadPoolExecutor
 import os
 import secrets
 import socket
@@ -182,3 +183,36 @@ def test_missing_pinned_image_prevents_readiness_and_creation(environment):
         registry = Registry(config.registry_path)
         assert registry.unterminated() == []
         assert DockerDriver(registry.broker_id, IMAGE).owned_inventory() == []
+
+
+def test_ready_waits_for_real_reconciliation_before_reporting_state(environment, monkeypatch):
+    config, _, _, headers = environment
+    app = create_app(replace(config, sweep_seconds=60))
+    with TestClient(app) as client:
+        lifecycle = app.state.lifecycle
+        assert client.get("/ready", headers=headers).status_code == 200
+        entered = threading.Event()
+        release = threading.Event()
+        inventory = lifecycle.driver.owned_inventory
+
+        def held_inventory():
+            entered.set()
+            if not release.wait(5):
+                raise AssertionError("reconciliation was not released")
+            return inventory()
+
+        monkeypatch.setattr(lifecycle.driver, "owned_inventory", held_inventory)
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            sweep = pool.submit(lifecycle.sweep)
+            try:
+                assert entered.wait(5)
+                assert not lifecycle.ready
+                probe = pool.submit(client.get, "/ready", headers=headers)
+                time.sleep(0.1)
+                assert not probe.done()
+            finally:
+                release.set()
+            sweep.result(timeout=10)
+            response = probe.result(timeout=5)
+            assert response.status_code == 200
+            assert response.json() == {"alive": True, "ready": True}

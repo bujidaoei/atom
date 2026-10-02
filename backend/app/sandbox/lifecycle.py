@@ -82,6 +82,17 @@ class Lifecycle:
     def ready(self) -> bool:
         return self._ready and not self._closed and self._lease_alive()
 
+    def ready_after_control(self, timeout: float = 3.0) -> bool:
+        """Observe readiness after an in-flight control operation, if bounded."""
+        if self.ready:
+            return True
+        if not self._control.acquire(timeout=timeout):
+            return False
+        try:
+            return self.ready
+        finally:
+            self._control.release()
+
     @contextmanager
     def _exclusive(self):
         if not self._lease_alive():

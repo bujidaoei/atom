@@ -177,9 +177,11 @@ def create_app(config: BrokerConfig | None = None) -> FastAPI:
         if len(values) != 1 or not hmac.compare_digest(values[0].encode("latin-1"), expected):
             raise ServiceError(401, "unauthorized")
 
-    def ready():
+    async def ready():
         lifecycle = getattr(app.state, "lifecycle", None)
-        return lifecycle is not None and app.state.maintenance_ok and lifecycle.ready
+        if lifecycle is None or not app.state.maintenance_ok:
+            return False
+        return await run_in_threadpool(lifecycle.ready_after_control)
 
     def signed_header(request, header="authorization"):
         values = request.headers.getlist(header)
@@ -241,7 +243,7 @@ def create_app(config: BrokerConfig | None = None) -> FastAPI:
     @app.get("/ready")
     async def health(request: Request):
         authenticate(request)
-        status = ready()
+        status = await ready()
         return JSONResponse({"alive": True, "ready": status}, status_code=503 if request.url.path == "/ready" and not status else 200)
 
     @app.post("/v1/admin/provision", status_code=202)
