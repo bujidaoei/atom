@@ -52,9 +52,11 @@ flock -n 9
 ! docker inspect "$old_api" >/dev/null 2>&1
 ! docker inspect "$old_broker" >/dev/null 2>&1
 
-python3 "$source/deploy/protected_cutover.py" preflight \
+preflight=$(python3 "$source/deploy/protected_cutover.py" preflight \
   --config /etc/atom/protected-cutover.json \
-  --source "$source" --revision "$revision" --image-id "$image" >/dev/null
+  --source "$source" --revision "$revision" --image-id "$image")
+backup_dir=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["backupDirectory"])' <<<"$preflight")
+[[ $backup_dir == /* && ! -e $backup_dir ]]
 docker inspect atom-candidate > "$private/api.inspect.json"
 docker inspect atom-candidate-broker > "$private/broker.inspect.json"
 python3 - "$private" "$image" <<'PY'
@@ -78,6 +80,30 @@ PY
 phase=stopping
 docker stop atom-candidate-broker >/dev/null
 docker stop atom-candidate >/dev/null
+phase=backing_up
+install -d -m 0700 -- "$backup_dir"
+python3 - "$data/atom.db" "$backup_dir/atom.db" "$broker_data/registry.db" "$backup_dir/registry.db" <<'PY'
+import sqlite3
+import sys
+
+for source, destination, expected in zip(sys.argv[1::2], sys.argv[2::2], (10, 3), strict=True):
+    live = sqlite3.connect(f'file:{source}?mode=ro', uri=True, timeout=10)
+    copy = sqlite3.connect(destination)
+    try:
+        live.backup(copy, pages=256, sleep=.05)
+        if (copy.execute('PRAGMA user_version').fetchone()[0] != expected
+                or copy.execute('PRAGMA integrity_check').fetchall() != [('ok',)]
+                or copy.execute('PRAGMA foreign_key_check').fetchall()):
+            raise RuntimeError('cutover_backup_invalid')
+    finally:
+        copy.close()
+        live.close()
+PY
+tar -C "$data" -cf "$backup_dir/data.tar" .
+tar -C "$broker_data" -cf "$backup_dir/broker.tar" .
+tar -tf "$backup_dir/data.tar" >/dev/null
+tar -tf "$backup_dir/broker.tar" >/dev/null
+(cd "$backup_dir" && sha256sum atom.db registry.db data.tar broker.tar > sha256sums.txt && sha256sum -c sha256sums.txt >/dev/null)
 docker rename atom-candidate "$old_api"
 docker rename atom-candidate-broker "$old_broker"
 phase=creating
