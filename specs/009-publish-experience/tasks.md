@@ -30,4 +30,5 @@ T001-T002 precede all edits. T003 can progress while T004 is researched; T005-T0
 
 ## COS integration tasks
 - [x] T007a [US2] Add validated COS configuration, bounded storage adapter and real round-trip/failure coverage in backend/app/config.py, backend/app/artifacts.py and backend/tests/; add secret-free .env.example.
-- [ ] T007b [US2] Verify existing artifact import to COS and deployment configuration without making the shared bucket public; record specs/009-publish-experience/deployment.md evidence.
+- [x] T007b [US2] Import and byte-verify the existing registered artifact inventory to private COS from an isolated ledger copy; record specs/009-publish-experience/deployment.md evidence.
+- [ ] T007c [US2] Repeat the inventory check after quiescing writers, activate COS authoritative reads in the deployed pair and verify real public/owner content without exposing the shared bucket.
