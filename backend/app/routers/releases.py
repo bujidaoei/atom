@@ -100,6 +100,20 @@ async def _unpublish_command(request: Request):
     return command
 
 
+async def _rollback_command(request: Request):
+    command = await _json_command(request)
+    if (set(command) != {'commandId', 'newReleaseId', 'sourceReleaseId',
+                         'expectedGeneration', 'expectedRevision'}
+            or any(type(command[key]) is not str or _ID.fullmatch(command[key]) is None
+                   for key in ('commandId', 'newReleaseId'))
+            or any(type(command[key]) is not str or _REVISION.fullmatch(command[key]) is None
+                   for key in ('sourceReleaseId', 'expectedRevision'))
+            or type(command['expectedGeneration']) is not int
+            or not 1 <= command['expectedGeneration'] < 2**63-1):
+        _deny(400, '回滚请求格式不正确')
+    return command
+
+
 def _configured(request: Request):
     settings = get_settings()
     if (settings.sandbox_mode != 'broker' or settings.session_mode != 'durable'
@@ -267,6 +281,55 @@ async def unpublish_verified_release(project: OwnedProject, release_id: str, req
         return response
     except VerificationError as error:
         response = OwnedJSONResponse({'detail':'无法确认可信撤销'}, lifecycle, token,
+                                     status_code=_status(error), headers=_HEADERS)
+        release = False
+        return response
+    finally:
+        if release:
+            lifecycle.release(token)
+
+
+@router.post('/{project_id}/releases/{release_id}/rollback')
+async def rollback_verified_release(project: OwnedProject, release_id: str, request: Request):
+    require_auth_origin(request)
+    if (request.headers.getlist('x-atom-intent') != ['rollback-verified-release']
+            or _REVISION.fullmatch(release_id) is None):
+        _deny(403, '回滚意图不明确')
+    settings, store = _configured(request)
+    command = await _rollback_command(request)
+    lifecycle = request.app.state.release_operations
+    token = lifecycle.acquire()
+    if token is None:
+        _deny(503, '发布服务繁忙')
+    release = True
+    try:
+        def apply():
+            receipt = ReleaseRepository(settings.db_path, required_schema=14).rollback_verified(store,
+                owner=project.user_id, project_id=project.id,
+                command_id=command['commandId'], release_id=command['newReleaseId'],
+                source_release_id=command['sourceReleaseId'], expected_release=release_id,
+                expected_generation=command['expectedGeneration'],
+                expected_revision=command['expectedRevision'],
+                policy_digest=settings.verifier_policy_digest,
+                runner_version=settings.verifier_runner_version)
+            return {'releaseId':receipt.release_id,
+                    'sourceReleaseId':receipt.source_release_id,
+                    'displacedReleaseId':receipt.displaced_release_id,
+                    'generation':receipt.generation, 'slug':receipt.slug}
+        worker = asyncio.create_task(asyncio.to_thread(apply))
+        _WORKERS.add(worker)
+        worker.add_done_callback(_WORKERS.discard)
+        try:
+            result = await asyncio.shield(worker)
+        except asyncio.CancelledError:
+            release = False
+            worker.add_done_callback(lambda done: _finished(done, lifecycle, token))
+            raise
+        response = OwnedJSONResponse(result, lifecycle, token, headers=_HEADERS)
+        release = False
+        return response
+    except (VerificationError, ArtifactError) as error:
+        response = OwnedJSONResponse({'detail':'无法确认可信回滚'}, lifecycle, token,
                                      status_code=_status(error), headers=_HEADERS)
         release = False
         return response
