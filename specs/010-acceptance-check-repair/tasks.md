@@ -12,7 +12,7 @@
 
 ## Delivery
 - [x] T005 Run focused backend, frontend build and locked runtime checks; record exact results in specs/010-acceptance-check-repair/evidence.md.
-- [ ] T006 Build the exact committed image, run protected production preflight and schema-preserving cutover with rollback in specs/010-acceptance-check-repair/evidence.md.
-- [ ] T007 Confirm target owner check saves/reloads without HTTP 500 and complete deployment evidence in specs/010-acceptance-check-repair/evidence.md.
+- [x] T006 Build the exact committed image, run protected production preflight and schema-preserving cutover with rollback in specs/010-acceptance-check-repair/evidence.md.
+- [x] T007 Confirm target owner check saves/reloads without HTTP 500 and complete deployment evidence in specs/010-acceptance-check-repair/evidence.md.
 
 T001 precedes T002-T003; T004-T005 follow implementation; T006-T007 follow passing gates. Publication work remains in feature009.
