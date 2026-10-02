@@ -21,18 +21,21 @@ pytestmark = pytest.mark.skipif(not IMAGE or not API_IMAGE,reason='requires pinn
 _V10_SCENARIOS = ['happy','auth','policy','lost-result','worker','cancelled','cli','commit-before','commit-after',
     'pages','pages-hold','missing','corrupt','cold-read','prune-happy','prune-reader','prune-cli','prune-commit-before','prune-commit-after','prune-hold','prune-corrupt','prune-verifier','prune-missing-receipt','prune-rollback']
 _V13_SCENARIOS = ['happy','auth','lost-result','commit-before','commit-after','pages-hold']
+_V14_SCENARIOS = ['happy','auth','worker','missing','corrupt','lost-result']
 
 
 @pytest.mark.parametrize('scenario,schema_version',
-    [(scenario,10) for scenario in _V10_SCENARIOS] + [(scenario,13) for scenario in _V13_SCENARIOS])
+    [(scenario,10) for scenario in _V10_SCENARIOS] +
+    [(scenario,13) for scenario in _V13_SCENARIOS] +
+    [(scenario,14) for scenario in _V14_SCENARIOS])
 def test_real_linux_owner_wire_worker_and_receipt(planned,recovery,tmp_path,monkeypatch,scenario,schema_version):
     path,_ = planned
     migrate(path,tmp_path/'before-ten.db',target_version=10)
-    if schema_version == 13:
+    if schema_version in (13, 14):
         from app.release_repository import ReleaseRepository
         ReleaseRepository(path).unpublish(owner='user',project_id='project',command_id='prepare-v13',
             expected_release='release',expected_generation=1)
-        for version in (11, 12, 13):
+        for version in range(11, schema_version + 1):
             migrate(path,tmp_path/f'before-{version}.db',target_version=version)
     if scenario in ('pages','pages-hold'):
         from app.access_repository import AccessRepository
