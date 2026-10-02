@@ -4,7 +4,6 @@ This is an isolated target-Linux acceptance path. It does not route public
 traffic or mutate the schema10 production databases.
 """
 from contextlib import asynccontextmanager
-import faulthandler
 import json
 import os
 from pathlib import Path
@@ -55,13 +54,9 @@ def _port():
     pytest.param({'width': 1280, 'height': 800}, id='desktop'),
     pytest.param({'width': 390, 'height': 844}, id='mobile'),
 ])
+@pytest.mark.parametrize('audience', ['public', 'owner'])
 def test_ui_runs_real_private_verification_and_publishes(
-        adopted, tmp_path, monkeypatch, viewport):
-    faulthandler.dump_traceback_later(35, file=sys.stderr)
-    def stage(name):
-        print(f'verifier-browser-{viewport["width"]}: {name}', flush=True)
-
-    stage('fixture-ready')
+        adopted, tmp_path, monkeypatch, viewport, audience):
     assert DIST.joinpath('index.html').is_file(), 'built /atom/ SPA required'
     assert PROFILE.is_file(), 'host-visible pinned seccomp profile required'
     path, receipt, intent = adopted
@@ -100,7 +95,6 @@ def test_ui_runs_real_private_verification_and_publishes(
         'app.verifier_service:create_app', '--factory', '--host', '127.0.0.1',
         '--port', str(port), '--log-level', 'error'], env=environment,
         stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
-    stage('verifier-started')
     server = thread = None
     failures = []
     responses = []
@@ -117,7 +111,6 @@ def test_ui_runs_real_private_verification_and_publishes(
                 except httpx.ConnectError:
                     assert time.monotonic() < deadline, 'private verifier not ready'
                     time.sleep(.05)
-        stage('verifier-healthy')
 
         @asynccontextmanager
         async def trusted_client(_app):
@@ -129,10 +122,8 @@ def test_ui_runs_real_private_verification_and_publishes(
 
         outer.router.lifespan_context = trusted_client
         server, thread, api_port = _serve(outer)
-        stage('api-started')
         with sync_playwright() as playwright:
             browser = playwright.chromium.launch(channel='chromium')
-            stage('browser-started')
             context = browser.new_context(viewport=viewport, service_workers='block')
             context.add_cookies([{'name': '__Host-atom_console', 'value': owner_token,
                 'url': ORIGIN, 'secure': True, 'httpOnly': True, 'sameSite': 'Lax'}])
@@ -140,7 +131,6 @@ def test_ui_runs_real_private_verification_and_publishes(
             def bridge(route):
                 request = route.request
                 requests.append(request.url)
-                stage('route-start-' + request.url.split('/atom/', 1)[-1][:80])
                 assert request.url.startswith(ORIGIN + '/atom/')
                 if '/events?' in request.url:
                     route.abort('blockedbyclient')
@@ -150,13 +140,11 @@ def test_ui_runs_real_private_verification_and_publishes(
                     asset = (DIST / relative).resolve()
                     assert asset.is_relative_to(DIST.resolve()) and asset.is_file()
                     route.fulfill(path=str(asset))
-                    stage('asset-fulfilled')
                     return
                 headers = request.headers | {'host': 'console.example.org',
                     'x-forwarded-proto': 'https', 'accept-encoding': 'identity'}
                 response = route.fetch(url=f'http://127.0.0.1:{api_port}' +
                     request.url[len(ORIGIN):], headers=headers, timeout=10000)
-                stage('route-end-' + str(response.status))
                 route.fulfill(status=response.status,
                     headers={key: value for key, value in response.headers.items()
                         if key.lower() not in ('content-encoding', 'content-length',
@@ -165,7 +153,6 @@ def test_ui_runs_real_private_verification_and_publishes(
 
             context.route(ORIGIN + '/atom/**', bridge)
             page = context.new_page()
-            stage('page-created')
             page.on('pageerror', lambda error: failures.append(str(error)))
             page.on('console', lambda message: failures.append(message.text)
                     if message.type == 'error' and
@@ -181,26 +168,19 @@ def test_ui_runs_real_private_verification_and_publishes(
                 failures.append('request_failed: ' + request.url + ' ' + failure)
             page.on('requestfailed', note_failed)
             page.on('response', lambda response: responses.append((response.status, response.url)))
-            page.on('response', lambda response: stage('response-type-' +
-                str(response.status) + '-' + str(response.header_value('content-type'))))
             try:
                 page.goto(ORIGIN + '/atom/app/p/project', wait_until='domcontentloaded',
                           timeout=15000)
             except Exception as error:
                 raise AssertionError((type(error).__name__, requests, responses, failures)) from error
-            stage('page-loaded')
             try:
                 page.get_by_role('tab', name='发布', exact=True).wait_for(timeout=8000)
-            except Exception:
-                state = page.evaluate('''() => ({ ready: document.readyState,
-                    root: document.getElementById('root')?.innerHTML.slice(0, 500),
-                    module: document.querySelector('script[type="module"]')?.outerHTML })''')
-                stage('tab-missing ' + repr((page.url, requests, responses, failures, state)))
+            except Exception as error:
+                diagnostic = (page.url, requests, responses, failures)
                 context.close()
                 browser.close()
-                raise
+                raise AssertionError(diagnostic) from error
             page.get_by_role('tab', name='发布', exact=True).click()
-            stage('release-tab-open')
             panel = page.get_by_label('发布工作台')
             controls = panel.get_by_label('可信发布操作')
             controls.get_by_role('button', name='预约当前修订验证').click()
@@ -216,7 +196,7 @@ def test_ui_runs_real_private_verification_and_publishes(
                 assert db.execute('SELECT count(*) FROM verification_attestations '
                                   'WHERE request_id=?', (reserved.request.id,)).fetchone() == (1,)
 
-            controls.get_by_role('combobox', name='发布受众').select_option('public')
+            controls.get_by_role('combobox', name='发布受众').select_option(audience)
             controls.get_by_role('textbox', name='发布短链接').fill('verified-ui-site')
             controls.get_by_role('checkbox').first.check()
             controls.get_by_role('button', name='发布经验证版本').click()
@@ -224,7 +204,7 @@ def test_ui_runs_real_private_verification_and_publishes(
             publication = ReleaseRepository(path).current(owner='user', project_id='project')
             assert publication is not None and publication.live
             assert publication.verification_id == reserved.request.id
-            assert publication.audience == 'public' and publication.slug == 'verified-ui-site'
+            assert publication.audience == audience and publication.slug == 'verified-ui-site'
             page.reload(wait_until='domcontentloaded')
             page.get_by_role('tab', name='发布', exact=True).click()
             page.get_by_label('发布工作台').get_by_text(publication.release_id, exact=True).wait_for()
@@ -237,7 +217,6 @@ def test_ui_runs_real_private_verification_and_publishes(
             context.close()
             browser.close()
     finally:
-        faulthandler.cancel_dump_traceback_later()
         if server is not None:
             server.should_exit = True
             thread.join(timeout=10)
