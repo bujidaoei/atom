@@ -1,0 +1,98 @@
+# Standalone IP-origin services. Use the same tested image, data bind and
+# private storage environment as the console process during protected cutover.
+# Only Caddy joins these services from the public internet; they publish no
+# host ports. The preview service writes one-use grant/session consumption to
+# the shared SQLite ledger, so its data bind cannot be read-only.
+name: atom-ip-publication
+
+x-content-service: &content-service
+  image: ${ATOM_PUBLICATION_IMAGE:?set an exact tested image reference}
+  working_dir: /app/backend
+  env_file:
+    - path: ${ATOM_STORAGE_ENV_FILE:?set the root-private storage environment path}
+      required: true
+  environment:
+    PYTHONDONTWRITEBYTECODE: "1"
+  volumes:
+    - type: bind
+      source: ${ATOM_DATA_BIND:?set the protected Atom data directory}
+      target: /data
+  networks:
+    - ingress
+  read_only: true
+  tmpfs:
+    - /tmp:size=64m,mode=1777
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+  pids_limit: 128
+  mem_limit: 512m
+  init: true
+  restart: unless-stopped
+  expose:
+    - "8000"
+  # The main image checks its nginx/API on port 80. These isolated processes
+  # only run uvicorn on 8000; Caddy's identity probe validates real routing.
+  healthcheck:
+    test:
+      - CMD
+      - /app/backend/.venv/bin/python
+      - -c
+      - "import socket; connection=socket.create_connection(('127.0.0.1', 8000), 2); connection.close()"
+    interval: 20s
+    timeout: 5s
+    start_period: 10s
+    retries: 3
+
+services:
+  atom-preview:
+    <<: *content-service
+    container_name: atom-preview
+    environment:
+      PYTHONDONTWRITEBYTECODE: "1"
+      ATOM_PREVIEW_DB_PATH: /data/atom.db
+      ATOM_PREVIEW_ARTIFACT_DIR: /data/artifacts
+      ATOM_PREVIEW_IP: ${ATOM_PUBLIC_IP:?set the canonical public IP}
+      ATOM_PREVIEW_FIRST_PORT: ${ATOM_FIRST_PORT:?set the reserved first port}
+      ATOM_PREVIEW_LAST_PORT: ${ATOM_LAST_PORT:?set the reserved last port}
+    command:
+      - /app/backend/.venv/bin/uvicorn
+      - app.preview_entry:create_ip_preview_app
+      - --factory
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --proxy-headers
+      - --forwarded-allow-ips
+      - ${ATOM_CADDY_PROXY_IP:?set the pinned Caddy bridge IP}
+      - --no-access-log
+
+  atom-public:
+    <<: *content-service
+    container_name: atom-public
+    environment:
+      PYTHONDONTWRITEBYTECODE: "1"
+      ATOM_PUBLIC_DB_PATH: /data/atom.db
+      ATOM_PUBLIC_ARTIFACT_DIR: /data/artifacts
+      ATOM_PUBLIC_IP: ${ATOM_PUBLIC_IP:?set the canonical public IP}
+      ATOM_PUBLIC_FIRST_PORT: ${ATOM_FIRST_PORT:?set the reserved first port}
+      ATOM_PUBLIC_LAST_PORT: ${ATOM_LAST_PORT:?set the reserved last port}
+    command:
+      - /app/backend/.venv/bin/uvicorn
+      - app.content_entry:create_ip_public_app
+      - --factory
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --proxy-headers
+      - --forwarded-allow-ips
+      - ${ATOM_CADDY_PROXY_IP:?set the pinned Caddy bridge IP}
+      - --no-access-log
+
+networks:
+  ingress:
+    external: true
+    name: ${ATOM_PROXY_NETWORK:?set the existing Caddy network}
