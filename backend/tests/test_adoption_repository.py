@@ -18,8 +18,8 @@ from app.artifacts import Artifact
 from app.migrations import migrate, verify
 from test_revision_migrations import legacy
 
-pytestmark = pytest.mark.parametrize('prepared', [12, 13], indirect=True,
-                                     ids=['schema-v12', 'schema-v13'])
+pytestmark = pytest.mark.parametrize('prepared', [12, 13, 14], indirect=True,
+                                     ids=['schema-v12', 'schema-v13', 'schema-v14'])
 
 
 def snapshot(content: bytes) -> tuple[bytes, Artifact]:
@@ -64,8 +64,10 @@ def prepared(legacy, tmp_path, request):
         db.execute("UPDATE races SET status='done' WHERE id='race'")
         db.execute("UPDATE race_heats SET status='done' WHERE id='heat'")
     migrate(path, tmp_path / 'before-v12.db', target_version=12)
-    if getattr(request, 'param', 12) == 13:
+    if getattr(request, 'param', 12) in (13, 14):
         migrate(path, tmp_path / 'before-v13.db', target_version=13)
+    if getattr(request, 'param', 12) == 14:
+        migrate(path, tmp_path / 'before-v14.db', target_version=14)
     return path, main, heat, heat_payload, heat_artifact
 
 

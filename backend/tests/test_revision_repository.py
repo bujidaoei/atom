@@ -26,7 +26,7 @@ BASE = Artifact('a'*64, 'b'*64, 14)
 OUTPUT = Artifact('c'*64, 'd'*64, 15)
 
 
-@pytest.fixture(params=[1,4,5,6,7,9,10,12,13],ids=["schema-v1","schema-v4","schema-v5","schema-v6","schema-v7","schema-v9","schema-v10","schema-v12","schema-v13"])
+@pytest.fixture(params=[1,4,5,6,7,9,10,12,13,14],ids=["schema-v1","schema-v4","schema-v5","schema-v6","schema-v7","schema-v9","schema-v10","schema-v12","schema-v13","schema-v14"])
 def repository(tmp_path,request):
     path = tmp_path / 'api.db'
     engine = create_engine('sqlite:///' + path.as_posix())
@@ -43,11 +43,13 @@ def repository(tmp_path,request):
         s.add(Run(id='heat-run', project_id='p', heat_id='heat', role='alex', model='fixture', status='running'))
         s.commit()
     engine.dispose()
-    if request.param in (12, 13):
+    if request.param in (12, 13, 14):
         migrate(path, tmp_path / 'backup.db', target_version=11)
         migrate(path, tmp_path / 'before-v12.db', target_version=12)
-        if request.param == 13:
+        if request.param in (13, 14):
             migrate(path, tmp_path / 'before-v13.db', target_version=13)
+        if request.param == 14:
+            migrate(path, tmp_path / 'before-v14.db', target_version=14)
     else:
         migrate(path, tmp_path / 'backup.db', target_version=request.param)
     with sqlite3.connect(path) as db:

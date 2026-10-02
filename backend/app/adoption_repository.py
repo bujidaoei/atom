@@ -1,4 +1,4 @@
-"""Fenced adoption of a verified heat revision in offline schema v12/v13.
+"""Fenced adoption of a verified heat revision in offline schema v12-v14.
 
 This repository has no HTTP wiring. Production remains at v10 until every
 application reader and writer has passed the separate serving cutover gates.
@@ -53,7 +53,7 @@ class AdoptionRepository:
             raise AdoptionError('invalid_adoption_configuration')
         self.path, self.timeout = Path(path), lock_timeout
         try:
-            if verify(self.path) not in (12, 13):
+            if verify(self.path) not in (12, 13, 14):
                 raise AdoptionError('adoption_schema_required')
         except MigrationError:
             raise AdoptionError('adoption_schema_required') from None
@@ -67,7 +67,7 @@ class AdoptionRepository:
             db.execute('PRAGMA foreign_keys=ON')
             db.execute('PRAGMA synchronous=FULL')
             db.execute('BEGIN IMMEDIATE')
-            if _schema(db) not in (12, 13):
+            if _schema(db) not in (12, 13, 14):
                 raise AdoptionError('adoption_schema_required')
             db.row_factory = sqlite3.Row
             yield db
