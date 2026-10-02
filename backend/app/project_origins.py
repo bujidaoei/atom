@@ -114,6 +114,19 @@ class ProjectOriginRepository:
                              'JOIN projects p ON p.id=o.project_id WHERE o.port=?', (port,)).fetchone()
             return OriginRoute(*row) if row else None
 
+    def for_project(self, project_id: str) -> ProjectOrigins | None:
+        if not isinstance(project_id, str) or not project_id or len(project_id) > 100:
+            raise ProjectOriginError('invalid_origin_project')
+        with self._database(write=False) as db:
+            rows = db.execute('SELECT purpose,port FROM project_origin_ports '
+                              'WHERE project_id=?', (project_id,)).fetchall()
+            if not rows:
+                return None
+            ports = dict(rows)
+            if len(rows) != 2 or set(ports) != {'preview', 'public'}:
+                raise ProjectOriginError('origin_incomplete')
+            return ProjectOrigins(project_id, ports['preview'], ports['public'])
+
     def active_routes(self) -> tuple[OriginRoute, ...]:
         with self._database(write=False) as db:
             if db.execute('SELECT 1 FROM project_origin_ports WHERE port<? OR port>? LIMIT 1',

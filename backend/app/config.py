@@ -27,6 +27,10 @@ class Settings(ObjectStorageSettings):
     console_proof_required: bool = False
     console_origin: str | None = None
     content_host_suffix: str | None = None
+    ip_preview_enabled: bool = False
+    ip_preview_address: str | None = None
+    ip_preview_first_port: int | None = None
+    ip_preview_last_port: int | None = None
     publication_verification: Literal['advisory', 'required'] = 'advisory'
     cookie_secure: bool = False
     cookie_path: str = "/"
@@ -117,6 +121,25 @@ class Settings(ObjectStorageSettings):
             if self.session_mode != 'durable':
                 raise ValueError('content handoff requires durable sessions')
             ContentNavigation(self.console_origin).validate_content_hosts(ContentHosts(self.content_host_suffix))
+        if self.ip_preview_enabled:
+            if (self.session_mode != 'durable' or not self.console_proof_required
+                    or self.ip_preview_address is None
+                    or self.ip_preview_first_port is None or self.ip_preview_last_port is None):
+                raise ValueError('ip preview requires durable console proof and complete origin configuration')
+            # Validate the literal address without touching the database here.
+            try:
+                parsed = ip_address(self.ip_preview_address.strip('[]'))
+                canonical = f'[{parsed.compressed}]' if parsed.version == 6 else parsed.compressed
+                if canonical != self.ip_preview_address:
+                    raise ValueError
+            except ValueError:
+                raise ValueError('ip preview requires a canonical literal address') from None
+            if (type(self.ip_preview_first_port) is not int or type(self.ip_preview_last_port) is not int
+                    or not 1024 <= self.ip_preview_first_port < self.ip_preview_last_port <= 65535
+                    or self.ip_preview_last_port - self.ip_preview_first_port + 1 > 512):
+                raise ValueError('invalid ip preview port range')
+            if self.console_origin != f'https://{canonical}':
+                raise ValueError('ip preview must use the console IP address')
         self.sandbox_mode = self.sandbox_mode or ('broker' if self.environment == 'production' else 'local')
         if self.environment == 'production' and self.sandbox_mode != 'broker':
             raise ValueError('production requires broker execution')

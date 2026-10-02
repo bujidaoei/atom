@@ -17,7 +17,7 @@ from .execution_service import ExecutionGateway, execution_resources
 from .sandbox.client import BrokerClientError
 from .errors import AtomError
 from .models import Base
-from .routers import audit, content_access, auth, preview, projects, publish, releases, settings, usage, verifications
+from .routers import audit, content_access, auth, preview, preview_access, projects, publish, releases, settings, usage, verifications
 from .schema_guard import verify as verify_schema
 from .services.orchestrator import orchestrator
 from .services.runtime_client import runtime_client
@@ -182,6 +182,7 @@ app.include_router(settings.router, prefix="/api")
 app.include_router(projects.router, prefix="/api")
 app.include_router(verifications.router, prefix="/api")
 app.include_router(releases.router, prefix="/api")
+app.include_router(preview_access.router, prefix="/api")
 app.include_router(publish.router, prefix="/api")
 app.include_router(usage.router, prefix="/api")
 
