@@ -35,6 +35,11 @@ _CASES.append(pytest.param(13,True,None,True,True,id='schema-v13-isolated-verifi
         not os.environ.get('ATOM_TEST_VERIFIER_SECCOMP_HOST_PATH') or
         not os.environ.get('ATOM_TEST_VERIFIER_SOURCE_HOST_PATH'),
         reason='requires pinned Chromium and host-visible source and seccomp profile')))
+_CASES.append(pytest.param(14,True,None,True,True,id='schema-v14-isolated-verifier',
+    marks=pytest.mark.skipif(not os.environ.get('ATOM_VERIFIER_TEST_IMAGE_DIGEST') or
+        not os.environ.get('ATOM_TEST_VERIFIER_SECCOMP_HOST_PATH') or
+        not os.environ.get('ATOM_TEST_VERIFIER_SOURCE_HOST_PATH'),
+        reason='requires pinned Chromium and host-visible source and seccomp profile')))
 
 
 @pytest.mark.parametrize('schema_version,valid,interrupt,verify_output,isolate_verifier',_CASES)
@@ -115,7 +120,7 @@ if data['verify_output']:
         ATOM_VERIFIER_SECCOMP_PATH=data['seccomp'],ATOM_VERIFIER_ID=data['verifier_id'])
 if data['isolate_verifier']:
     os.environ['ATOM_CONTENT_HOST_SUFFIX']='apps.example.net'
-if data['schema_version'] in (4,5,6,7,9,10,13):
+if data['schema_version'] in (4,5,6,7,9,10,13,14):
     os.environ.update(ATOM_SESSION_MODE='durable',ATOM_CONSOLE_ORIGIN='https://console.example.org',ATOM_COOKIE_SECURE='true')
 from app.main import app
 if data['interrupt']=='deadline_checkpoint':
@@ -137,8 +142,8 @@ with session_scope() as s:
     s.add(User(id='owner',email='owner@example.invalid',name='Owner',password_hash='fixture'));s.flush()
     s.add(Project(id='p',user_id='owner',title='P',prompt='fixture'))
 settings=get_settings()
-if data['schema_version']==13:
-    for version in (11,12,13):
+if data['schema_version'] in (13,14):
+    for version in ((11,12,13) if data['schema_version']==13 else (11,12,13,14)):
         migrate(settings.db_path,Path(f'/tmp/data/before-v{version}.db'),target_version=version)
 else:
     migrate(settings.db_path,Path('/tmp/data/backup.db'),target_version=data['schema_version'])
@@ -149,7 +154,7 @@ if data['verify_output']:
         db.execute('INSERT INTO requirements VALUES (?,?,?,?,?,?,?)',
                    ('page-check','p','page','Page','',
                     json.dumps([{'type':'exists','selector':'body'}]),0))
-if data['schema_version'] in (4,5,6,7,9,10,13):
+if data['schema_version'] in (4,5,6,7,9,10,13,14):
     from app.security import issue_session
     from app.console_auth import credentials
     console_token=issue_session('owner')
@@ -365,12 +370,12 @@ async def main():
                 if data['isolate_verifier']:
                     assert db.execute('SELECT count(*) FROM release_records').fetchone()==(1,)
                     assert db.execute('SELECT count(*) FROM content_bindings').fetchone()==(1,)
-        if data['schema_version'] in (4,5,6,7,9,10,13):
+        if data['schema_version'] in (4,5,6,7,9,10,13,14):
             codec=credentials();source=codec.authenticate(console_token)
             assert source and source.user_id=='owner'
             codec.repository.revoke_console_session(user_id='owner',session_id=source.id)
             assert codec.authenticate(console_token) is None
-            if data['schema_version'] in (5,6,7,9,10,13):
+            if data['schema_version'] in (5,6,7,9,10,13,14):
                 with sqlite3.connect(settings.db_path) as db:
                     events=[row[0] for row in db.execute('SELECT event_kind FROM security_audit_events ORDER BY sequence')]
                     assert events[0]=='console.session.created' and events[-1]=='console.session.revoked'
