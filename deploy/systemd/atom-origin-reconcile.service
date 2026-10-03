@@ -1,0 +1,16 @@
+[Unit]
+Description=Atom committed project-origin ingress reconciliation
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+User=root
+EnvironmentFile=/etc/atom/origin-reconcile.env
+ExecStart=/usr/bin/python3 ${ATOM_OPERATOR_ROOT}/deploy/ip_origin_reconcile.py --config ${ATOM_CUTOVER_CONFIG} --publication-file ${ATOM_PUBLICATION_FILE}
+TimeoutStartSec=180
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ReadWritePaths=/run /var/backups/atom-cutovers
+

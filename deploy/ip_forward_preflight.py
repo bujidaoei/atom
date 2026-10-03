@@ -253,7 +253,8 @@ def _inspect_locked(*, config: protected_cutover.CutoverConfig,
                     publication_file: Path, revision: str,
                     successor_source: Path | None = None,
                     successor_revision: str | None = None,
-                    successor_image: str | None = None) -> dict[str, object]:
+                    successor_image: str | None = None,
+                    allow_ingress_drift: bool = False) -> dict[str, object]:
     """Inspect under the caller's already-held host deployment lock."""
     _require(getattr(os, "geteuid", lambda: -1)() == 0, "root_required")
     _require(protected_cutover.REVISION.fullmatch(revision) is not None,
@@ -262,6 +263,7 @@ def _inspect_locked(*, config: protected_cutover.CutoverConfig,
               and successor_image is None)
              or (successor_source is not None and successor_revision is not None
                  and successor_image is not None), "incomplete_successor_identity")
+    _require(type(allow_ingress_drift) is bool, "invalid_ingress_drift_option")
     forward = ip_forward_journal.ForwardJournal(config, revision).read()
     if forward is None:
         record = protected_cutover.PhaseLedger(config.state_dir, revision).read()
@@ -329,12 +331,14 @@ def _inspect_locked(*, config: protected_cutover.CutoverConfig,
     # The cutover receipt records the *initial* Caddy digest. New projects
     # legitimately add origins later, so the current committed ledger is
     # the authority for the live config rather than that historical hash.
-    _require(active == expected,
+    _require(allow_ingress_drift or active == expected,
              "active_ingress_ledger_mismatch")
     result = {"status": "current_generation_verified", "revision": revision,
             "imageId": image_id, "candidateDirectory": str(candidate),
             "containerIds": ids, "activeOriginCount": len(routes),
             "caddySha256": hashlib.sha256(active).hexdigest()}
+    if allow_ingress_drift:
+        result["ingressDrift"] = active != expected
     if successor_source is not None:
         result["successor"] = _target(
             config, source=successor_source, revision=successor_revision,
