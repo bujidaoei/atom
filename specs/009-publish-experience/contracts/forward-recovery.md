@@ -1,0 +1,19 @@
+# Protected forward recovery after publication writes
+
+Status: design contract; **not implemented or production-accepted**.
+
+## Trigger and source of truth
+
+When the old-schema rollback fence reports `candidate_has_unmerged_writes`, the active schema18 candidate is the only authoritative application and broker state. The preserved schema10 pair is an audit/recovery artifact, never a source for the next deployment. A new operation must identify the active candidate by exact container IDs, image digest, database schema, data and broker bind paths, origin ledger and current release generation before stopping a writer.
+
+## Transaction
+
+1. Under the same host-exclusive deployment lock, validate a clean exact Git revision, exact image and SHA-locked runtime, current service identity/health, schema compatibility, retained data paths, COS inventory and the full committed origin set. Reject if any pointer or source changed.
+2. Put console and every allocated project HTTPS origin in a write-blocked maintenance state with verified TLS and 503/no-store. Quiesce API, broker, preview, public and verifier writers, including in-flight operations and leases. Do not capture a source state while any writer can still commit.
+3. Capture and independently verify a fresh root-private paired application/broker/Caddy backup. Restore only that captured **current candidate** state to a separate generation. Preserve source and backup byte-for-byte. Run only an explicit migration from its actual schema when the new image requires one; for a schema-preserving image change, assert schema/foreign keys and immutable artifact/COS and origin-ledger equivalence.
+4. Start the new private verifier and content services and the new API/broker pair against the separate generation. Retain the previous compatible schema18 containers stopped by exact ID. Reconcile all committed HTTPS origins, verify their project/role identities and existing public bytes, then seal a new pre-console baseline. Promote the normal console only after strict-TLS readiness.
+5. Record each phase, exact image/data IDs, backup manifest and terminal outcome. On failure before exposure, restore the previous compatible generation and HTTPS routes by exact ID. After exposure, use a fresh write fence: if the new generation has owner writes, retain it and refuse an older data generation. Recovery never automatically copies SQL rows between schemas or manufactures publication receipts.
+
+## Verification boundary
+
+An isolated drill must create a real Atom release/history write, observe old-schema rollback refusal, then run the new forward transaction from the retained state. It must prove the release and draft survive, another owner operation succeeds, the public page serves the selected immutable bytes, project origin assignments are unchanged, and a fault at each ingress/writer phase leaves a usable generation. Production acceptance additionally requires authenticated owner/browser and certificate-renewal evidence. Until those pass, T013f and T014 remain open.
