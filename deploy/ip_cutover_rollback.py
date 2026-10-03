@@ -28,12 +28,29 @@ from protected_cutover import CutoverError, PhaseLedger, host_lock
 IDENTITY = re.compile(r"[0-9a-f]{64}\Z")
 IMAGE = re.compile(r"sha256:[0-9a-f]{64}\Z")
 NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,80}\Z")
-CONTAINERS = {
+DEFAULT_CONTAINERS = {
     "api": "atom-candidate", "broker": "atom-candidate-broker", "caddy": "atom-tls",
 }
-ROLLBACK_NAMES = {key: value + "-rollback" for key, value in CONTAINERS.items()}
-EXTRA = {"atom-preview": "atom-ip-publication", "atom-public": "atom-ip-publication",
-         "atom-verifier": "atom-ip-verifier"}
+DEFAULT_EXTRA = {"preview": "atom-preview", "public": "atom-public",
+                 "verifier": "atom-verifier"}
+EXTRA_PROJECTS = {"preview": "atom-ip-publication", "public": "atom-ip-publication",
+                  "verifier": "atom-ip-verifier"}
+DEFAULT_NAMES = DEFAULT_CONTAINERS | DEFAULT_EXTRA
+
+
+def _names(value: object) -> dict[str, str]:
+    if (type(value) is not dict or set(value) != set(DEFAULT_NAMES)
+            or any(type(name) is not str or NAME.fullmatch(name) is None
+                   or len(name) > 70 for name in value.values())
+            or len(set(value.values())) != len(value)
+            or any(name + "-rollback" in value.values()
+                   for name in value.values())):
+        raise RollbackError("invalid_container_names")
+    return value
+
+
+def _rollback_name(name: str) -> str:
+    return name + "-rollback"
 
 
 class RollbackError(RuntimeError):
@@ -77,28 +94,42 @@ def _identity(path: Path) -> dict:
         raise RollbackError("invalid_rollback_identity") from exc
     if (type(record) is not dict or set(record) != {
             "schemaVersion", "revision", "oldImageId", "candidateImageId",
-            "containers", "stateDirectory"} or record["schemaVersion"] != 1
+            "containers", "stateDirectory", "names"} or record["schemaVersion"] != 2
             or not isinstance(record["revision"], str)
             or re.fullmatch(r"[0-9a-f]{40}", record["revision"]) is None
             or any(not isinstance(record[key], str) or IMAGE.fullmatch(record[key]) is None
                    for key in ("oldImageId", "candidateImageId"))
             or type(record["containers"]) is not dict
-            or set(record["containers"]) != set(CONTAINERS)
+            or set(record["containers"]) != set(DEFAULT_CONTAINERS)
             or any(not isinstance(value, str) or IDENTITY.fullmatch(value) is None
                    for value in record["containers"].values())
             or not isinstance(record["stateDirectory"], str)
             or not Path(record["stateDirectory"]).is_absolute()):
         raise RollbackError("invalid_rollback_identity")
+    _names(record["names"])
     return record
 
 
-def capture_identity(path: Path, *, revision: str, candidate_image: str) -> dict:
+def _names_file(path: Path) -> dict[str, str]:
+    info = path.lstat()
+    if (not path.is_absolute() or not stat.S_ISREG(info.st_mode)
+            or info.st_uid != 0 or stat.S_IMODE(info.st_mode) != 0o600):
+        raise RollbackError("insecure_names_file")
+    try:
+        return _names(json.loads(path.read_text(encoding="utf-8")))
+    except (OSError, UnicodeError, ValueError) as exc:
+        raise RollbackError("invalid_names_file") from exc
+
+
+def capture_identity(path: Path, *, revision: str, candidate_image: str,
+                     names: dict[str, str] | None = None) -> dict:
     """Persist the current old IDs before a writer is stopped or renamed."""
     if (not path.is_absolute() or not isinstance(revision, str)
             or re.fullmatch(r"[0-9a-f]{40}", revision) is None
             or not isinstance(candidate_image, str)
             or IMAGE.fullmatch(candidate_image) is None):
         raise RollbackError("invalid_identity_capture")
+    names = _names(names if names is not None else DEFAULT_NAMES)
     parent = path.parent
     info = parent.stat()
     if (not stat.S_ISDIR(info.st_mode) or info.st_uid != 0
@@ -106,12 +137,13 @@ def capture_identity(path: Path, *, revision: str, candidate_image: str) -> dict
         raise RollbackError("insecure_identity_directory")
     containers = {}
     old_image = None
-    for role, name in CONTAINERS.items():
+    for role in DEFAULT_CONTAINERS:
+        name = names[role]
         item = _inspect(name)
         if (item is None or item.get("State", {}).get("Running") is not True
                 or not isinstance(item.get("Id"), str)
                 or IDENTITY.fullmatch(item["Id"]) is None
-                or _inspect(ROLLBACK_NAMES[role]) is not None):
+                or _inspect(_rollback_name(name)) is not None):
             raise RollbackError("old_container_not_ready")
         if role != "caddy":
             if old_image is None:
@@ -120,11 +152,12 @@ def capture_identity(path: Path, *, revision: str, candidate_image: str) -> dict
                 raise RollbackError("old_pair_image_mismatch")
         containers[role] = item["Id"]
     if (not isinstance(old_image, str) or IMAGE.fullmatch(old_image) is None
-            or old_image == candidate_image or any(_inspect(name) is not None for name in EXTRA)):
+            or old_image == candidate_image
+            or any(_inspect(names[role]) is not None for role in EXTRA_PROJECTS)):
         raise RollbackError("candidate_not_isolated")
-    record = {"schemaVersion": 1, "revision": revision, "oldImageId": old_image,
+    record = {"schemaVersion": 2, "revision": revision, "oldImageId": old_image,
               "candidateImageId": candidate_image, "containers": containers,
-              "stateDirectory": str(parent)}
+              "stateDirectory": str(parent), "names": names}
     descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL
                          | getattr(os, "O_NOFOLLOW", 0), 0o600)
     try:
@@ -143,8 +176,10 @@ def capture_identity(path: Path, *, revision: str, candidate_image: str) -> dict
 def _old_locations(identity: dict) -> dict[str, str]:
     """Validate all old IDs before any destructive candidate operation."""
     locations = {}
-    for role, canonical in CONTAINERS.items():
-        backup_name = ROLLBACK_NAMES[role]
+    names = _names(identity["names"])
+    for role in DEFAULT_CONTAINERS:
+        canonical = names[role]
+        backup_name = _rollback_name(canonical)
         original_id = identity["containers"][role]
         old_image = (identity["oldImageId"] if role != "caddy"
                      else None)
@@ -166,7 +201,8 @@ def _old_locations(identity: dict) -> dict[str, str]:
             if project != "atom-ip-ingress":
                 raise RollbackError("candidate_caddy_identity_mismatch")
         locations[role] = matching[0][0]
-    for name, project in EXTRA.items():
+    for role, project in EXTRA_PROJECTS.items():
+        name = names[role]
         item = _inspect(name)
         if item is not None and (item.get("Image") != identity["candidateImageId"]
                                  or item.get("Config", {}).get("Labels", {}).get(
@@ -203,19 +239,28 @@ def _await_healthy(name: str, *, seconds: int = 150) -> None:
     raise RollbackError("old_pair_health_timeout")
 
 
-def _await_console(url: str, *, seconds: int = 60) -> None:
+def _await_console(url: str, *, ca_file: Path | None = None,
+                   seconds: int = 60) -> None:
     try:
         parsed = urlsplit(url)
         valid = (parsed.scheme == "https" and parsed.hostname is not None
                  and ip_address(parsed.hostname).compressed == parsed.hostname
-                 and parsed.port is None and parsed.path == "/atom/"
+                 and (parsed.port is None or 1024 <= parsed.port <= 65535)
+                 and parsed.path == "/atom/"
                  and not parsed.query and not parsed.fragment
                  and parsed.username is None and parsed.password is None)
     except ValueError:
         valid = False
     if not valid:
         raise RollbackError("invalid_console_probe")
-    opener = build_opener(ProxyHandler({}), HTTPSHandler(context=ssl.create_default_context()))
+    if ca_file is not None and (not ca_file.is_absolute() or not ca_file.is_file()
+                                or ca_file.is_symlink()):
+        raise RollbackError("invalid_console_ca")
+    try:
+        context = ssl.create_default_context(cafile=str(ca_file) if ca_file else None)
+    except (OSError, ssl.SSLError) as exc:
+        raise RollbackError("invalid_console_ca") from exc
+    opener = build_opener(ProxyHandler({}), HTTPSHandler(context=context))
     deadline = time.monotonic() + seconds
     while time.monotonic() < deadline:
         try:
@@ -228,37 +273,40 @@ def _await_console(url: str, *, seconds: int = 60) -> None:
     raise RollbackError("old_console_probe_timeout")
 
 
-def rollback(identity: dict, *, console_url: str) -> None:
+def rollback(identity: dict, *, console_url: str,
+             ca_file: Path | None = None) -> None:
     locations = _old_locations(identity)
+    names = _names(identity["names"])
     # The broker must release its Docker-daemon lease before the preserved
     # broker with the same identity starts again.
     for role in ("broker", "api"):
-        canonical = CONTAINERS[role]
+        canonical = names[role]
         if locations[role] != canonical:
             _stop_remove_candidate(canonical, identity["candidateImageId"])
-            _run("container", "rename", ROLLBACK_NAMES[role], canonical)
-    _start_if_needed(CONTAINERS["api"])
-    _start_if_needed(CONTAINERS["broker"])
-    _await_healthy(CONTAINERS["api"])
-    _await_healthy(CONTAINERS["broker"])
+            _run("container", "rename", _rollback_name(canonical), canonical)
+    _start_if_needed(names["api"])
+    _start_if_needed(names["broker"])
+    _await_healthy(names["api"])
+    _await_healthy(names["broker"])
 
     # Restore the old Caddy only after the old API is answering. An unfinished
     # cutover may have left the original Caddy active; keep it in that case.
-    if locations["caddy"] != CONTAINERS["caddy"]:
-        new_caddy = _inspect(CONTAINERS["caddy"])
+    if locations["caddy"] != names["caddy"]:
+        new_caddy = _inspect(names["caddy"])
         if new_caddy is not None:
             project = new_caddy.get("Config", {}).get("Labels", {}).get(
                 "com.docker.compose.project")
             if project != "atom-ip-ingress":
                 raise RollbackError("candidate_caddy_identity_mismatch")
-            _stop_remove_candidate(CONTAINERS["caddy"], None)
-        _run("container", "rename", ROLLBACK_NAMES["caddy"], CONTAINERS["caddy"])
-    _start_if_needed(CONTAINERS["caddy"])
-    _await_console(console_url)
+            _stop_remove_candidate(names["caddy"], None)
+        _run("container", "rename", _rollback_name(names["caddy"]), names["caddy"])
+    _start_if_needed(names["caddy"])
+    _await_console(console_url, ca_file=ca_file)
 
     # Remove only Compose-labelled candidate support services after old 443
     # routing has recovered. Unknown same-name containers are left untouched.
-    for name, project in EXTRA.items():
+    for role, project in EXTRA_PROJECTS.items():
+        name = names[role]
         item = _inspect(name)
         if item is None:
             continue
@@ -267,7 +315,8 @@ def rollback(identity: dict, *, console_url: str) -> None:
                     "com.docker.compose.project") != project):
             raise RollbackError("candidate_support_identity_mismatch")
         _stop_remove_candidate(name, identity["candidateImageId"])
-    for role, name in CONTAINERS.items():
+    for role in DEFAULT_CONTAINERS:
+        name = names[role]
         item = _inspect(name)
         if item is None or item.get("Id") != identity["containers"][role]:
             raise RollbackError("restored_container_identity_mismatch")
@@ -278,8 +327,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("mode", choices=("capture", "rollback"))
     parser.add_argument("--identity", required=True, type=Path)
     parser.add_argument("--console-url")
+    parser.add_argument("--ca-file", type=Path)
     parser.add_argument("--revision")
     parser.add_argument("--candidate-image")
+    parser.add_argument("--names-file", type=Path)
     arguments = parser.parse_args(argv)
     try:
         with host_lock():
@@ -287,7 +338,9 @@ def main(argv: list[str] | None = None) -> int:
                 if arguments.revision is None or arguments.candidate_image is None:
                     raise RollbackError("missing_capture_inputs")
                 capture_identity(arguments.identity, revision=arguments.revision,
-                                 candidate_image=arguments.candidate_image)
+                                 candidate_image=arguments.candidate_image,
+                                 names=(_names_file(arguments.names_file)
+                                        if arguments.names_file is not None else None))
                 print("old_container_identity_recorded")
                 return 0
             if arguments.console_url is None:
@@ -297,7 +350,8 @@ def main(argv: list[str] | None = None) -> int:
             ledger.write(outcome="rollback_started", image_id=identity["candidateImageId"],
                          details={"oldImageId": identity["oldImageId"]})
             try:
-                rollback(identity, console_url=arguments.console_url)
+                rollback(identity, console_url=arguments.console_url,
+                         ca_file=arguments.ca_file)
             except RollbackError as exc:
                 ledger.write(outcome="rollback_failed", image_id=identity["candidateImageId"],
                              details={"reason": str(exc)})
