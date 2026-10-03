@@ -175,6 +175,43 @@ class ForwardStartTest(TestCase):
                     project=starter._project(self.successor),
                     publication=self.publication)
 
+    def test_cleanup_removes_only_verified_successor_ids_in_dependency_order(self):
+        remaining = dict(self.new_ids)
+        removed = []
+        def current(_config, role):
+            return {"Id": remaining[role]} if role in remaining else None
+        def remove(_config, *_args, timeout):
+            identifier = _args[-1]
+            role = next(role for role, value in remaining.items()
+                        if value == identifier)
+            removed.append(role)
+            remaining.pop(role)
+        with patch.object(starter, "_current", side_effect=current), \
+             patch.object(starter, "_profile",
+                          side_effect=lambda *, role, **_: self.new_ids[role]), \
+             patch.object(starter.ip_forward_hold, "_run", side_effect=remove):
+            starter._cleanup_candidate(config=self.config,
+                prepared=self.prepared, image=self.image,
+                project=starter._project(self.successor),
+                publication=self.publication)
+        self.assertEqual(removed, ["caddy", "verifier", "preview", "public",
+                                   "broker", "api"])
+        self.assertEqual(remaining, {})
+
+    def test_cleanup_refuses_unknown_container_without_deletion(self):
+        with patch.object(starter, "_current", return_value={"Id": "f" * 64}), \
+             patch.object(starter, "_profile",
+                          side_effect=starter.StartError(
+                              "forward_candidate_image_mismatch")), \
+             patch.object(starter.ip_forward_hold, "_run") as remove:
+            with self.assertRaisesRegex(starter.StartError,
+                                        "forward_candidate_image_mismatch"):
+                starter._cleanup_candidate(config=self.config,
+                    prepared=self.prepared, image=self.image,
+                    project=starter._project(self.successor),
+                    publication=self.publication)
+            remove.assert_not_called()
+
 
 if __name__ == "__main__":
     main()
