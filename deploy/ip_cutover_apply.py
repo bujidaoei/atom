@@ -301,8 +301,12 @@ def _start_candidate_pair(config: protected_cutover.CutoverConfig,
 
 
 def _ingress(source: Path, compose_env: Path, candidate: Path,
-             publication: dict[str, str], config: protected_cutover.CutoverConfig) -> str:
-    _command(["docker", "container", "stop", "--time", "15", "atom-tls"], timeout=30)
+             publication: dict[str, str], config: protected_cutover.CutoverConfig,
+             old_caddy_id: str) -> str:
+    old_caddy = ip_cutover_rollback._inspect("atom-tls")
+    _require(old_caddy is not None and old_caddy.get("Id") == old_caddy_id
+             and old_caddy.get("State", {}).get("Running") is False,
+             "old_ingress_not_quiesced")
     _command(["docker", "container", "rename", "atom-tls", "atom-tls-rollback"],
              timeout=20)
     _compose(source, compose_env, "compose.ip-ingress.yml", "up", "-d", "atom-tls")
@@ -520,6 +524,10 @@ def apply(inputs: Inputs, *, rehearsal: bool = False) -> dict[str, object]:
             _record(ledger, outcome="private_services_ready", image_id=inputs.image_id,
                          details={"candidateDirectory": str(candidate)})
 
+            _command(["docker", "container", "stop", "--time", "15", "atom-tls"],
+                     timeout=30)
+            _record(ledger, outcome="old_ingress_stopped", image_id=inputs.image_id,
+                         details={"oldCaddyId": identity["containers"]["caddy"]})
             _start_candidate_pair(config, candidate, inputs.image_id,
                                   publication["ATOM_VERIFIER_NETWORK"],
                                   publication["ATOM_CANDIDATE_API_IP"])
@@ -527,7 +535,8 @@ def apply(inputs: Inputs, *, rehearsal: bool = False) -> dict[str, object]:
                          details={"candidateDirectory": str(candidate)})
 
             ingress_digest = _ingress(inputs.source, compose_env, candidate,
-                                      publication, config)
+                                      publication, config,
+                                      identity["containers"]["caddy"])
             _require(re.fullmatch(r"[0-9a-f]{64}", ingress_digest) is not None,
                      "invalid_ingress_receipt")
             _record(ledger, outcome="ingress_ready", image_id=inputs.image_id,

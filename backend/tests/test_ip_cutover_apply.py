@@ -41,6 +41,42 @@ class Ledger:
 
 
 class CutoverApplyTest(unittest.TestCase):
+    def test_ingress_requires_the_exact_stopped_old_caddy(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            old_id = "1" * 64
+            for observed in ({"Id": old_id, "State": {"Running": True}},
+                             {"Id": "2" * 64, "State": {"Running": False}}):
+                with self.subTest(observed=observed), patch.object(
+                        module.ip_cutover_rollback, "_inspect", return_value=observed), \
+                        patch.object(module, "_command") as command:
+                    with self.assertRaisesRegex(module.ApplyError,
+                                                "old_ingress_not_quiesced"):
+                        module._ingress(root, root / "compose.env", root, {},
+                                        SimpleNamespace(), old_id)
+                    command.assert_not_called()
+
+    def test_ingress_renames_quiesced_caddy_without_a_second_stop(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            old_id = "1" * 64
+            publication = {"ATOM_PUBLIC_IP": "159.75.231.98",
+                           "ATOM_PREVIEW_UPSTREAM": "atom-preview:8765",
+                           "ATOM_PUBLIC_UPSTREAM": "atom-public:8765",
+                           "ATOM_ACME_DIRECTORY": "https://acme.example/directory",
+                           "ATOM_FIRST_PORT": "20000", "ATOM_LAST_PORT": "20127"}
+            with patch.object(module.ip_cutover_rollback, "_inspect", side_effect=[
+                    {"Id": old_id, "State": {"Running": False}},
+                    {"State": {"Running": True}}]), patch.object(
+                    module, "_command", side_effect=["", "a" * 64]) as command, \
+                    patch.object(module, "_compose"):
+                self.assertEqual(module._ingress(root, root / "compose.env", root,
+                                                  publication, SimpleNamespace(), old_id),
+                                 "a" * 64)
+            self.assertEqual(command.call_args_list[0].args[0],
+                             ["docker", "container", "rename", "atom-tls",
+                              "atom-tls-rollback"])
+
     def _publication_case(self, preview_ip: str, public_ip: str,
                           api_ip: str) -> list[str]:
         with tempfile.TemporaryDirectory() as temporary:
