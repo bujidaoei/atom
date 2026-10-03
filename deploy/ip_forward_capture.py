@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 from pathlib import Path
+import re
 import stat
 import sys
 
@@ -44,6 +45,7 @@ class CapturedGeneration:
     caddy_sha256: str
     artifact_count: int
     origin_count: int
+    cos_inventory_sha256: str
 
 
 def _private_path(path: Path, *, directory: bool) -> None:
@@ -91,6 +93,33 @@ def _maintenance(config: protected_cutover.CutoverConfig, *, source: Path,
     return hashlib.sha256(expected).hexdigest()
 
 
+def _verify_cos(*, config: protected_cutover.CutoverConfig, candidate: Path,
+                image_id: str, storage_env: Path, artifacts: int) -> str:
+    """Read registered COS objects from the restored ledger without a PUT."""
+    _require(storage_env.is_absolute() and candidate.is_absolute()
+             and protected_cutover.IMAGE.fullmatch(image_id) is not None
+             and type(artifacts) is int and 0 <= artifacts <= 10000,
+             "invalid_forward_cos_source")
+    _private_path(storage_env, directory=False)
+    result = ip_cutover_apply._json_command([
+        str(config.docker), "run", "--rm", "--network", "bridge", "--read-only",
+        "--tmpfs", "/tmp:size=64m", "--volume", f"{candidate / 'data'}:/data:ro",
+        "--env-file", str(storage_env), "--workdir", "/app/backend",
+        "--entrypoint", "/app/backend/.venv/bin/python", image_id,
+        "-m", "app.artifact_transfer", "--database", "/data/atom.db",
+        "--verify-only"], timeout=600)
+    digest = result.get("inventory_sha256")
+    _require(result.get("schema_version") == 18
+             and result.get("artifact_count") == artifacts
+             and type(result.get("artifact_bytes")) is int
+             and (result["artifact_bytes"] > 0 if artifacts else
+                  result["artifact_bytes"] == 0)
+             and type(digest) is str
+             and re.fullmatch(r"[0-9a-f]{64}", digest) is not None,
+             "forward_cos_receipt_mismatch")
+    return digest
+
+
 def capture(*, config: protected_cutover.CutoverConfig,
             active: dict[str, object], publication: dict[str, str],
             stopped: ip_forward_writers.StoppedWriters,
@@ -107,17 +136,23 @@ def capture(*, config: protected_cutover.CutoverConfig,
              and all(publication.get(key)
              for key in ("ATOM_PUBLIC_IP", "ATOM_ACME_DIRECTORY",
                          "ATOM_PREVIEW_UPSTREAM", "ATOM_PUBLIC_UPSTREAM",
-                         "ATOM_FIRST_PORT", "ATOM_LAST_PORT")),
+                         "ATOM_FIRST_PORT", "ATOM_LAST_PORT",
+                         "ATOM_STORAGE_ENV_FILE")),
              "invalid_forward_capture")
     _require(type(active.get("candidateDirectory")) is str,
              "forward_source_identity_mismatch")
     source = Path(active["candidateDirectory"])
     ids = active.get("containerIds")
     image = active.get("imageId")
+    successor = active.get("successor")
     _require(source.is_absolute() and type(ids) is dict
              and type(image) is str and protected_cutover.IMAGE.fullmatch(image)
              and ids.get("caddy") and stopped.ids == {
-                 role: ids.get(role) for role in ip_forward_writers.STOP_ORDER},
+                 role: ids.get(role) for role in ip_forward_writers.STOP_ORDER}
+             and type(successor) is dict
+             and successor.get("revision") == successor_revision
+             and type(successor.get("imageId")) is str
+             and protected_cutover.IMAGE.fullmatch(successor["imageId"]) is not None,
              "forward_source_identity_mismatch")
     _private_path(source, directory=True)
     try:
@@ -158,7 +193,14 @@ def capture(*, config: protected_cutover.CutoverConfig,
                  "forward_origin_count_mismatch")
     except (paired_backup.BackupError, OSError, ValueError) as exc:
         raise CaptureError("forward_backup_failed") from exc
+    try:
+        inventory = _verify_cos(config=config, candidate=candidate,
+            image_id=successor["imageId"],
+            storage_env=Path(publication["ATOM_STORAGE_ENV_FILE"]),
+            artifacts=checked["counts"]["data"]["revision_artifacts"])
+    except (ip_cutover_apply.ApplyError, OSError) as exc:
+        raise CaptureError("forward_cos_unavailable") from exc
     return CapturedGeneration(backup, candidate, checked["manifestSha256"],
-                              caddy_digest,
-                              checked["counts"]["data"]["revision_artifacts"],
-                              len(routes))
+                               caddy_digest,
+                               checked["counts"]["data"]["revision_artifacts"],
+                               len(routes), inventory)
