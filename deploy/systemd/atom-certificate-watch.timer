@@ -1,0 +1,11 @@
+[Unit]
+Description=Check Atom short-lived IP certificates every six hours
+
+[Timer]
+OnBootSec=5min
+OnUnitInactiveSec=6h
+AccuracySec=1min
+Unit=atom-certificate-watch.service
+
+[Install]
+WantedBy=timers.target
