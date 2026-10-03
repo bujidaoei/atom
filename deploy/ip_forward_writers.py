@@ -73,14 +73,33 @@ class StoppedWriters:
 
 
 def resume(config: protected_cutover.CutoverConfig, stopped: StoppedWriters) -> None:
-    """Restart the exact stopped generation; API precedes its network-sharing broker."""
+    """Start exact IDs in dependency order, then wait for service health.
+
+    The API waits for both the verifier and broker during its own startup.
+    Waiting for API health before starting its network-sharing broker causes
+    a deadlock. Broker must join the current API network namespace, so stop
+    a stale running broker before starting a stopped API.
+    """
     _require(isinstance(stopped, StoppedWriters)
              and set(stopped.ids) == set(STOP_ORDER), "invalid_writer_receipt")
-    for role in reversed(STOP_ORDER):
+    for role in STOP_ORDER:
+        _identity(config, role, stopped.ids[role], running=None)
+    api = _identity(config, "api", stopped.ids["api"], running=None)
+    broker = _identity(config, "broker", stopped.ids["broker"], running=None)
+    if (api.get("State", {}).get("Running") is not True
+            and broker.get("State", {}).get("Running") is True):
+        _run(config.docker, "container", "stop", "--time",
+             str(GRACE["broker"]), stopped.ids["broker"],
+             timeout=GRACE["broker"] + 20)
+        _identity(config, "broker", stopped.ids["broker"], running=False)
+    startup_order = ("verifier", "api", "broker", "preview", "public")
+    for role in startup_order:
         expected_id = stopped.ids[role]
         item = _identity(config, role, expected_id, running=None)
         if item.get("State", {}).get("Running") is not True:
             _run(config.docker, "container", "start", expected_id, timeout=45)
+    for role in startup_order:
+        expected_id = stopped.ids[role]
         _healthy(config, role, expected_id)
 
 

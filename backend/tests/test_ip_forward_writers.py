@@ -69,9 +69,39 @@ class ForwardWritersTest(unittest.TestCase):
             self.assertEqual(db.call_count, 2)
             module.resume(config, receipt)
             module.resume(config, receipt)
-        self.assertEqual(fake.actions[5:], [("start", role)
-                                            for role in reversed(module.STOP_ORDER)])
+        self.assertEqual(fake.actions[5:], [("start", role) for role in
+            ("verifier", "api", "broker", "preview", "public")])
         self.assertTrue(all(fake.running.values()))
+
+    def test_resume_starts_dependencies_before_waiting_for_api_health(self):
+        fake = FakeDocker()
+        fake.running = {role: False for role in module.STOP_ORDER}
+        config, source, inspect, database, run = self.setup(fake)
+
+        def healthy(_config, role, _identifier, **_kwargs):
+            if role == "api":
+                self.assertTrue(fake.running["verifier"])
+                self.assertTrue(fake.running["broker"])
+            fake.actions.append(("healthy", role))
+
+        with inspect, database, run, patch.object(module, "_healthy",
+                                                   side_effect=healthy):
+            module.resume(config, module.StoppedWriters(fake.ids))
+        self.assertEqual(fake.actions[:5], [("start", role) for role in
+            ("verifier", "api", "broker", "preview", "public")])
+        self.assertEqual([role for action, role in fake.actions
+                          if action == "healthy"],
+                         ["verifier", "api", "broker", "preview", "public"])
+
+    def test_resume_rejoins_broker_after_stopped_api(self):
+        fake = FakeDocker()
+        fake.running["api"] = False
+        config, source, inspect, database, run = self.setup(fake)
+        with inspect, database, run:
+            module.resume(config, module.StoppedWriters(fake.ids))
+        self.assertEqual(fake.actions[:3],
+                         [("stop", "broker"), ("start", "api"),
+                          ("start", "broker")])
 
     def test_failed_stop_recovers_container_that_stopped_before_timeout(self):
         fake = FakeDocker(fail_role="public", stop_before_failure=True)
