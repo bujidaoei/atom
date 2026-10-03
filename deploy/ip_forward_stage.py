@@ -71,7 +71,8 @@ def _recover_pre_exposure(*, config: protected_cutover.CutoverConfig,
                           controller: IpIngressController, original_base: bytes,
                           journal: ip_forward_journal.ForwardJournal,
                           active: dict[str, object], publication_file: Path,
-                          revision: str) -> None:
+                          revision: str,
+                          write_fence_unchanged: bool = False) -> None:
     """Restore source IDs and strict-TLS routes while the host lock is held."""
     try:
         if stopped is not None:
@@ -79,8 +80,11 @@ def _recover_pre_exposure(*, config: protected_cutover.CutoverConfig,
         controller.transition_base(original_base, maintenance=False)
         ip_forward_preflight._inspect_locked(
             config=config, publication_file=publication_file, revision=revision)
-        journal.advance("source_restored", evidence={"sourceIdsChecked": True,
-                                                    "normalIngressProbed": True})
+        evidence: dict[str, str | bool] = {"sourceIdsChecked": True,
+                                           "normalIngressProbed": True}
+        if write_fence_unchanged:
+            evidence["writeFence"] = "unchanged"
+        journal.advance("source_restored", evidence=evidence)
     except BaseException as exc:
         # Preserve the intent phase and exact identity for an operator/crash
         # recovery command. Never claim a source restore from partial checks.

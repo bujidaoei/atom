@@ -64,8 +64,9 @@ def _canonical(config: protected_cutover.CutoverConfig, role: str) -> str:
 
 def restore(*, config: protected_cutover.CutoverConfig,
             stage: ip_forward_stage.ForwardStage,
-            identity: dict[str, object], publication_file: Path) -> None:
-    """Pre-exposure recovery from any partially completed exact-ID rename."""
+            identity: dict[str, object], publication_file: Path,
+            write_fence_unchanged: bool = False) -> None:
+    """Restore exact source IDs, with a proven unchanged fence after exposure."""
     try:
         for role in reversed(ip_forward_identity.ROLES):
             expected_id = identity["containerIds"][role]
@@ -91,7 +92,8 @@ def restore(*, config: protected_cutover.CutoverConfig,
             original_base=ip_forward_identity.caddy_bytes(identity, "base"),
             journal=stage.journal, active=stage.active,
             publication_file=publication_file,
-            revision=identity["sourceRevision"])
+            revision=identity["sourceRevision"],
+            write_fence_unchanged=write_fence_unchanged)
     except BaseException as exc:
         raise HoldError("forward_held_source_recovery_failed") from exc
 
