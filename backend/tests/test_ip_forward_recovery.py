@@ -1,9 +1,12 @@
 """Interrupted pre-handoff recovery must use the sealed six source IDs."""
 
 from contextlib import contextmanager
+import hashlib
+import os
 from pathlib import Path
 import sys
-from unittest import TestCase, main
+import tempfile
+from unittest import TestCase, main, skipUnless
 from unittest.mock import Mock, patch
 
 
@@ -125,6 +128,101 @@ class ForwardRecoveryTest(TestCase):
                 publication_file=self.publication_file,
                 successor_revision=self.successor_revision), "source_restored")
         self.assertFalse(held["value"])
+
+    def _partial_fixture(self):
+        temporary = tempfile.TemporaryDirectory(prefix="atom-forward-recover-")
+        self.addCleanup(temporary.cleanup)
+        candidate = Path(temporary.name).resolve() / "candidate"
+        caddy = candidate / "caddy"
+        caddy.mkdir(parents=True)
+        (caddy / "Caddyfile").write_bytes(b"maintenance")
+        (caddy / "Caddyfile").chmod(0o600)
+        receipt = dict(self.identity)
+        receipt.update({
+            "candidateDirectory": str(candidate),
+            "backupDirectory": str(candidate.parent / "backup"),
+            "successorImageId": "sha256:" + "b" * 64,
+            "serviceIps": {"caddy": "172.30.0.4"},
+            "heldNames": {role: "held-" + role for role in self.ids},
+        })
+        self.journal.read.return_value = {
+            "phase": "candidate_intent", "capture": {
+                "backupDirectory": receipt["backupDirectory"],
+                "manifestSha256": "a" * 64,
+                "caddySha256": hashlib.sha256(b"maintenance").hexdigest(),
+                "artifactCount": 2, "originCount": 4,
+                "cosInventorySha256": "c" * 64}}
+        return receipt
+
+    def test_partial_handoff_fences_before_cleanup_and_source_restore(self):
+        receipt = self._partial_fixture()
+        events = []
+        with patch.object(recovery.ip_forward_journal, "ForwardJournal",
+                          return_value=self.journal), \
+             patch.object(recovery.ip_forward_identity, "read",
+                          return_value=receipt), \
+             patch.object(recovery.ip_forward_preflight, "_publication",
+                          return_value={"ATOM_FIRST_PORT": "20000",
+                                        "ATOM_LAST_PORT": "20003"}), \
+             patch.object(recovery.ip_forward_preflight, "_active_routes",
+                          return_value=()), \
+             patch.object(recovery, "_candidate_caddy_digest"), \
+             patch.object(recovery.ip_forward_stage, "_controller",
+                          return_value=Mock()), \
+             patch.object(recovery.ip_forward_start,
+                          "_fence_partial_candidate",
+                          side_effect=lambda **_: events.append("fence")), \
+             patch.object(recovery.ip_forward_start, "_cleanup_candidate",
+                          side_effect=lambda **_: events.append("cleanup")), \
+             patch.object(recovery.ip_forward_hold, "restore",
+                          side_effect=lambda **_: events.append("restore")):
+            self.assertEqual(recovery.recover_partial_handoff_locked(
+                config=self.config, publication_file=self.publication_file,
+                successor_revision=self.successor_revision), "source_restored")
+        self.assertEqual(events, ["fence", "cleanup", "restore"])
+
+    def test_changed_partial_candidate_is_retained(self):
+        receipt = self._partial_fixture()
+        with patch.object(recovery.ip_forward_journal, "ForwardJournal",
+                          return_value=self.journal), \
+             patch.object(recovery.ip_forward_identity, "read",
+                          return_value=receipt), \
+             patch.object(recovery.ip_forward_preflight, "_publication",
+                          return_value={"ATOM_FIRST_PORT": "20000",
+                                        "ATOM_LAST_PORT": "20003"}), \
+             patch.object(recovery.ip_forward_preflight, "_active_routes",
+                          return_value=()), \
+             patch.object(recovery, "_candidate_caddy_digest"), \
+             patch.object(recovery.ip_forward_stage, "_controller",
+                          return_value=Mock()), \
+             patch.object(recovery.ip_forward_start,
+                          "_fence_partial_candidate",
+                          side_effect=recovery.ip_forward_start.StartError(
+                              "forward_prestart_writes_detected")), \
+             patch.object(recovery.ip_forward_start,
+                          "_cleanup_candidate") as cleanup, \
+             patch.object(recovery.ip_forward_hold, "restore") as restore:
+            with self.assertRaisesRegex(recovery.ip_forward_start.StartError,
+                                        "forward_prestart_writes_detected"):
+                recovery.recover_partial_handoff_locked(
+                    config=self.config, publication_file=self.publication_file,
+                    successor_revision=self.successor_revision)
+        cleanup.assert_not_called()
+        restore.assert_not_called()
+
+    @skipUnless(os.name == "posix" and getattr(os, "geteuid", lambda: -1)() == 0,
+                "root POSIX private-file semantics")
+    def test_partial_caddy_receipt_refuses_changed_bytes(self):
+        receipt = self._partial_fixture()
+        candidate = Path(receipt["candidateDirectory"])
+        candidate.chmod(0o700)
+        (candidate / "caddy").chmod(0o700)
+        digest = hashlib.sha256(b"maintenance").hexdigest()
+        recovery._candidate_caddy_digest(candidate, digest)
+        (candidate / "caddy" / "Caddyfile").write_bytes(b"changed")
+        with self.assertRaisesRegex(recovery.RecoveryError,
+                                    "forward_candidate_caddy_changed"):
+            recovery._candidate_caddy_digest(candidate, digest)
 
 
 if __name__ == "__main__":

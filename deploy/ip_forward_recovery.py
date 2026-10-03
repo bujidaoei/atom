@@ -8,11 +8,17 @@ must never infer that a phase name alone authorizes source restoration.
 from __future__ import annotations
 
 from pathlib import Path
+import hashlib
+import stat
 
+import ip_forward_candidate
+import ip_forward_capture
+import ip_forward_hold
 import ip_forward_identity
 import ip_forward_journal
 import ip_forward_preflight
 import ip_forward_stage
+import ip_forward_start
 import ip_forward_writers
 import protected_cutover
 
@@ -76,11 +82,100 @@ def recover_pre_handoff_locked(*, config: protected_cutover.CutoverConfig,
     return "source_restored"
 
 
+def _candidate_caddy_digest(candidate: Path, expected: str) -> None:
+    ip_forward_candidate._private_directory(candidate)
+    ip_forward_candidate._private_directory(candidate / "caddy")
+    caddy_file = candidate / "caddy" / "Caddyfile"
+    try:
+        info = caddy_file.lstat()
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid != 0
+                or stat.S_IMODE(info.st_mode) != 0o600
+                or hashlib.sha256(caddy_file.read_bytes()).hexdigest()
+                != expected):
+            raise RecoveryError("forward_candidate_caddy_changed")
+    except OSError as exc:
+        raise RecoveryError("forward_candidate_caddy_unavailable") from exc
+
+
+def recover_partial_handoff_locked(*, config: protected_cutover.CutoverConfig,
+                                   publication_file: Path,
+                                   successor_revision: str) -> str:
+    """Fence a partially started successor before restoring held source IDs."""
+    if not publication_file.is_absolute():
+        raise RecoveryError("invalid_forward_recovery_input")
+    journal = ip_forward_journal.ForwardJournal(config, successor_revision)
+    record = journal.read()
+    if record is None or record["phase"] != "candidate_intent":
+        raise RecoveryError("forward_recovery_phase_refused")
+    identity = ip_forward_identity.read(
+        journal.identity_path, config=config,
+        successor_revision=successor_revision)
+    publication = ip_forward_preflight._publication(
+        publication_file, config, identity["sourceImageId"])
+    source = Path(identity["sourceDirectory"])
+    candidate = Path(identity["candidateDirectory"])
+    capture = record["capture"]
+    if capture is None:
+        raise RecoveryError("forward_capture_receipt_missing")
+    _candidate_caddy_digest(candidate, capture["caddySha256"])
+    prepared = ip_forward_candidate.PreparedCandidate(
+        candidate, candidate / "compose.env",
+        candidate / "private-env" / "api.env",
+        candidate / "private-env" / "broker.env",
+        identity["serviceIps"]["caddy"], identity["serviceIps"],
+        capture["caddySha256"])
+    routes = ip_forward_preflight._active_routes(
+        source / "data" / "atom.db",
+        int(publication["ATOM_FIRST_PORT"]),
+        int(publication["ATOM_LAST_PORT"]))
+    stage = ip_forward_stage.ForwardStage(
+        {"containerIds": identity["containerIds"],
+         "candidateDirectory": str(source),
+         "imageId": identity["sourceImageId"]},
+        publication, routes,
+        ip_forward_writers.StoppedWriters({
+            role: identity["containerIds"][role]
+            for role in ip_forward_writers.STOP_ORDER}),
+        ip_forward_capture.CapturedGeneration(
+            Path(capture["backupDirectory"]), candidate,
+            capture["manifestSha256"], capture["caddySha256"],
+            capture["artifactCount"], capture["originCount"],
+            capture["cosInventorySha256"]),
+        journal,
+        ip_forward_stage._controller(config=config,
+                                     publication=publication, source=source))
+    ip_forward_start._fence_partial_candidate(
+        config=config, stage=stage, prepared=prepared,
+        successor_revision=successor_revision,
+        successor_image=identity["successorImageId"],
+        source_ids=identity["containerIds"])
+    ip_forward_start._cleanup_candidate(
+        config=config, prepared=prepared,
+        image=identity["successorImageId"],
+        project=ip_forward_start._project(successor_revision),
+        publication=publication, source_ids=identity["containerIds"])
+    ip_forward_hold.restore(config=config, stage=stage,
+                            identity=identity,
+                            publication_file=publication_file,
+                            write_fence_unchanged=True)
+    return "source_restored"
+
+
 def recover_pre_handoff(*, config_file: Path, publication_file: Path,
                         successor_revision: str) -> str:
     """Keep receipt inspection and all source transitions under one lock."""
     config = protected_cutover.load_config(config_file)
     with protected_cutover.host_lock():
         return recover_pre_handoff_locked(
+            config=config, publication_file=publication_file,
+            successor_revision=successor_revision)
+
+
+def recover_partial_handoff(*, config_file: Path, publication_file: Path,
+                            successor_revision: str) -> str:
+    """Hold the host lock while fencing and reconciling a partial handoff."""
+    config = protected_cutover.load_config(config_file)
+    with protected_cutover.host_lock():
+        return recover_partial_handoff_locked(
             config=config, publication_file=publication_file,
             successor_revision=successor_revision)
