@@ -188,7 +188,10 @@ def test_release_workbench_keeps_real_event_stream_and_recovers(
             assert 'text/event-stream' in stream_responses[0].headers['content-type']
             emitted = page.request.post(origin + '/atom/__test/emit-stream')
             assert emitted.status == 200 and emitted.json() == {'ok': True}
-            page.get_by_text('stream-live-marker').wait_for(timeout=10000)
+            # The conversation panel is hidden behind the release tab on mobile.
+            # Attachment proves the decoded event reached React in both layouts.
+            page.get_by_text('stream-live-marker').wait_for(
+                state='attached', timeout=10000)
 
             fault = page.request.post(origin + '/atom/__test/close-stream')
             assert fault.status == 200 and fault.json() == {'ok': True}

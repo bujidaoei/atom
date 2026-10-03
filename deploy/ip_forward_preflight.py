@@ -248,6 +248,9 @@ def _target(config: protected_cutover.CutoverConfig, *, source: Path,
     _require(image.get("Id") == image_id and image.get("Config", {})
              .get("Labels", {}).get("atom.revision") == revision,
              "successor_image_mismatch")
+    _require(image.get("Config", {}).get("Labels", {}).get(
+             "atom.frontend_base") == "/atom/",
+             "successor_frontend_base_mismatch")
     return {"revision": revision, "imageId": image_id}
 
 

@@ -184,11 +184,21 @@ class ForwardPreflightTest(unittest.TestCase):
             with patch.object(module.protected_cutover, "_command", side_effect=command), \
                     patch.object(module.protected_cutover, "_inspect", return_value={
                         "Id": successor_image,
-                        "Config": {"Labels": {"atom.revision": successor}}}):
+                        "Config": {"Labels": {"atom.revision": successor,
+                                               "atom.frontend_base": "/atom/"}}}):
                 result = module._target(config, source=source, revision=successor,
                     image_id=successor_image, current_revision="a" * 40,
                     current_image=IMAGE, candidate=candidate)
                 self.assertEqual(result["imageId"], successor_image)
+                with patch.object(module.protected_cutover, "_inspect", return_value={
+                        "Id": successor_image,
+                        "Config": {"Labels": {"atom.revision": successor,
+                                               "atom.frontend_base": "/"}}}):
+                    with self.assertRaisesRegex(module.ForwardPreflightError,
+                                                "successor_frontend_base_mismatch"):
+                        module._target(config, source=source, revision=successor,
+                            image_id=successor_image, current_revision="a" * 40,
+                            current_image=IMAGE, candidate=candidate)
                 with patch.object(module.protected_cutover, "_inspect", return_value={
                         "Id": successor_image,
                         "Config": {"Labels": {"atom.revision": "a" * 40}}}):

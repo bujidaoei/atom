@@ -75,6 +75,8 @@ COPY --from=runtime /runtime /app/runtime
 COPY --from=web /web/dist /usr/share/nginx/html
 COPY deploy/nginx.conf /etc/nginx/nginx.conf
 COPY deploy/supervisord.conf /etc/supervisor/supervisord.conf
+ARG VITE_BASE=/
+LABEL atom.frontend_base="${VITE_BASE}"
 
 ENV ATOM_DATA_DIR=/data \
     ATOM_DB_PATH=/data/atom.db \
