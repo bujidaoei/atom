@@ -11,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "deploy"))
 import ip_forward_candidate as candidate  # noqa: E402
 import ip_forward_stage as stage_module  # noqa: E402
 import test_ip_forward_capture as capture_fixture  # noqa: E402
-REAL_CADDY_IP = candidate._caddy_ip
+REAL_SERVICE_IPS = candidate._service_ips
 
 
 def _setup(tmp_path, monkeypatch):
@@ -50,7 +50,9 @@ def _setup(tmp_path, monkeypatch):
                         **_kwargs: identity)
     monkeypatch.setattr(candidate.ip_forward_identity, "caddy_bytes",
                         lambda *_args: b"original console base")
-    monkeypatch.setattr(candidate, "_caddy_ip", lambda *_args: "172.30.0.10")
+    monkeypatch.setattr(candidate, "_service_ips", lambda *_args: {
+        "api": "172.30.0.8", "preview": "172.30.0.6",
+        "public": "172.30.0.7", "caddy": "172.30.0.10"})
     monkeypatch.setattr(candidate, "_private_directory",
                         lambda path, *, create=False:
                         path.mkdir(mode=0o700) if create else None)
@@ -62,6 +64,10 @@ def _setup(tmp_path, monkeypatch):
         return first, second
     monkeypatch.setattr(candidate.ip_cutover_env, "build", env_build)
     def compose_env(_publication, directory, _image, _address):
+        assert _publication["ATOM_CANDIDATE_API_IP"] == "172.30.0.8"
+        assert _publication["ATOM_PREVIEW_SERVICE_IP"] == "172.30.0.6"
+        assert _publication["ATOM_PUBLIC_SERVICE_IP"] == "172.30.0.7"
+        assert _address == "172.30.0.10"
         path = directory / "compose.env"
         path.write_text("safe=fixture", encoding="utf-8")
         return path
@@ -78,6 +84,7 @@ def test_prepares_maintenance_candidate_without_changing_release_pair(
         successor_source=tmp_path / "source", successor_revision="f" * 40,
         successor_image=image)
     assert prepared.directory == forward.captured.candidate
+    assert prepared.service_ips["caddy"] == "172.30.0.10"
     assert prepared.compose_env.exists() and prepared.api_env.exists()
     assert (prepared.directory / "caddy" / "Caddyfile").read_bytes() == \
         (prepared.directory / "Caddyfile").read_bytes()
@@ -104,29 +111,50 @@ def test_changed_candidate_origin_refuses_before_creating_inputs(
     assert not (forward.captured.candidate / "private-env").exists()
 
 
-@pytest.mark.parametrize("observed", ["172.30.0.6", "172.30.0.8"])
-def test_caddy_trusted_proxy_address_must_match_live_id_and_config(
-        tmp_path, monkeypatch, observed):
+@pytest.mark.parametrize("fault", ["changed_id", "address_collision",
+                                   "unpinned"])
+def test_live_service_addresses_refuse_changed_identity_or_collision(
+        tmp_path, monkeypatch, fault):
     config, forward, _image = _setup(tmp_path, monkeypatch)
+    addresses = {"api": "172.30.0.8", "preview": "172.30.0.6",
+                 "public": "172.30.0.7", "caddy": "172.30.0.10"}
+    names = {"api": config.api, "preview": "atom-preview",
+             "public": "atom-public", "caddy": "atom-tls"}
+    def inspect(_docker, _kind, name):
+        role = next(role for role, label in names.items() if label == name)
+        address = addresses[role]
+        return {"Name": "/" + name,
+                "Id": "f" * 64 if fault == "changed_id" and role == "caddy"
+                else forward.active["containerIds"][role],
+                "State": {"Running": True},
+                "NetworkSettings": {"Networks": {config.network: {
+                    "IPAddress": address,
+                    "IPAMConfig": {"IPv4Address": "" if fault == "unpinned"
+                                   and role == "caddy" else address}}}}}
+    if fault == "address_collision":
+        addresses["caddy"] = addresses["api"]
     monkeypatch.setattr(candidate.protected_cutover, "_inspect",
-        lambda *_args: {"Id": forward.active["containerIds"]["caddy"],
-                       "State": {"Running": True},
-                       "NetworkSettings": {"Networks": {
-                           config.network: {"IPAddress": observed}}}})
-    with pytest.raises(candidate.CandidateError,
-                       match="forward_caddy_ip_mismatch"):
-        REAL_CADDY_IP(config,
-            forward.active["containerIds"]["caddy"], forward.publication)
+                        inspect)
+    with pytest.raises(candidate.CandidateError):
+        REAL_SERVICE_IPS(config, forward.active["containerIds"])
 
 
-def test_caddy_live_address_overrides_old_staging_template(tmp_path, monkeypatch):
+def test_live_addresses_override_old_staging_template(tmp_path, monkeypatch):
     config, forward, _image = _setup(tmp_path, monkeypatch)
+    addresses = {"api": "172.30.0.8", "preview": "172.30.0.6",
+                 "public": "172.30.0.7", "caddy": "172.30.0.10"}
+    names = {"api": config.api, "preview": "atom-preview",
+             "public": "atom-public", "caddy": "atom-tls"}
+    def inspect(_docker, _kind, name):
+        role = next(role for role, label in names.items() if label == name)
+        address = addresses[role]
+        return {"Name": "/" + name,
+                "Id": forward.active["containerIds"][role],
+                "State": {"Running": True},
+                "NetworkSettings": {"Networks": {config.network: {
+                    "IPAddress": address,
+                    "IPAMConfig": {"IPv4Address": address}}}}}
     monkeypatch.setattr(candidate.protected_cutover, "_inspect",
-        lambda *_args: {"Id": forward.active["containerIds"]["caddy"],
-                       "State": {"Running": True},
-                       "NetworkSettings": {"Networks": {
-                           config.network: {"IPAddress": "172.30.0.10"}}}})
-    assert REAL_CADDY_IP(config,
-        forward.active["containerIds"]["caddy"], forward.publication) \
-        == "172.30.0.10"
+                        inspect)
+    assert REAL_SERVICE_IPS(config, forward.active["containerIds"]) == addresses
     assert forward.publication["ATOM_CADDY_PROXY_IP"] == "172.30.0.2"

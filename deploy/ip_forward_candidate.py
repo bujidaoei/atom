@@ -44,6 +44,7 @@ class PreparedCandidate:
     api_env: Path
     broker_env: Path
     caddy_ip: str
+    service_ips: dict[str, str]
     maintenance_sha256: str
 
 
@@ -78,25 +79,34 @@ def _private_bytes(path: Path, payload: bytes) -> None:
         raise
 
 
-def _caddy_ip(config: protected_cutover.CutoverConfig,
-              expected_id: str, publication: dict[str, str]) -> str:
-    item = protected_cutover._inspect(config.docker, "container", "atom-tls")
-    network = (item.get("NetworkSettings", {}).get("Networks", {})
-               .get(config.network, {}))
-    address = network.get("IPAddress")
-    try:
-        parsed = ipaddress.ip_address(address)
-    except ValueError as exc:
-        raise CandidateError("forward_caddy_ip_invalid") from exc
-    reserved = {publication.get(key) for key in
-                ("ATOM_PREVIEW_SERVICE_IP", "ATOM_PUBLIC_SERVICE_IP",
-                 "ATOM_CANDIDATE_API_IP")}
-    _require(item.get("Id") == expected_id
-             and item.get("State", {}).get("Running") is True
-             and parsed.version == 4 and parsed.compressed == address
-             and all(reserved) and address not in reserved,
-             "forward_caddy_ip_mismatch")
-    return address
+def _service_ips(config: protected_cutover.CutoverConfig,
+                 ids: dict[str, str]) -> dict[str, str]:
+    """Capture four pinned bridge addresses from the exact running generation."""
+    names = {"api": config.api, "preview": "atom-preview",
+             "public": "atom-public", "caddy": "atom-tls"}
+    result: dict[str, str] = {}
+    _require(type(ids) is dict and all(role in ids for role in names),
+             "invalid_forward_service_ids")
+    for role, name in names.items():
+        item = protected_cutover._inspect(config.docker, "container", name)
+        network = (item.get("NetworkSettings", {}).get("Networks", {})
+                   .get(config.network, {}))
+        address = network.get("IPAddress")
+        pinned = (network.get("IPAMConfig") or {}).get("IPv4Address")
+        try:
+            parsed = ipaddress.ip_address(address)
+        except ValueError as exc:
+            raise CandidateError("forward_service_ip_invalid") from exc
+        _require(item.get("Name") == "/" + name
+                 and item.get("Id") == ids[role]
+                 and item.get("State", {}).get("Running") is True
+                 and parsed.version == 4 and parsed.compressed == address
+                 and pinned == address,
+                 "forward_service_ip_mismatch")
+        result[role] = address
+    _require(len(set(result.values())) == len(result),
+             "forward_service_ip_collision")
+    return result
 
 
 def prepare(*, config: protected_cutover.CutoverConfig,
@@ -155,8 +165,8 @@ def prepare(*, config: protected_cutover.CutoverConfig,
              and hashlib.sha256(caddy_file.read_bytes()).hexdigest()
              == stage.captured.caddy_sha256,
              "forward_candidate_caddy_mismatch")
-    address = _caddy_ip(config, stage.active["containerIds"]["caddy"],
-                        publication)
+    service_ips = _service_ips(config, stage.active["containerIds"])
+    address = service_ips["caddy"]
     maintenance = ip_cutover_apply._maintenance_caddyfile(
         publication["ATOM_PUBLIC_IP"], publication["ATOM_ACME_DIRECTORY"])
     ingress = IpIngressConfig(publication["ATOM_PUBLIC_IP"],
@@ -190,7 +200,14 @@ def prepare(*, config: protected_cutover.CutoverConfig,
         public_ip=publication["ATOM_PUBLIC_IP"],
         first_port=int(publication["ATOM_FIRST_PORT"]),
         last_port=int(publication["ATOM_LAST_PORT"]))
+    current_publication = dict(publication)
+    current_publication.update({
+        "ATOM_CANDIDATE_API_IP": service_ips["api"],
+        "ATOM_PREVIEW_SERVICE_IP": service_ips["preview"],
+        "ATOM_PUBLIC_SERVICE_IP": service_ips["public"],
+    })
     compose_env = ip_cutover_apply._compose_environment(
-        publication, candidate, successor_image, address)
+        current_publication, candidate, successor_image, address)
     return PreparedCandidate(candidate, compose_env, api_env, broker_env,
-                             address, hashlib.sha256(active).hexdigest())
+                             address, service_ips,
+                             hashlib.sha256(active).hexdigest())
