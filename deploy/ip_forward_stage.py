@@ -106,7 +106,8 @@ def stage_locked(*, config: protected_cutover.CutoverConfig,
         successor_source=successor_source,
         successor_revision=successor_revision, successor_image=successor_image)
     publication = ip_forward_preflight._publication(
-        publication_file, config, active["imageId"])
+        publication_file, config, active["imageId"],
+        require_template_image=False)
     source = Path(active["candidateDirectory"])
     routes = ip_forward_preflight._active_routes(
         source / "data" / "atom.db", int(publication["ATOM_FIRST_PORT"]),

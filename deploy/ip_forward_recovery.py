@@ -69,7 +69,8 @@ def recover_pre_handoff_locked(*, config: protected_cutover.CutoverConfig,
                     is not True)):
             raise RecoveryError("forward_source_identity_changed")
     publication = ip_forward_preflight._publication(
-        publication_file, config, identity["sourceImageId"])
+        publication_file, config, identity["sourceImageId"],
+        require_template_image=False)
     controller = ip_forward_stage._controller(
         config=config, publication=publication,
         source=Path(identity["sourceDirectory"]))
@@ -115,7 +116,8 @@ def _rebuild_context(*, config: protected_cutover.CutoverConfig,
         journal.identity_path, config=config,
         successor_revision=successor_revision)
     publication = ip_forward_preflight._publication(
-        publication_file, config, identity["sourceImageId"])
+        publication_file, config, identity["sourceImageId"],
+        require_template_image=False)
     source = Path(identity["sourceDirectory"])
     candidate = Path(identity["candidateDirectory"])
     capture = record["capture"]

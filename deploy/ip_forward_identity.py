@@ -113,8 +113,10 @@ def _record(config: protected_cutover.CutoverConfig,
     _require(type(active.get("candidateDirectory")) is str,
              "forward_source_identity_mismatch")
     source = Path(active["candidateDirectory"])
-    expected_source = config.backup_root / ("candidate-" + active["revision"][:12])
-    _require(source == expected_source and source.is_absolute()
+    expected_sources = {
+        config.backup_root / (prefix + active["revision"][:12])
+        for prefix in ("candidate-", "forward-candidate-")}
+    _require(source in expected_sources and source.is_absolute()
              and type(active.get("containerIds")) is dict
              and set(active["containerIds"]) == set(ROLES),
              "forward_source_identity_mismatch")
@@ -250,8 +252,9 @@ def read(path: Path, *, config: protected_cutover.CutoverConfig,
         and set(record["serviceIps"]) == set(PINNED_ROLES)
         and all(type(record["serviceIps"][role]) is str
                 for role in PINNED_ROLES)
-        and record["sourceDirectory"] == str(config.backup_root /
-                                             ("candidate-" + record["sourceRevision"][:12]))
+        and record["sourceDirectory"] in {
+            str(config.backup_root / (prefix + record["sourceRevision"][:12]))
+            for prefix in ("candidate-", "forward-candidate-")}
         and record["backupDirectory"] == str(config.backup_root /
                                               ("forward-pre-" + successor_revision[:12]))
         and record["candidateDirectory"] == str(config.backup_root /

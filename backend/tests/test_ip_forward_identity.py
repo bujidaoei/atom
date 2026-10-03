@@ -99,6 +99,20 @@ class ForwardIdentityTest(TestCase):
         self.assertFalse((self.config.state_dir /
                           (self.next_revision + '.forward.json')).exists())
 
+    def test_next_forward_can_capture_current_forward_generation(self):
+        original = Path(self.active['candidateDirectory'])
+        successor = self.config.backup_root / (
+            'forward-candidate-' + self.old_revision[:12])
+        original.rename(successor)
+        self.active['candidateDirectory'] = str(successor)
+        with patch.object(module.protected_cutover, '_inspect', side_effect=self._inspect), \
+                patch.object(module.ip_cutover_rollback, '_inspect', return_value=None):
+            path = module.capture(self.config, self.active,
+                                  self.next_revision, self.next_image)
+        record = module.read(path, config=self.config,
+                             successor_revision=self.next_revision)
+        self.assertEqual(record['sourceDirectory'], str(successor))
+
 
 if __name__ == '__main__':
     main()

@@ -20,6 +20,8 @@ import sys
 
 import ip_cutover_apply
 import ip_cutover_rollback
+import ip_forward_identity
+import ip_forward_journal
 import protected_cutover
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
@@ -55,6 +57,14 @@ def _candidate(config: protected_cutover.CutoverConfig,
                                                         ("pre-" + revision[:12]))
              and expected != config.data and expected != config.broker_data,
              "active_generation_mismatch")
+    return _private_candidate_path(config, expected)
+
+
+def _private_candidate_path(config: protected_cutover.CutoverConfig,
+                            expected: Path) -> Path:
+    _require(expected.is_absolute() and expected != config.data
+             and expected != config.broker_data,
+             "active_generation_mismatch")
     try:
         protected_cutover._trusted_parents(expected)
         info = expected.lstat()
@@ -70,8 +80,23 @@ def _candidate(config: protected_cutover.CutoverConfig,
     return expected
 
 
+def _forward_candidate(config: protected_cutover.CutoverConfig,
+                       revision: str, record: dict[str, object],
+                       identity: dict[str, object]) -> Path:
+    expected = config.backup_root / ("forward-candidate-" + revision[:12])
+    _require(record["candidate"] is not None
+             and record["candidate"]["directory"] == str(expected)
+             and identity["candidateDirectory"] == str(expected)
+             and record["capture"] is not None
+             and record["capture"]["candidateDirectory"] == str(expected)
+             and record["capture"]["backupDirectory"]
+                 == identity["backupDirectory"],
+             "active_generation_mismatch")
+    return _private_candidate_path(config, expected)
+
+
 def _publication(path: Path, config: protected_cutover.CutoverConfig,
-                 image_id: str) -> dict[str, str]:
+                 image_id: str, *, require_template_image: bool = True) -> dict[str, str]:
     _private_file(path)
     try:
         values = ip_cutover_apply._private_env(path)
@@ -86,10 +111,11 @@ def _publication(path: Path, config: protected_cutover.CutoverConfig,
         # live mounts below, rather than these template fields, are trusted.
         _require(values["ATOM_PROXY_NETWORK"] == config.network,
                  "publication_config_mismatch")
-        actual_image = protected_cutover._inspect(config.docker, "image",
-                                                   values["ATOM_PUBLICATION_IMAGE"])
-        _require(actual_image.get("Id") == image_id,
-                 "publication_image_mismatch")
+        if require_template_image:
+            actual_image = protected_cutover._inspect(
+                config.docker, "image", values["ATOM_PUBLICATION_IMAGE"])
+            _require(actual_image.get("Id") == image_id,
+                     "publication_image_mismatch")
         first, last = int(values["ATOM_FIRST_PORT"]), int(values["ATOM_LAST_PORT"])
         _require(1024 <= first < last <= 65535 and last - first + 1 <= 512,
                  "invalid_origin_pool")
@@ -236,15 +262,33 @@ def _inspect_locked(*, config: protected_cutover.CutoverConfig,
               and successor_image is None)
              or (successor_source is not None and successor_revision is not None
                  and successor_image is not None), "incomplete_successor_identity")
-    record = protected_cutover.PhaseLedger(config.state_dir, revision).read()
-    _require(record is not None and record.get("schemaVersion") == 1
-             and record.get("outcome") in {"awaiting_acceptance", "completed"}
-             and type(record.get("imageId")) is str
-             and protected_cutover.IMAGE.fullmatch(record["imageId"]) is not None,
-             "active_ledger_mismatch")
-    image_id = record["imageId"]
-    candidate = _candidate(config, revision, record)
-    publication = _publication(publication_file, config, image_id)
+    forward = ip_forward_journal.ForwardJournal(config, revision).read()
+    if forward is None:
+        record = protected_cutover.PhaseLedger(config.state_dir, revision).read()
+        _require(record is not None and record.get("schemaVersion") == 1
+                 and record.get("outcome") in {"awaiting_acceptance", "completed"}
+                 and type(record.get("imageId")) is str
+                 and protected_cutover.IMAGE.fullmatch(record["imageId"]) is not None,
+                 "active_ledger_mismatch")
+        image_id = record["imageId"]
+        candidate = _candidate(config, revision, record)
+        expected_ids = None
+    else:
+        _require(forward["phase"] in {"awaiting_acceptance",
+                                      "successor_retained", "accepted"},
+                 "active_forward_phase_mismatch")
+        identity_forward = ip_forward_identity.read(
+            config.state_dir / (revision + ".forward.json"),
+            config=config, successor_revision=revision)
+        _require(identity_forward["successorRevision"] == revision,
+                 "active_forward_identity_mismatch")
+        candidate = _forward_candidate(
+            config, revision, forward, identity_forward)
+        image_id = forward["candidate"]["imageId"]
+        expected_ids = forward["candidate"]["containerIds"]
+    publication = _publication(
+        publication_file, config, image_id,
+        require_template_image=forward is None)
     image = protected_cutover._inspect(config.docker, "image", image_id)
     _require(image.get("Id") == image_id and image.get("Config", {})
              .get("Labels", {}).get("atom.revision") == revision,
@@ -254,14 +298,18 @@ def _inspect_locked(*, config: protected_cutover.CutoverConfig,
                             int(publication["ATOM_FIRST_PORT"]),
                             int(publication["ATOM_LAST_PORT"]))
     ids = _services(config, candidate, image_id, publication)
-    identity = ip_cutover_rollback._identity(config.state_dir /
-                                             (revision + ".identity.json"))
-    _require(identity["revision"] == revision
-             and identity["candidateImageId"] == image_id
-             and ip_cutover_rollback._old_locations(identity) == {
-                 role: name + "-rollback" for role, name in
-                 ip_cutover_rollback.DEFAULT_CONTAINERS.items()},
-             "preserved_source_identity_mismatch")
+    if expected_ids is None:
+        identity = ip_cutover_rollback._identity(config.state_dir /
+                                                 (revision + ".identity.json"))
+        _require(identity["revision"] == revision
+                 and identity["candidateImageId"] == image_id
+                 and ip_cutover_rollback._old_locations(identity) == {
+                     role: name + "-rollback" for role, name in
+                     ip_cutover_rollback.DEFAULT_CONTAINERS.items()},
+                 "preserved_source_identity_mismatch")
+    else:
+        _require(ids == expected_ids,
+                 "active_forward_container_identity_mismatch")
     directory = candidate / "caddy"
     try:
         base = (directory / "Caddyfile.base").read_bytes()

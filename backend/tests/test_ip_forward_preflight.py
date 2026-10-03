@@ -57,6 +57,76 @@ def bind(path: Path, destination: str, writable: bool = True) -> dict:
 
 
 class ForwardPreflightTest(unittest.TestCase):
+    def test_successor_journal_is_active_only_with_exact_live_ids(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            revision = "d" * 40
+            candidate = root / ("forward-candidate-" + revision[:12])
+            caddy = candidate / "caddy"
+            caddy.mkdir(parents=True)
+            (caddy / "Caddyfile.base").write_text("base", encoding="utf-8")
+            (caddy / "Caddyfile").write_text("active", encoding="utf-8")
+            config = SimpleNamespace(
+                backup_root=root, state_dir=root, docker=Path("/usr/bin/docker"),
+                data=root / "old-data", broker_data=root / "old-broker")
+            ids = {role: f"{index:064x}" for index, role in enumerate(
+                module.ip_forward_identity.ROLES, start=1)}
+            record = {"phase": "awaiting_acceptance",
+                      "candidate": {"directory": str(candidate),
+                                    "imageId": IMAGE, "containerIds": ids},
+                      "capture": {"candidateDirectory": str(candidate),
+                                  "backupDirectory": str(root / "backup")}}
+            identity = {"successorRevision": revision,
+                        "candidateDirectory": str(candidate),
+                        "backupDirectory": str(root / "backup")}
+            publication = {"ATOM_FIRST_PORT": "20000",
+                           "ATOM_LAST_PORT": "20001",
+                           "ATOM_PUBLIC_IP": "192.0.2.10",
+                           "ATOM_PREVIEW_UPSTREAM": "atom-preview:8080",
+                           "ATOM_PUBLIC_UPSTREAM": "atom-public:8080",
+                           "ATOM_ACME_DIRECTORY":
+                               "https://acme-v02.api.letsencrypt.org/directory"}
+            journal = SimpleNamespace(read=lambda: record)
+            with patch.object(module.os, "geteuid", return_value=0,
+                              create=True), \
+                 patch.object(module.ip_forward_journal, "ForwardJournal",
+                              return_value=journal), \
+                 patch.object(module.ip_forward_identity, "read",
+                              return_value=identity), \
+                 patch.object(module, "_private_candidate_path",
+                              return_value=candidate), \
+                 patch.object(module, "_publication",
+                              return_value=publication) as load_publication, \
+                 patch.object(module.protected_cutover, "_inspect",
+                              return_value={"Id": IMAGE, "Config": {
+                                  "Labels": {"atom.revision": revision}}}), \
+                 patch.object(module.protected_cutover, "_database"), \
+                 patch.object(module, "_active_routes", return_value=()), \
+                 patch.object(module, "_services", return_value=ids) as services, \
+                 patch.object(module, "render_ip_routes",
+                              return_value="active"):
+                result = module._inspect_locked(
+                    config=config, publication_file=root / "publication.env",
+                    revision=revision)
+                self.assertEqual(result["candidateDirectory"], str(candidate))
+                self.assertEqual(result["containerIds"], ids)
+                self.assertFalse(load_publication.call_args.kwargs[
+                    "require_template_image"])
+                services.return_value = dict(ids, api="f" * 64)
+                with self.assertRaisesRegex(module.ForwardPreflightError,
+                                            "active_forward_container_identity_mismatch"):
+                    module._inspect_locked(
+                        config=config,
+                        publication_file=root / "publication.env",
+                        revision=revision)
+                record["phase"] = "source_restored"
+                with self.assertRaisesRegex(module.ForwardPreflightError,
+                                            "active_forward_phase_mismatch"):
+                    module._inspect_locked(
+                        config=config,
+                        publication_file=root / "publication.env",
+                        revision=revision)
+
     def test_public_gate_holds_host_lock_through_internal_inspection(self):
         state = {"held": False}
         config = SimpleNamespace()

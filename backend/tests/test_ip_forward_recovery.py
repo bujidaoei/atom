@@ -62,7 +62,8 @@ class ForwardRecoveryTest(TestCase):
                 config=self.config, publication_file=self.publication_file,
                 successor_revision=self.successor_revision), "source_restored")
         publication.assert_called_once_with(
-            self.publication_file, self.config, self.identity["sourceImageId"])
+            self.publication_file, self.config, self.identity["sourceImageId"],
+            require_template_image=False)
         self.assertEqual(restore.call_args.kwargs["stopped"].ids,
                          {role: self.ids[role] for role in
                           recovery.ip_forward_writers.STOP_ORDER})
