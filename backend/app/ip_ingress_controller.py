@@ -153,7 +153,19 @@ class IpIngressController:
         """Atomically deny project-origin writes and verify every TLS port."""
         return self._apply(maintenance=True)
 
-    def _apply(self, *, maintenance: bool) -> str:
+    def transition_base(self, payload: bytes, *, maintenance: bool) -> str:
+        """Switch the console base and origin policy under one ingress lock.
+
+        Maintenance writes the denying active route before changing the base;
+        recovery writes the normal base before exposing the normal route.
+        Both prior files are restored on any failed apply or probe.
+        """
+        if (not isinstance(payload, bytes) or not payload or len(payload) > 1024 * 1024
+                or not isinstance(maintenance, bool)):
+            raise IngressError('invalid_base_transition')
+        return self._apply(maintenance=maintenance, base_override=payload)
+
+    def _apply(self, *, maintenance: bool, base_override: bytes | None = None) -> str:
         with _exclusive(self.active.parent / '.atom-ingress.lock'):
             self.caddy.ensure_directory_bind(self.active.parent)
             for _attempt in range(3):
@@ -161,7 +173,8 @@ class IpIngressController:
                         or self.base.is_symlink() or self.active.is_symlink()):
                     raise IngressError('ingress_files_required')
                 original = self.active.read_bytes()
-                base = self.base.read_bytes()
+                original_base = self.base.read_bytes()
+                base = original_base if base_override is None else base_override
                 if len(base) > 1024 * 1024 or len(original) > 1024 * 1024:
                     raise IngressError('ingress_file_too_large')
                 try:
@@ -173,12 +186,16 @@ class IpIngressController:
                 candidate = renderer(base_text, routes, self.config).encode('utf-8')
                 probe = self.maintenance_probe if maintenance else self.probe
                 mode = stat.S_IMODE(self.active.stat().st_mode)
+                base_mode = stat.S_IMODE(self.base.stat().st_mode)
                 self.caddy.validate(candidate)
                 # _replace can fail after os.replace (for example during the
                 # directory fsync), so every attempted write needs recovery.
-                replaced = True
                 try:
+                    if base_override is not None and not maintenance:
+                        _replace(self.base, base, base_mode)
                     _replace(self.active, candidate, mode)
+                    if base_override is not None and maintenance:
+                        _replace(self.base, base, base_mode)
                     self.caddy.reload()
                     deadline = time.monotonic() + self.probe_budget_seconds
                     while True:
@@ -190,12 +207,13 @@ class IpIngressController:
                                 raise
                             time.sleep(min(1, deadline - time.monotonic()))
                 except BaseException as failure:
-                    if replaced:
-                        try:
-                            _replace(self.active, original, mode)
-                            self.caddy.reload()
-                        except BaseException:
-                            raise IngressError('ingress_rollback_failed') from failure
+                    try:
+                        _replace(self.active, original, mode)
+                        if base_override is not None:
+                            _replace(self.base, original_base, base_mode)
+                        self.caddy.reload()
+                    except BaseException:
+                        raise IngressError('ingress_rollback_failed') from failure
                     raise IngressError('ingress_apply_failed') from failure
                 if self.repository.active_routes() == routes:
                     return hashlib.sha256(candidate).hexdigest()

@@ -158,6 +158,52 @@ def test_forward_maintenance_probe_failure_restores_prior_caddyfile(ingress):
     assert caddy.reloads == 2
 
 
+def test_forward_base_transition_switches_console_and_origins_together(ingress):
+    origins, config, base, active = ingress
+    normal_base = base.read_bytes()
+    maintenance_base = (b'https://192.0.2.10 {\n'
+                        b'  header Cache-Control "no-store"\n'
+                        b'  respond "maintenance" 503\n}\n')
+    caddy = ObservedCaddy()
+    calls = []
+    controller = IpIngressController(origins, config, base, active, caddy,
+        probe=lambda _routes, _address: calls.append('normal'),
+        maintenance_probe=lambda _routes, _address: calls.append('maintenance'),
+        probe_budget_seconds=0)
+    controller.transition_base(maintenance_base, maintenance=True)
+    assert base.read_bytes() == maintenance_base
+    assert b'reverse_proxy' not in active.read_bytes()
+    controller.transition_base(normal_base, maintenance=False)
+    assert base.read_bytes() == normal_base
+    assert b'reverse_proxy' in active.read_bytes()
+    assert calls == ['maintenance', 'normal'] and caddy.reloads == 2
+
+
+@pytest.mark.parametrize('failure', ['base_write', 'probe'])
+def test_failed_base_transition_restores_both_files(ingress, monkeypatch, failure):
+    origins, config, base, active = ingress
+    original_base, original_active = base.read_bytes(), active.read_bytes()
+    maintenance_base = b'https://192.0.2.10 { respond "maintenance" 503 }\n'
+    real_replace = controller_module._replace
+    if failure == 'base_write':
+        def fault_after_base(path, payload, mode):
+            real_replace(path, payload, mode)
+            if path == base and payload == maintenance_base:
+                raise OSError('injected fsync failure after base rename')
+        monkeypatch.setattr(controller_module, '_replace', fault_after_base)
+    caddy = ObservedCaddy()
+    def failing_probe(_routes, _address):
+        if failure == 'probe':
+            raise IngressError('injected probe failure')
+    controller = IpIngressController(origins, config, base, active, caddy,
+        maintenance_probe=failing_probe, probe_budget_seconds=0)
+    with pytest.raises(IngressError, match='ingress_apply_failed'):
+        controller.transition_base(maintenance_base, maintenance=True)
+    assert base.read_bytes() == original_base
+    assert active.read_bytes() == original_active
+    assert caddy.reloads == (1 if failure == 'base_write' else 2)
+
+
 @pytest.mark.parametrize('failure', ['mount', 'validation', 'reload', 'probe'])
 def test_failed_stage_preserves_previous_caddyfile(ingress, failure):
     origins, config, base, active = ingress
