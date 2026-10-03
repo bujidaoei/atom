@@ -252,6 +252,82 @@ class ForwardRecoveryTest(TestCase):
                     successor_revision=self.successor_revision)
         reconcile.assert_not_called()
 
+    def test_durable_restore_intent_completes_after_partial_cleanup(self):
+        receipt = self._partial_fixture()
+        candidate_ids = {role: f"{index + 100:064x}" for index, role in
+                         enumerate(recovery.ip_forward_identity.ROLES)}
+        record = {"phase": "source_restore_intent",
+                  "candidate": {"containerIds": candidate_ids,
+                                "baselineSha256": "d" * 64}}
+        stage, prepared = Mock(), Mock()
+        stage.publication = {}
+        remaining = {"api": {"Id": candidate_ids["api"],
+                              "State": {"Running": False}},
+                     "caddy": {"Id": candidate_ids["caddy"],
+                               "State": {"Running": True}}}
+        events = []
+        with patch.object(recovery, "_rebuild_context",
+                          return_value=(record, receipt, stage, prepared)), \
+             patch.object(recovery.ip_forward_start, "_current",
+                          side_effect=lambda _config, role: remaining.get(role)), \
+             patch.object(recovery.candidate_write_fence,
+                          "compare_baseline", return_value=True), \
+             patch.object(recovery.ip_forward_start, "_cleanup_candidate",
+                          side_effect=lambda **_: events.append("cleanup")), \
+             patch.object(recovery.ip_forward_hold, "restore",
+                          side_effect=lambda **_: events.append("restore")):
+            self.assertEqual(recovery.finish_source_restore_locked(
+                config=self.config, publication_file=self.publication_file,
+                successor_revision=self.successor_revision), "source_restored")
+        self.assertEqual(events, ["cleanup", "restore"])
+
+    def test_restore_intent_refuses_restarted_successor_writer(self):
+        receipt = self._partial_fixture()
+        candidate_ids = {role: f"{index + 100:064x}" for index, role in
+                         enumerate(recovery.ip_forward_identity.ROLES)}
+        record = {"phase": "source_restore_intent",
+                  "candidate": {"containerIds": candidate_ids,
+                                "baselineSha256": "d" * 64}}
+        with patch.object(recovery, "_rebuild_context",
+                          return_value=(record, receipt, Mock(), Mock())), \
+             patch.object(recovery.ip_forward_start, "_current",
+                          side_effect=lambda _config, role: {
+                              "Id": candidate_ids["api"],
+                              "State": {"Running": True}}
+                          if role == "api" else None), \
+             patch.object(recovery.ip_forward_start,
+                          "_cleanup_candidate") as cleanup:
+            with self.assertRaisesRegex(recovery.RecoveryError,
+                                        "forward_recovery_writer_restarted"):
+                recovery.finish_source_restore_locked(
+                    config=self.config,
+                    publication_file=self.publication_file,
+                    successor_revision=self.successor_revision)
+        cleanup.assert_not_called()
+
+    def test_restore_intent_rechecks_candidate_bytes_before_cleanup(self):
+        receipt = self._partial_fixture()
+        candidate_ids = {role: f"{index + 100:064x}" for index, role in
+                         enumerate(recovery.ip_forward_identity.ROLES)}
+        record = {"phase": "source_restore_intent",
+                  "candidate": {"containerIds": candidate_ids,
+                                "baselineSha256": "d" * 64}}
+        with patch.object(recovery, "_rebuild_context",
+                          return_value=(record, receipt, Mock(), Mock())), \
+             patch.object(recovery.ip_forward_start, "_current",
+                          return_value=None), \
+             patch.object(recovery.candidate_write_fence,
+                          "compare_baseline", return_value=False), \
+             patch.object(recovery.ip_forward_start,
+                          "_cleanup_candidate") as cleanup:
+            with self.assertRaisesRegex(recovery.RecoveryError,
+                                        "forward_restore_candidate_changed"):
+                recovery.finish_source_restore_locked(
+                    config=self.config,
+                    publication_file=self.publication_file,
+                    successor_revision=self.successor_revision)
+        cleanup.assert_not_called()
+
     @skipUnless(os.name == "posix" and getattr(os, "geteuid", lambda: -1)() == 0,
                 "root POSIX private-file semantics")
     def test_partial_caddy_receipt_refuses_changed_bytes(self):

@@ -72,6 +72,8 @@ class ForwardExposureTest(TestCase):
 
     def test_clean_candidate_restores_source_after_writer_exclusion(self):
         self.stage.journal.read.return_value = {"phase": "exposure_intent"}
+        self.stage.journal.advance.side_effect = (
+            lambda phase, **_kwargs: self.events.append(phase))
         self.controller.transition_base.side_effect = (
             lambda _payload, **_kwargs: self.events.append("maintenance"))
         with self._patches()[0], self._patches()[1], self._patches()[4], \
@@ -89,6 +91,7 @@ class ForwardExposureTest(TestCase):
             outcome = exposure.recover_after_exposure(**self._kwargs())
         self.assertEqual(outcome, "source_restored")
         self.assertEqual(self.events, ["maintenance", "stop", "compare",
+                                       "source_restore_intent",
                                        "cleanup", ("restore", True)])
 
     def test_changed_candidate_retains_successor_and_never_restores_source(self):

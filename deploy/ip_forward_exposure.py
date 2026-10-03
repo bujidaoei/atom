@@ -122,6 +122,8 @@ def recover_after_exposure(*, config: protected_cutover.CutoverConfig,
         # An unreadable or mismatched receipt cannot authorize old data.
         unchanged = None
     if unchanged:
+        stage.journal.advance("source_restore_intent", evidence={
+            "writeFence": "unchanged", "successorIdsChecked": True})
         ip_forward_start._cleanup_candidate(
             config=config, prepared=prepared, image=successor_image,
             project=ip_forward_start._project(successor_revision),

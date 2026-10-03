@@ -24,6 +24,7 @@ PHASES = (
     "candidate_ready", "exposure_intent", "awaiting_acceptance",
 )
 TERMINAL = frozenset({"source_restored", "successor_retained", "accepted"})
+RESTORE_INTENT = "source_restore_intent"
 FORMAT = 1
 MAX_BYTES = 64 * 1024
 
@@ -91,7 +92,7 @@ class ForwardJournal:
             and record["identitySha256"] == self._identity_digest(),
             "forward_journal_identity_mismatch")
         events = record["events"]
-        _require(type(events) is list and 1 <= len(events) <= len(PHASES) + 1,
+        _require(type(events) is list and 1 <= len(events) <= len(PHASES) + 2,
                  "invalid_forward_journal")
         observed_phases = [event.get("phase") for event in events
                            if type(event) is dict]
@@ -115,13 +116,23 @@ class ForwardJournal:
             if phase in PHASES:
                 _require(len(seen) < len(PHASES) and phase == PHASES[len(seen)],
                          "invalid_forward_journal_sequence")
+            elif phase == RESTORE_INTENT:
+                _require(bool(seen) and seen[-1] in {"candidate_ready", "exposure_intent",
+                                      "awaiting_acceptance"}
+                         and len(seen) >= len(events) - 2
+                         and event["evidence"].get("writeFence") == "unchanged",
+                         "invalid_forward_restore_intent")
             else:
                 _require(phase in TERMINAL and len(seen) > 0
                          and len(seen) == len(events) - 1,
                          "invalid_forward_journal_sequence")
                 if phase == "source_restored" and "candidate_ready" in seen:
-                    _require(event["evidence"].get("writeFence") == "unchanged",
+                    _require(seen[-1] == RESTORE_INTENT
+                             and event["evidence"].get("writeFence") == "unchanged",
                              "forward_exposure_requires_fence")
+                if seen[-1] == RESTORE_INTENT:
+                    _require(phase == "source_restored",
+                             "invalid_forward_journal_sequence")
                 if phase == "accepted":
                     _require(seen[-1] == "awaiting_acceptance",
                              "invalid_forward_journal_sequence")
@@ -220,7 +231,11 @@ class ForwardJournal:
         _require(type(phase) is str and type(evidence) in (dict, type(None))
                  and (phase in PHASES and previous in PHASES
                       and PHASES.index(phase) == PHASES.index(previous) + 1
-                      or phase in TERMINAL and previous in PHASES),
+                      or phase == RESTORE_INTENT and previous in {
+                          "candidate_ready", "exposure_intent",
+                          "awaiting_acceptance"}
+                      or phase in TERMINAL and previous in PHASES
+                      or phase == "source_restored" and previous == RESTORE_INTENT),
                  "invalid_forward_phase_transition")
         details = evidence or {}
         _require(all(type(key) is str and type(value) in (str, int, bool)
@@ -243,10 +258,15 @@ class ForwardJournal:
         if phase == "accepted":
             _require(previous == "awaiting_acceptance",
                      "invalid_forward_phase_transition")
-        if phase == "source_restored" and previous in PHASES[
-                PHASES.index("candidate_ready"):]:
+        if phase == RESTORE_INTENT:
             _require(details.get("writeFence") == "unchanged",
                      "forward_exposure_requires_fence")
+        if phase == "source_restored" and (previous == RESTORE_INTENT
+                or previous in PHASES[PHASES.index("candidate_ready") :]):
+            _require(details.get("writeFence") == "unchanged",
+                     "forward_exposure_requires_fence")
+            _require(previous == RESTORE_INTENT,
+                     "forward_restore_intent_required")
         record["phase"] = phase
         record["events"].append({"phase": phase, "at": _utc_now(),
                                  "evidence": details})

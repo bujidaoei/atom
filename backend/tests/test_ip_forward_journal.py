@@ -102,6 +102,11 @@ class ForwardJournalTest(TestCase):
                                     "forward_exposure_requires_fence"):
             self.log.advance("source_restored")
         self.assertEqual(self.log.read()["phase"], "exposure_intent")
+        with self.assertRaisesRegex(journal.JournalError,
+                                    "forward_exposure_requires_fence"):
+            self.log.advance("source_restore_intent")
+        self.log.advance("source_restore_intent", evidence={
+            "writeFence": "unchanged"})
         self.log.advance("source_restored", evidence={"writeFence": "unchanged"})
         with self.assertRaisesRegex(journal.JournalError,
                                     "invalid_forward_phase_transition"):
@@ -113,8 +118,26 @@ class ForwardJournalTest(TestCase):
                                     "forward_exposure_requires_fence"):
             self.log.advance("source_restored")
         self.assertEqual(self.log.read()["phase"], "candidate_ready")
+        with self.assertRaisesRegex(journal.JournalError,
+                                    "forward_restore_intent_required"):
+            self.log.advance("source_restored", evidence={"writeFence": "unchanged"})
+        self.log.advance("source_restore_intent", evidence={
+            "writeFence": "unchanged"})
         self.log.advance("source_restored", evidence={"writeFence": "unchanged"})
         self.assertEqual(self.log.read()["phase"], "source_restored")
+
+    def test_restore_intent_can_survive_restart_before_terminal_receipt(self):
+        self._through("awaiting_acceptance")
+        self.log.advance("source_restore_intent", evidence={
+            "writeFence": "unchanged", "successorIdsChecked": True})
+        restarted = journal.ForwardJournal(self.config, self.revision)
+        self.assertEqual(restarted.read()["phase"], "source_restore_intent")
+        with self.assertRaisesRegex(journal.JournalError,
+                                    "invalid_forward_phase_transition"):
+            restarted.advance("successor_retained")
+        restarted.advance("source_restored", evidence={
+            "writeFence": "unchanged"})
+        self.assertEqual(restarted.read()["phase"], "source_restored")
 
     def test_pre_exposure_recovery_and_terminal_refusal(self):
         self._through("writers_intent")

@@ -11,6 +11,7 @@ from pathlib import Path
 import hashlib
 import stat
 
+import candidate_write_fence
 import ip_forward_candidate
 import ip_forward_capture
 import ip_forward_exposure
@@ -121,7 +122,8 @@ def _rebuild_context(*, config: protected_cutover.CutoverConfig,
     if capture is None:
         raise RecoveryError("forward_capture_receipt_missing")
     allowed_caddy = {capture["caddySha256"]}
-    if record["phase"] in {"exposure_intent", "awaiting_acceptance"}:
+    if record["phase"] in {"exposure_intent", "awaiting_acceptance",
+                           "source_restore_intent"}:
         allowed_caddy.add(identity["caddy"]["active"]["sha256"])
     _candidate_caddy_digest(candidate, allowed_caddy)
     prepared = ip_forward_candidate.PreparedCandidate(
@@ -204,6 +206,49 @@ def recover_ready_or_exposed_locked(*,
         publication_file=publication_file)
 
 
+def finish_source_restore_locked(*, config: protected_cutover.CutoverConfig,
+                                 publication_file: Path,
+                                 successor_revision: str) -> str:
+    """Finish a durably authorized source restore after cleanup was interrupted."""
+    record, identity, stage, prepared = _rebuild_context(
+        config=config, publication_file=publication_file,
+        successor_revision=successor_revision,
+        allowed_phases={"source_restore_intent"})
+    candidate = record["candidate"]
+    if candidate is None:
+        raise RecoveryError("forward_candidate_receipt_missing")
+    for role in ip_forward_identity.ROLES:
+        item = ip_forward_start._current(config, role)
+        if item is None or item.get("Id") == identity["containerIds"][role]:
+            continue
+        if item.get("Id") != candidate["containerIds"][role]:
+            raise RecoveryError("forward_recovery_unknown_container")
+        if (role != "caddy"
+                and item.get("State", {}).get("Running") is not False):
+            raise RecoveryError("forward_recovery_writer_restarted")
+    try:
+        unchanged = candidate_write_fence.compare_baseline(
+            config.state_dir / (successor_revision + ".forward-baseline.json"),
+            candidate_directory=prepared.directory,
+            revision=successor_revision,
+            candidate_image=identity["successorImageId"],
+            expected_digest=candidate["baselineSha256"])
+    except candidate_write_fence.FenceError as exc:
+        raise RecoveryError("forward_restore_fence_unverified") from exc
+    if not unchanged:
+        raise RecoveryError("forward_restore_candidate_changed")
+    ip_forward_start._cleanup_candidate(
+        config=config, prepared=prepared,
+        image=identity["successorImageId"],
+        project=ip_forward_start._project(successor_revision),
+        publication=stage.publication,
+        source_ids=identity["containerIds"])
+    ip_forward_hold.restore(
+        config=config, stage=stage, identity=identity,
+        publication_file=publication_file, write_fence_unchanged=True)
+    return "source_restored"
+
+
 def recover_pre_handoff(*, config_file: Path, publication_file: Path,
                         successor_revision: str) -> str:
     """Keep receipt inspection and all source transitions under one lock."""
@@ -231,5 +276,16 @@ def recover_ready_or_exposed(*, config_file: Path,
     config = protected_cutover.load_config(config_file)
     with protected_cutover.host_lock():
         return recover_ready_or_exposed_locked(
+            config=config, publication_file=publication_file,
+            successor_revision=successor_revision)
+
+
+def finish_source_restore(*, config_file: Path,
+                          publication_file: Path,
+                          successor_revision: str) -> str:
+    """Hold one lock while completing a previously sealed restore decision."""
+    config = protected_cutover.load_config(config_file)
+    with protected_cutover.host_lock():
+        return finish_source_restore_locked(
             config=config, publication_file=publication_file,
             successor_revision=successor_revision)
