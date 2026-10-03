@@ -211,11 +211,23 @@ def _confirm_held(config: protected_cutover.CutoverConfig,
 def _cleanup_candidate(*, config: protected_cutover.CutoverConfig,
                        prepared: ip_forward_candidate.PreparedCandidate,
                        image: str, project: str,
-                       publication: dict[str, str]) -> None:
+                       publication: dict[str, str],
+                       source_ids: dict[str, str] | None = None) -> None:
     """Delete only canonical successor containers with proven exact profiles."""
+    _require(source_ids is None or
+             (type(source_ids) is dict
+              and set(source_ids) == set(ip_forward_identity.ROLES)
+              and all(type(value) is str
+                      and ip_forward_identity.HEX64.fullmatch(value) is not None
+                      for value in source_ids.values())),
+             "invalid_forward_source_ids")
     for role in ("caddy", "verifier", "preview", "public", "broker", "api"):
         item = _current(config, role)
         if item is None:
+            continue
+        if source_ids is not None and item.get("Id") == source_ids[role]:
+            # A failed partial rename can leave the exact source at its
+            # canonical name. Never send that ID to candidate cleanup.
             continue
         identifier = _profile(config=config, role=role, item=item,
             image=image, prepared=prepared, project=project,

@@ -212,6 +212,32 @@ class ForwardStartTest(TestCase):
                     publication=self.publication)
             remove.assert_not_called()
 
+    def test_partial_handoff_cleanup_never_removes_canonical_source_ids(self):
+        remaining = {"api": self.old_ids["api"],
+                     "broker": self.old_ids["broker"],
+                     "preview": self.new_ids["preview"]}
+        removed = []
+
+        def current(_config, role):
+            return {"Id": remaining[role]} if role in remaining else None
+
+        def remove(_config, *_args, timeout):
+            identifier = _args[-1]
+            removed.append(identifier)
+            remaining.pop("preview")
+
+        with patch.object(starter, "_current", side_effect=current), \
+             patch.object(starter, "_profile",
+                          side_effect=lambda *, role, **_: self.new_ids[role]), \
+             patch.object(starter.ip_forward_hold, "_run", side_effect=remove):
+            starter._cleanup_candidate(config=self.config,
+                prepared=self.prepared, image=self.image,
+                project=starter._project(self.successor),
+                publication=self.publication, source_ids=self.old_ids)
+        self.assertEqual(removed, [self.new_ids["preview"]])
+        self.assertEqual(remaining, {"api": self.old_ids["api"],
+                                     "broker": self.old_ids["broker"]})
+
 
 if __name__ == "__main__":
     main()
