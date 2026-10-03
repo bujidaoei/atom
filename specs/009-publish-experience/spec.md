@@ -2,7 +2,7 @@
 
 **Feature Branch**: `codex/009-publish-experience`
 **Created**: 2026-10-02
-**Status**: Partial implementation; IP-only isolation and production acceptance pending
+**Status**: IP-only isolation and owner publication/browser checks deployed; full recovery fault injection, authenticated cross-port denial and certificate renewal remain open
 **Input**: Repair check HTTP500, restore simple publication, make publishing a comprehensible history of restorable published snapshots; retain Atom runtime.
 
 ## User Scenarios & Testing
