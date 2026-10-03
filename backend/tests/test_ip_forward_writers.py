@@ -108,6 +108,32 @@ class ForwardWritersTest(unittest.TestCase):
                          + [("start", role) for role in reversed(module.STOP_ORDER)])
         self.assertTrue(all(fake.running.values()))
 
+    def test_interrupted_stop_finishes_exact_ids_without_restarting_them(self):
+        fake = FakeDocker()
+        fake.running["verifier"] = False
+        fake.running["preview"] = False
+        config, source, inspect, database, run = self.setup(fake)
+        with inspect, database as db, run:
+            receipt = module.ensure_stopped(config, fake.ids, source)
+            module.ensure_stopped(config, fake.ids, source)
+        self.assertEqual(receipt.ids, fake.ids)
+        self.assertEqual(fake.actions, [("stop", role) for role in
+                                        module.STOP_ORDER[2:]])
+        self.assertEqual(db.call_count, 4)
+        self.assertTrue(all(not running for running in fake.running.values()))
+
+    def test_interrupted_stop_failure_leaves_other_writers_fenced(self):
+        fake = FakeDocker(fail_role="public", stop_before_failure=True)
+        config, source, inspect, database, run = self.setup(fake)
+        with inspect, database, run:
+            with self.assertRaisesRegex(module.WriterError,
+                                        "writer_docker_unavailable"):
+                module.ensure_stopped(config, fake.ids, source)
+        self.assertFalse(fake.running["verifier"])
+        self.assertFalse(fake.running["preview"])
+        self.assertFalse(fake.running["public"])
+        self.assertNotIn(("start", "verifier"), fake.actions)
+
 
 if __name__ == "__main__":
     unittest.main()

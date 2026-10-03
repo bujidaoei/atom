@@ -36,7 +36,8 @@ def _identity(*, config: protected_cutover.CutoverConfig,
               held: ip_forward_hold.HeldSource,
               started: ip_forward_start.StartedCandidate,
               successor_revision: str, successor_image: str,
-              verify_baseline: bool = True) -> dict:
+              verify_baseline: bool = True,
+              allow_stopped_writers: bool = False) -> dict:
     receipt = ip_forward_identity.read(
         stage.journal.identity_path, config=config,
         successor_revision=successor_revision)
@@ -66,7 +67,8 @@ def _identity(*, config: protected_cutover.CutoverConfig,
     for role in ip_forward_identity.ROLES:
         item = ip_forward_start._current(config, role)
         _require(item is not None and item.get("Id") == started.ids[role]
-                 and item.get("State", {}).get("Running") is True,
+                 and (allow_stopped_writers and role != "caddy"
+                      or item.get("State", {}).get("Running") is True),
                  "forward_exposure_service_changed")
         ip_forward_start._profile(
             config=config, role=role, item=item, image=successor_image,
@@ -100,7 +102,8 @@ def recover_after_exposure(*, config: protected_cutover.CutoverConfig,
         "forward_exposure_phase_mismatch")
     receipt = _identity(config=config, stage=stage, prepared=prepared,
         held=held, started=started, successor_revision=successor_revision,
-        successor_image=successor_image, verify_baseline=False)
+        successor_image=successor_image, verify_baseline=False,
+        allow_stopped_writers=True)
     controller = _candidate_controller(config=config, stage=stage,
                                        prepared=prepared)
     maintenance = ip_cutover_apply._maintenance_caddyfile(
@@ -108,7 +111,8 @@ def recover_after_exposure(*, config: protected_cutover.CutoverConfig,
         stage.publication["ATOM_ACME_DIRECTORY"])
     controller.transition_base(maintenance, maintenance=True)
     ip_cutover_apply._maintenance_probe(stage.publication["ATOM_PUBLIC_IP"])
-    stopped = ip_forward_writers.stop(config, started.ids, prepared.directory)
+    stopped = ip_forward_writers.ensure_stopped(
+        config, started.ids, prepared.directory)
     try:
         unchanged = candidate_write_fence.compare_baseline(
             started.baseline_path, candidate_directory=prepared.directory,

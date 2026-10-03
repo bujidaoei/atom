@@ -84,6 +84,17 @@ def resume(config: protected_cutover.CutoverConfig, stopped: StoppedWriters) -> 
         _healthy(config, role, expected_id)
 
 
+def _source_ids(container_ids: dict[str, str], candidate: Path) -> dict[str, str]:
+    _require(type(container_ids) is dict and set(STOP_ORDER) <= set(container_ids)
+             and isinstance(candidate, Path) and candidate.is_absolute(),
+             "invalid_writer_source")
+    ids = {role: container_ids[role] for role in STOP_ORDER}
+    _require(all(type(value) is str and len(value) == 64
+                 and all(char in "0123456789abcdef" for char in value)
+                 for value in ids.values()), "invalid_writer_identity")
+    return ids
+
+
 def stop(config: protected_cutover.CutoverConfig,
          container_ids: dict[str, str], candidate: Path) -> StoppedWriters:
     """Stop five exact current IDs, verify schema/idle state and recover on failure.
@@ -92,13 +103,7 @@ def stop(config: protected_cutover.CutoverConfig,
     before this call until the paired backup completes. This operation does not
     stop Caddy so existing certificates and 503 routes remain available.
     """
-    _require(type(container_ids) is dict and set(STOP_ORDER) <= set(container_ids)
-             and isinstance(candidate, Path) and candidate.is_absolute(),
-             "invalid_writer_source")
-    ids = {role: container_ids[role] for role in STOP_ORDER}
-    _require(all(type(value) is str and len(value) == 64
-                 and all(char in "0123456789abcdef" for char in value)
-                 for role, value in ids.items()), "invalid_writer_identity")
+    ids = _source_ids(container_ids, candidate)
     attempted: list[str] = []
     try:
         for role in STOP_ORDER:
@@ -120,4 +125,27 @@ def stop(config: protected_cutover.CutoverConfig,
         except BaseException as recovery_failure:
             raise WriterError("writer_recovery_failed") from recovery_failure
         raise WriterError("writer_stop_failed") from failure
+    return StoppedWriters(ids)
+
+
+def ensure_stopped(config: protected_cutover.CutoverConfig,
+                   container_ids: dict[str, str],
+                   candidate: Path) -> StoppedWriters:
+    """Idempotently fence exact candidate IDs after an interrupted recovery.
+
+    TLS maintenance must already be serving. On failure, leave the observed
+    writer state untouched rather than restarting a possibly exposed service.
+    The caller retains the host cutover lock and the durable phase journal.
+    """
+    ids = _source_ids(container_ids, candidate)
+    for role in STOP_ORDER:
+        item = _identity(config, role, ids[role], running=None)
+        if item.get("State", {}).get("Running") is True:
+            _run(config.docker, "container", "stop", "--time",
+                 str(GRACE[role]), ids[role], timeout=GRACE[role] + 20)
+        _identity(config, role, ids[role], running=False)
+    protected_cutover._database(candidate / "data" / "atom.db", 18,
+                                broker=False)
+    protected_cutover._database(candidate / "broker" / "registry.db", 3,
+                                broker=True)
     return StoppedWriters(ids)

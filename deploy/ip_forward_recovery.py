@@ -13,6 +13,7 @@ import stat
 
 import ip_forward_candidate
 import ip_forward_capture
+import ip_forward_exposure
 import ip_forward_hold
 import ip_forward_identity
 import ip_forward_journal
@@ -82,7 +83,7 @@ def recover_pre_handoff_locked(*, config: protected_cutover.CutoverConfig,
     return "source_restored"
 
 
-def _candidate_caddy_digest(candidate: Path, expected: str) -> None:
+def _candidate_caddy_digest(candidate: Path, expected: str | set[str]) -> None:
     ip_forward_candidate._private_directory(candidate)
     ip_forward_candidate._private_directory(candidate / "caddy")
     caddy_file = candidate / "caddy" / "Caddyfile"
@@ -91,21 +92,23 @@ def _candidate_caddy_digest(candidate: Path, expected: str) -> None:
         if (not stat.S_ISREG(info.st_mode) or info.st_uid != 0
                 or stat.S_IMODE(info.st_mode) != 0o600
                 or hashlib.sha256(caddy_file.read_bytes()).hexdigest()
-                != expected):
+                not in ({expected} if type(expected) is str else expected)):
             raise RecoveryError("forward_candidate_caddy_changed")
     except OSError as exc:
         raise RecoveryError("forward_candidate_caddy_unavailable") from exc
 
 
-def recover_partial_handoff_locked(*, config: protected_cutover.CutoverConfig,
-                                   publication_file: Path,
-                                   successor_revision: str) -> str:
-    """Fence a partially started successor before restoring held source IDs."""
+def _rebuild_context(*, config: protected_cutover.CutoverConfig,
+                     publication_file: Path, successor_revision: str,
+                     allowed_phases: set[str]) -> tuple[dict, dict,
+                                                        ip_forward_stage.ForwardStage,
+                                                        ip_forward_candidate.PreparedCandidate]:
+    """Recreate validated recovery inputs without replaying any deploy phase."""
     if not publication_file.is_absolute():
         raise RecoveryError("invalid_forward_recovery_input")
     journal = ip_forward_journal.ForwardJournal(config, successor_revision)
     record = journal.read()
-    if record is None or record["phase"] != "candidate_intent":
+    if record is None or record["phase"] not in allowed_phases:
         raise RecoveryError("forward_recovery_phase_refused")
     identity = ip_forward_identity.read(
         journal.identity_path, config=config,
@@ -117,7 +120,10 @@ def recover_partial_handoff_locked(*, config: protected_cutover.CutoverConfig,
     capture = record["capture"]
     if capture is None:
         raise RecoveryError("forward_capture_receipt_missing")
-    _candidate_caddy_digest(candidate, capture["caddySha256"])
+    allowed_caddy = {capture["caddySha256"]}
+    if record["phase"] in {"exposure_intent", "awaiting_acceptance"}:
+        allowed_caddy.add(identity["caddy"]["active"]["sha256"])
+    _candidate_caddy_digest(candidate, allowed_caddy)
     prepared = ip_forward_candidate.PreparedCandidate(
         candidate, candidate / "compose.env",
         candidate / "private-env" / "api.env",
@@ -144,6 +150,17 @@ def recover_partial_handoff_locked(*, config: protected_cutover.CutoverConfig,
         journal,
         ip_forward_stage._controller(config=config,
                                      publication=publication, source=source))
+    return record, identity, stage, prepared
+
+
+def recover_partial_handoff_locked(*, config: protected_cutover.CutoverConfig,
+                                   publication_file: Path,
+                                   successor_revision: str) -> str:
+    """Fence a partially started successor before restoring held source IDs."""
+    _record, identity, stage, prepared = _rebuild_context(
+        config=config, publication_file=publication_file,
+        successor_revision=successor_revision,
+        allowed_phases={"candidate_intent"})
     ip_forward_start._fence_partial_candidate(
         config=config, stage=stage, prepared=prepared,
         successor_revision=successor_revision,
@@ -153,12 +170,38 @@ def recover_partial_handoff_locked(*, config: protected_cutover.CutoverConfig,
         config=config, prepared=prepared,
         image=identity["successorImageId"],
         project=ip_forward_start._project(successor_revision),
-        publication=publication, source_ids=identity["containerIds"])
+        publication=stage.publication,
+        source_ids=identity["containerIds"])
     ip_forward_hold.restore(config=config, stage=stage,
                             identity=identity,
                             publication_file=publication_file,
                             write_fence_unchanged=True)
     return "source_restored"
+
+
+def recover_ready_or_exposed_locked(*,
+        config: protected_cutover.CutoverConfig,
+        publication_file: Path, successor_revision: str) -> str:
+    """Reconcile a fully identified running successor by its sealed write fence."""
+    record, identity, stage, prepared = _rebuild_context(
+        config=config, publication_file=publication_file,
+        successor_revision=successor_revision,
+        allowed_phases={"candidate_ready", "exposure_intent",
+                        "awaiting_acceptance"})
+    candidate = record["candidate"]
+    if candidate is None:
+        raise RecoveryError("forward_candidate_receipt_missing")
+    held = ip_forward_hold.HeldSource(identity["containerIds"],
+                                     identity["heldNames"])
+    started = ip_forward_start.StartedCandidate(
+        candidate["containerIds"],
+        config.state_dir / (successor_revision + ".forward-baseline.json"),
+        candidate["baselineSha256"], candidate["caddySha256"])
+    return ip_forward_exposure.recover_after_exposure(
+        config=config, stage=stage, prepared=prepared, held=held,
+        started=started, successor_revision=successor_revision,
+        successor_image=identity["successorImageId"],
+        publication_file=publication_file)
 
 
 def recover_pre_handoff(*, config_file: Path, publication_file: Path,
@@ -177,5 +220,16 @@ def recover_partial_handoff(*, config_file: Path, publication_file: Path,
     config = protected_cutover.load_config(config_file)
     with protected_cutover.host_lock():
         return recover_partial_handoff_locked(
+            config=config, publication_file=publication_file,
+            successor_revision=successor_revision)
+
+
+def recover_ready_or_exposed(*, config_file: Path,
+                             publication_file: Path,
+                             successor_revision: str) -> str:
+    """Retain one host lock across exact-ID successor recovery."""
+    config = protected_cutover.load_config(config_file)
+    with protected_cutover.host_lock():
+        return recover_ready_or_exposed_locked(
             config=config, publication_file=publication_file,
             successor_revision=successor_revision)

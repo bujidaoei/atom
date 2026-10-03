@@ -76,7 +76,7 @@ class ForwardExposureTest(TestCase):
             lambda _payload, **_kwargs: self.events.append("maintenance"))
         with self._patches()[0], self._patches()[1], self._patches()[4], \
              self._patches()[5], \
-             patch.object(exposure.ip_forward_writers, "stop",
+             patch.object(exposure.ip_forward_writers, "ensure_stopped",
                           side_effect=lambda *_args: self.events.append("stop")), \
              patch.object(exposure.candidate_write_fence, "compare_baseline",
                           side_effect=lambda *_args, **_kwargs:
@@ -97,7 +97,7 @@ class ForwardExposureTest(TestCase):
             lambda payload, **_kwargs: self.events.append(payload))
         with self._patches()[0], self._patches()[1], self._patches()[2], \
              self._patches()[3], self._patches()[4], self._patches()[5], \
-             patch.object(exposure.ip_forward_writers, "stop",
+             patch.object(exposure.ip_forward_writers, "ensure_stopped",
                           return_value=Mock()), \
              patch.object(exposure.candidate_write_fence, "compare_baseline",
                           return_value=False), \
@@ -117,7 +117,7 @@ class ForwardExposureTest(TestCase):
         self.stage.journal.read.return_value = {"phase": "exposure_intent"}
         with self._patches()[0], self._patches()[1], self._patches()[2], \
              self._patches()[3], self._patches()[4], self._patches()[5], \
-             patch.object(exposure.ip_forward_writers, "stop",
+             patch.object(exposure.ip_forward_writers, "ensure_stopped",
                           return_value=Mock()), \
              patch.object(exposure.candidate_write_fence, "compare_baseline",
                           side_effect=exposure.candidate_write_fence.FenceError(
@@ -135,7 +135,7 @@ class ForwardExposureTest(TestCase):
         self.stage.journal.read.return_value = {"phase": "candidate_ready"}
         with self._patches()[0], self._patches()[1], self._patches()[2], \
              self._patches()[3], self._patches()[4], self._patches()[5], \
-             patch.object(exposure.ip_forward_writers, "stop", return_value=Mock()), \
+             patch.object(exposure.ip_forward_writers, "ensure_stopped", return_value=Mock()), \
              patch.object(exposure.candidate_write_fence, "compare_baseline",
                           return_value=False), \
              patch.object(exposure.ip_forward_writers, "resume"), \

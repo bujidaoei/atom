@@ -18,6 +18,7 @@ class ForwardRecoveryTest(TestCase):
     def setUp(self):
         self.config = Mock()
         self.config.docker = Path("/usr/bin/docker")
+        self.config.state_dir = Path("/state")
         self.config.api = "atom-candidate"
         self.config.broker = "atom-candidate-broker"
         self.publication_file = Path.cwd() / "publication.env"
@@ -209,6 +210,47 @@ class ForwardRecoveryTest(TestCase):
                     successor_revision=self.successor_revision)
         cleanup.assert_not_called()
         restore.assert_not_called()
+
+    def test_ready_receipt_reconstructs_exact_successor_for_write_fence(self):
+        receipt = self._partial_fixture()
+        candidate_ids = {role: f"{index + 100:064x}" for index, role in
+                         enumerate(recovery.ip_forward_identity.ROLES)}
+        record = {"phase": "candidate_ready", "candidate": {
+            "containerIds": candidate_ids,
+            "baselineSha256": "d" * 64,
+            "caddySha256": "e" * 64}}
+        stage = Mock()
+        stage.journal = self.journal
+        prepared = Mock()
+        with patch.object(recovery, "_rebuild_context",
+                          return_value=(record, receipt, stage, prepared)), \
+             patch.object(recovery.ip_forward_exposure,
+                          "recover_after_exposure",
+                          return_value="successor_retained") as reconcile:
+            result = recovery.recover_ready_or_exposed_locked(
+                config=self.config, publication_file=self.publication_file,
+                successor_revision=self.successor_revision)
+        self.assertEqual(result, "successor_retained")
+        self.assertEqual(reconcile.call_args.kwargs["started"].ids, candidate_ids)
+        self.assertEqual(reconcile.call_args.kwargs["held"].ids, self.ids)
+        self.assertEqual(reconcile.call_args.kwargs["started"].baseline_sha256,
+                         "d" * 64)
+
+    def test_ready_recovery_refuses_missing_candidate_receipt(self):
+        receipt = self._partial_fixture()
+        with patch.object(recovery, "_rebuild_context",
+                          return_value=({"phase": "candidate_ready",
+                                         "candidate": None}, receipt,
+                                        Mock(), Mock())), \
+             patch.object(recovery.ip_forward_exposure,
+                          "recover_after_exposure") as reconcile:
+            with self.assertRaisesRegex(recovery.RecoveryError,
+                                        "forward_candidate_receipt_missing"):
+                recovery.recover_ready_or_exposed_locked(
+                    config=self.config,
+                    publication_file=self.publication_file,
+                    successor_revision=self.successor_revision)
+        reconcile.assert_not_called()
 
     @skipUnless(os.name == "posix" and getattr(os, "geteuid", lambda: -1)() == 0,
                 "root POSIX private-file semantics")
