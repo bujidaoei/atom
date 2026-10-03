@@ -104,6 +104,15 @@ class ForwardJournalTest(TestCase):
                                     "invalid_forward_phase_transition"):
             self.log.advance("accepted")
 
+    def test_running_candidate_requires_fence_before_source_restore(self):
+        self._through("candidate_ready")
+        with self.assertRaisesRegex(journal.JournalError,
+                                    "forward_exposure_requires_fence"):
+            self.log.advance("source_restored")
+        self.assertEqual(self.log.read()["phase"], "candidate_ready")
+        self.log.advance("source_restored", evidence={"writeFence": "unchanged"})
+        self.assertEqual(self.log.read()["phase"], "source_restored")
+
     def test_pre_exposure_recovery_and_terminal_refusal(self):
         self._through("writers_intent")
         self.log.advance("source_restored", evidence={"sourceIdsChecked": True})

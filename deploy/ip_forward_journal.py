@@ -114,7 +114,7 @@ class ForwardJournal:
                 _require(phase in TERMINAL and len(seen) > 0
                          and len(seen) == len(events) - 1,
                          "invalid_forward_journal_sequence")
-                if phase == "source_restored" and "exposure_intent" in seen:
+                if phase == "source_restored" and "candidate_ready" in seen:
                     _require(event["evidence"].get("writeFence") == "unchanged",
                              "forward_exposure_requires_fence")
                 if phase == "accepted":
@@ -234,7 +234,7 @@ class ForwardJournal:
             _require(previous == "awaiting_acceptance",
                      "invalid_forward_phase_transition")
         if phase == "source_restored" and previous in PHASES[
-                PHASES.index("exposure_intent"):]:
+                PHASES.index("candidate_ready"):]:
             _require(details.get("writeFence") == "unchanged",
                      "forward_exposure_requires_fence")
         record["phase"] = phase
