@@ -26,6 +26,7 @@ import time
 
 import ip_cutover_env
 import ip_cutover_rollback
+import candidate_write_fence
 import paired_backup
 import protected_cutover
 
@@ -403,6 +404,7 @@ def _publication_inputs(inputs: Inputs,
 def _receipt_reason(error: BaseException) -> str:
     if isinstance(error, (ApplyError, protected_cutover.CutoverError,
                           paired_backup.BackupError,
+                          candidate_write_fence.FenceError,
                           ip_cutover_env.EnvironmentError,
                           ip_cutover_rollback.RollbackError)):
         return str(error)
@@ -534,6 +536,18 @@ def apply(inputs: Inputs, *, rehearsal: bool = False) -> dict[str, object]:
             _record(ledger, outcome="candidate_pair_ready", image_id=inputs.image_id,
                          details={"candidateDirectory": str(candidate)})
 
+            imported = _import_legacy(legacy, image=inputs.image_id,
+                                      data=candidate / "data", storage_env=storage_file,
+                                      publication=publication)
+            _require(len(imported) == len(legacy), "legacy_import_count_mismatch")
+            baseline_digest = candidate_write_fence.capture_baseline(
+                config.state_dir / (inputs.revision + ".baseline.json"),
+                candidate_directory=candidate, revision=inputs.revision,
+                candidate_image=inputs.image_id)
+            _record(ledger, outcome="candidate_state_sealed", image_id=inputs.image_id,
+                         details={"candidateStateSha256": baseline_digest,
+                                  "legacyImported": len(imported)})
+
             ingress_digest = _ingress(inputs.source, compose_env, candidate,
                                       publication, config,
                                       identity["containers"]["caddy"])
@@ -541,11 +555,6 @@ def apply(inputs: Inputs, *, rehearsal: bool = False) -> dict[str, object]:
                      "invalid_ingress_receipt")
             _record(ledger, outcome="ingress_ready", image_id=inputs.image_id,
                          details={"caddySha256": ingress_digest})
-
-            imported = _import_legacy(legacy, image=inputs.image_id,
-                                      data=candidate / "data", storage_env=storage_file,
-                                      publication=publication)
-            _require(len(imported) == len(legacy), "legacy_import_count_mismatch")
             _record(ledger, outcome="awaiting_acceptance", image_id=inputs.image_id,
                          details={"backupDirectory": str(backup),
                                   "candidateDirectory": str(candidate),

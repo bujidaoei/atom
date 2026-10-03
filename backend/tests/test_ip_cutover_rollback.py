@@ -1,10 +1,12 @@
 """Rollback protects preserved container IDs before any candidate removal."""
 
-from contextlib import nullcontext, redirect_stdout
+from contextlib import closing, nullcontext, redirect_stdout
 import importlib.util
 import io
 from pathlib import Path
+import sqlite3
 import sys
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -21,7 +23,9 @@ NEW_IMAGE = "sha256:" + "b" * 64
 CADDY_IMAGE = "sha256:" + "c" * 64
 IDS = {"api": "1" * 64, "broker": "2" * 64, "caddy": "3" * 64}
 IDENTITY = {"oldImageId": OLD_IMAGE, "candidateImageId": NEW_IMAGE,
-            "containers": IDS, "names": module.DEFAULT_NAMES}
+            "containers": IDS, "names": module.DEFAULT_NAMES,
+            "stateDirectory": "/private", "revision": "f" * 40}
+BASELINE = {"candidateDirectory": "/private/candidate", "stateSha256": "a" * 64}
 
 
 def container(identity, image, *, project=None, running=False):
@@ -134,7 +138,10 @@ class RollbackTest(unittest.TestCase):
         identity = IDENTITY | {"names": names}
         with patch.object(module, "_inspect", side_effect=docker.inspect), patch.object(
                 module, "_run", side_effect=docker.run), patch.object(module, "_await_console"):
-            module.rollback(identity, console_url="https://127.0.0.1:44443/atom/")
+            with patch.object(module, "_baseline", return_value=BASELINE), patch.object(
+                    module.candidate_write_fence, "candidate_fingerprint",
+                    return_value=BASELINE["stateSha256"]):
+                module.rollback(identity, console_url="https://127.0.0.1:44443/atom/")
         self.assertEqual(docker.items[names["api"]]["Id"], IDS["api"])
         self.assertNotIn("atom-candidate", docker.items)
 
@@ -147,7 +154,10 @@ class RollbackTest(unittest.TestCase):
         docker = FakeDocker()
         with patch.object(module, "_inspect", side_effect=docker.inspect), patch.object(
                 module, "_run", side_effect=docker.run), patch.object(
-                module, "_await_console") as console:
+                module, "_await_console") as console, patch.object(
+                module, "_baseline", return_value=BASELINE), patch.object(
+                module.candidate_write_fence, "candidate_fingerprint",
+                return_value=BASELINE["stateSha256"]):
             module.rollback(IDENTITY, console_url="https://159.75.231.98/atom/")
         console.assert_called_once_with("https://159.75.231.98/atom/", ca_file=None)
         for role, name in module.DEFAULT_CONTAINERS.items():
@@ -167,6 +177,64 @@ class RollbackTest(unittest.TestCase):
             with self.assertRaisesRegex(module.RollbackError, "old_container_identity_missing"):
                 module.rollback(IDENTITY, console_url="https://159.75.231.98/atom/")
         self.assertEqual(docker.commands, [])
+
+    def test_missing_baseline_refuses_exposed_candidate_without_stopping_it(self):
+        docker = FakeDocker()
+        with patch.object(module, "_inspect", side_effect=docker.inspect), patch.object(
+                module, "_run", side_effect=docker.run), patch.object(
+                module, "_baseline", side_effect=module.RollbackError(
+                    "candidate_baseline_missing")):
+            with self.assertRaisesRegex(module.RollbackError,
+                                        "candidate_baseline_missing"):
+                module.rollback(IDENTITY, console_url="https://159.75.231.98/atom/")
+        self.assertEqual(docker.commands, [])
+
+    def test_post_activation_write_refuses_old_database_and_resumes_candidate(self):
+        docker = FakeDocker()
+        with patch.object(module, "_inspect", side_effect=docker.inspect), patch.object(
+                module, "_run", side_effect=docker.run), patch.object(
+                module, "_baseline", return_value=BASELINE), patch.object(
+                module.candidate_write_fence, "candidate_fingerprint",
+                return_value="b" * 64), patch.object(module, "_await_console") as console:
+            with self.assertRaisesRegex(module.RollbackError,
+                                        "candidate_has_unmerged_writes"):
+                module.rollback(IDENTITY, console_url="https://159.75.231.98/atom/")
+        self.assertEqual(docker.items["atom-candidate"]["Id"], "4" * 64)
+        self.assertTrue(docker.items["atom-candidate"]["State"]["Running"])
+        self.assertTrue(docker.items["atom-tls"]["State"]["Running"])
+        self.assertEqual(docker.items["atom-candidate-rollback"]["Id"], IDS["api"])
+        self.assertFalse(any(command[1] in ("rm", "rename") for command in docker.commands))
+        console.assert_called_once()
+
+    def test_write_during_stop_is_seen_before_old_pair_promotion(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            (root / "data").mkdir()
+            (root / "broker").mkdir()
+            for path in (root / "data" / "atom.db", root / "broker" / "registry.db"):
+                with closing(sqlite3.connect(path)) as db, db:
+                    db.execute("CREATE TABLE user_state(id INTEGER PRIMARY KEY)")
+            digest = module.candidate_write_fence.candidate_fingerprint(root)
+            docker = FakeDocker()
+            original_run = docker.run
+
+            def raced_run(*args, **kwargs):
+                if args[:2] == ("container", "stop") and args[-1] == "atom-candidate":
+                    with closing(sqlite3.connect(root / "data" / "atom.db")) as db, db:
+                        db.execute("INSERT INTO user_state VALUES (1)")
+                return original_run(*args, **kwargs)
+
+            with patch.object(module, "_inspect", side_effect=docker.inspect), patch.object(
+                    module, "_run", side_effect=raced_run), patch.object(
+                    module, "_baseline", return_value={
+                        "candidateDirectory": str(root), "stateSha256": digest}), patch.object(
+                    module, "_await_console"):
+                with self.assertRaisesRegex(module.RollbackError,
+                                            "candidate_has_unmerged_writes"):
+                    module.rollback(IDENTITY, console_url="https://159.75.231.98/atom/")
+            self.assertEqual(docker.items["atom-candidate"]["Id"], "4" * 64)
+            self.assertTrue(docker.items["atom-candidate"]["State"]["Running"])
+            self.assertFalse(any(command[1] == "rm" for command in docker.commands))
 
     def test_unknown_candidate_api_rejects_before_removal(self):
         docker = FakeDocker()

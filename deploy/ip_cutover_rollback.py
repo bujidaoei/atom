@@ -23,6 +23,7 @@ from urllib.parse import urlsplit
 import ssl
 from ipaddress import ip_address
 
+import candidate_write_fence
 from protected_cutover import CutoverError, PhaseLedger, host_lock
 
 
@@ -246,6 +247,66 @@ def _start_if_needed(name: str) -> None:
         _run("container", "start", name)
 
 
+def _baseline(identity: dict) -> dict:
+    path = Path(identity["stateDirectory"]) / (identity["revision"] + ".baseline.json")
+    try:
+        info = path.lstat()
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid != 0
+                or stat.S_IMODE(info.st_mode) != 0o600):
+            raise RollbackError("insecure_candidate_baseline")
+        record = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, ValueError) as exc:
+        raise RollbackError("candidate_baseline_missing") from exc
+    if (type(record) is not dict or set(record) != {
+            "schemaVersion", "revision", "candidateImageId",
+            "candidateDirectory", "stateSha256"} or record["schemaVersion"] != 1
+            or record["revision"] != identity["revision"]
+            or record["candidateImageId"] != identity["candidateImageId"]
+            or type(record["stateSha256"]) is not str
+            or IDENTITY.fullmatch(record["stateSha256"]) is None
+            or type(record["candidateDirectory"]) is not str
+            or not Path(record["candidateDirectory"]).is_absolute()):
+        raise RollbackError("invalid_candidate_baseline")
+    return record
+
+
+def _fence_candidate(identity: dict, locations: dict[str, str],
+                     *, console_url: str, ca_file: Path | None) -> None:
+    names = _names(identity["names"])
+    baseline_path = (Path(identity["stateDirectory"])
+                     / (identity["revision"] + ".baseline.json"))
+    if locations["caddy"] == names["caddy"] and not baseline_path.exists():
+        # The candidate was never exposed, and the old ingress is still fenced.
+        return
+    baseline = _baseline(identity)  # Fail before service disruption.
+    running = {role: (item is not None and item.get("State", {}).get("Running") is True)
+               for role, item in ((role, _inspect(names[role]))
+                                  for role in ("caddy", "broker", "api"))}
+    try:
+        for role, grace in (("caddy", 15), ("broker", 90), ("api", 30)):
+            if running[role]:
+                _run("container", "stop", "--time", str(grace), names[role],
+                     timeout=grace + 15)
+        try:
+            observed = candidate_write_fence.candidate_fingerprint(
+                Path(baseline["candidateDirectory"]))
+        except candidate_write_fence.FenceError as exc:
+            raise RollbackError("candidate_state_unavailable") from exc
+        if observed != baseline["stateSha256"]:
+            raise RollbackError("candidate_has_unmerged_writes")
+    except BaseException:
+        # A refusal must leave the live generation serving, including its TLS ingress.
+        for role in ("api", "broker", "caddy"):
+            if running[role]:
+                _start_if_needed(names[role])
+        for role in ("api", "broker"):
+            if running[role]:
+                _await_healthy(names[role])
+        if running["caddy"]:
+            _await_console(console_url, ca_file=ca_file)
+        raise
+
+
 def _await_healthy(name: str, *, seconds: int = 150) -> None:
     deadline = time.monotonic() + seconds
     while time.monotonic() < deadline:
@@ -294,6 +355,7 @@ def rollback(identity: dict, *, console_url: str,
              ca_file: Path | None = None) -> None:
     locations = _old_locations(identity)
     names = _names(identity["names"])
+    _fence_candidate(identity, locations, console_url=console_url, ca_file=ca_file)
     # The broker must release its Docker-daemon lease before the preserved
     # broker with the same identity starts again.
     for role in ("broker", "api"):

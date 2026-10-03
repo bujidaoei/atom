@@ -11,6 +11,7 @@ import argparse
 from contextlib import closing
 import hashlib
 import json
+import os
 from pathlib import Path
 import sqlite3
 import stat
@@ -102,6 +103,55 @@ def state_fingerprint(data_directory: Path) -> str:
         return digest.hexdigest()
     except (OSError, paired_backup.BackupError) as exc:
         raise FenceError("candidate_files_unavailable") from exc
+
+
+def candidate_fingerprint(candidate_directory: Path) -> str:
+    """Cover both application data and broker records; ignore the process lease."""
+    if not candidate_directory.is_absolute() or candidate_directory.is_symlink():
+        raise FenceError("invalid_candidate_directory")
+    broker = candidate_directory / "broker"
+    try:
+        if broker.is_symlink() or not broker.is_dir():
+            raise FenceError("invalid_candidate_broker")
+        broker_files = paired_backup._entries(broker, omit_database="registry.db")
+        if any(item["type"] == "symlink" for item in broker_files.values()):
+            raise FenceError("candidate_symlink_present")
+        broker_files.pop("registry.lease", None)
+        digest = hashlib.sha256()
+        _feed(digest, ["app", state_fingerprint(candidate_directory / "data")])
+        _feed(digest, ["broker", database_fingerprint(broker / "registry.db")])
+        _feed(digest, ["brokerFiles", broker_files])
+        return digest.hexdigest()
+    except (OSError, paired_backup.BackupError) as exc:
+        raise FenceError("candidate_files_unavailable") from exc
+
+
+def capture_baseline(path: Path, *, candidate_directory: Path, revision: str,
+                     candidate_image: str) -> str:
+    """Seal the pre-ingress candidate state in the root-private cutover ledger."""
+    if (not path.is_absolute() or not candidate_directory.is_absolute()
+            or path.exists() or path.is_symlink()):
+        raise FenceError("invalid_baseline_path")
+    parent = path.parent.stat()
+    if (not stat.S_ISDIR(parent.st_mode) or parent.st_uid != 0
+            or stat.S_IMODE(parent.st_mode) != 0o700):
+        raise FenceError("insecure_baseline_directory")
+    digest = candidate_fingerprint(candidate_directory)
+    record = {"schemaVersion": 1, "revision": revision,
+              "candidateImageId": candidate_image,
+              "candidateDirectory": str(candidate_directory), "stateSha256": digest}
+    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL
+                         | getattr(os, "O_NOFOLLOW", 0), 0o600)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            json.dump(record, stream, sort_keys=True, separators=(",", ":"))
+            stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+    except BaseException:
+        path.unlink(missing_ok=True)
+        raise
+    return digest
 
 
 def main(argv: list[str] | None = None) -> int:

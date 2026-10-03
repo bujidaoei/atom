@@ -69,6 +69,27 @@ class CandidateWriteFenceTest(unittest.TestCase):
             with self.assertRaisesRegex(fence.FenceError, "candidate_symlink_present"):
                 fence.state_fingerprint(data)
 
+    def test_candidate_covers_broker_rows_but_not_process_lease(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            candidate = Path(temporary).resolve()
+            data = candidate / "data"
+            broker = candidate / "broker"
+            data.mkdir()
+            broker.mkdir()
+            with closing(sqlite3.connect(data / "atom.db")) as db, db:
+                db.execute("CREATE TABLE projects(id INTEGER PRIMARY KEY)")
+            with closing(sqlite3.connect(broker / "registry.db")) as db, db:
+                db.execute("CREATE TABLE operations(id INTEGER PRIMARY KEY, state TEXT)")
+                db.execute("INSERT INTO operations VALUES (1, 'complete')")
+            lease = broker / "registry.lease"
+            lease.write_text("0", encoding="ascii")
+            baseline = fence.candidate_fingerprint(candidate)
+            lease.write_text("1", encoding="ascii")
+            self.assertEqual(fence.candidate_fingerprint(candidate), baseline)
+            with closing(sqlite3.connect(broker / "registry.db")) as db, db:
+                db.execute("INSERT INTO operations VALUES (2, 'queued')")
+            self.assertNotEqual(fence.candidate_fingerprint(candidate), baseline)
+
 
 if __name__ == "__main__":
     unittest.main()
