@@ -9,6 +9,8 @@ Goal: save real observations reliably and distinguish service failure. Independe
 - [x] T003 [US1] Reproduce and fix UTC comparison and response semantics in backend/app/serialize.py; regress backend/tests/test_acceptance.py.
 - [x] T003a [US1] Clarify action/status/error wording in frontend/src/workspace/ContractTab.tsx and frontend/src/pages/Workspace.tsx; real browser verification.
 - [ ] T003b [FR-005] Remove two stale user-facing claims that an unfinished build or failed race heat requires functional acceptance before any publication. Keep the actual ready-draft and immutable-revision gates, run the frontend build and relevant browser check, then prove the corrected copy on the deployed image before marking complete.
+
+T003b checkpoint (2026-10-04): clean `7210398` exact image passed the 1,905-file Pi check, successor preflight, protected forward deployment and independent six-ID/76-origin/backup/HTTPS checks. Local desktop/mobile release-workbench Chromium passed 2/2. Signed-in owner Chrome displayed the corrected failed-heat wording and a separate enabled direct-publish action on a ready project. No same-owner production project currently exercises the interrupted-main banner, so that branch is not claimed observed; T003b stays unchecked. No complete regression ran.
 ## Phase 4 - US2 Direct publication
 Goal: publish exact saved content without mandatory functional acceptance. Independent test: actual public bytes with no passing check.
 - [x] T004 [US2] Complete exact policy/schema/API design against existing invariants in specs/009-publish-experience/contracts/publication.md and data-model.md.
