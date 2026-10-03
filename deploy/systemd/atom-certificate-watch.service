@@ -13,5 +13,5 @@ TimeoutStartSec=120
 NoNewPrivileges=yes
 PrivateTmp=yes
 ProtectSystem=strict
-ReadWritePaths=/run
+ReadWritePaths=/run /var/backups/atom-cutovers /var/lib/atom-cutovers
 
