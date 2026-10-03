@@ -1,8 +1,8 @@
-"""Reconcile an interrupted forward transaction before source handoff.
+"""Reconcile an interrupted forward transaction from its durable receipt.
 
-This internal entry point covers only durable phases through ``captured``.
-Later phases require candidate-ID and write-fence reconciliation, so callers
-must never infer that a phase name alone authorizes source restoration.
+The operator entry point dispatches under one host lock. Each phase-specific
+continuation verifies exact service identities and the required write fence;
+the phase name alone never authorizes restoring an older data generation.
 """
 
 from __future__ import annotations

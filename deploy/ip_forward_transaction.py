@@ -1,17 +1,23 @@
-"""Single-lock ordinary forward deployment from the active schema-18 state.
+"""Single-lock, phase-recorded forward deployment from active schema-18 data.
 
-This remains an internal entry point until journal-guided crash recovery and
-real exact-image drills are complete. Never invoke it on production alone.
+This command requires an exact clean Git revision and immutable image ID.
+Read-only preflight, phase journaling and a verified paired backup are part of
+the host-locked transaction; crash recovery and acceptance are separate steps.
 """
 
 from __future__ import annotations
 
+import argparse
+import json
 from pathlib import Path
 
 import ip_forward_candidate
+import ip_forward_capture
 import ip_forward_exposure
 import ip_forward_hold
 import ip_forward_identity
+import ip_forward_journal
+import ip_forward_preflight
 import ip_forward_stage
 import ip_forward_start
 import protected_cutover
@@ -187,3 +193,39 @@ def run(*, config_file: Path, publication_file: Path,
             successor_source=successor_source,
             successor_revision=successor_revision,
             successor_image=successor_image)
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--config", required=True, type=Path)
+    parser.add_argument("--publication-file", required=True, type=Path)
+    parser.add_argument("--source-revision", required=True)
+    parser.add_argument("--successor-source", required=True, type=Path)
+    parser.add_argument("--successor-revision", required=True)
+    parser.add_argument("--successor-image", required=True)
+    args = parser.parse_args(argv)
+    try:
+        result = run(
+            config_file=args.config,
+            publication_file=args.publication_file,
+            source_revision=args.source_revision,
+            successor_source=args.successor_source,
+            successor_revision=args.successor_revision,
+            successor_image=args.successor_image)
+    except (TransactionError, protected_cutover.CutoverError,
+            ip_forward_preflight.ForwardPreflightError,
+            ip_forward_journal.JournalError,
+            ip_forward_identity.IdentityError,
+            ip_forward_stage.StageError,
+            ip_forward_capture.CaptureError,
+            ip_forward_candidate.CandidateError,
+            ip_forward_hold.HoldError,
+            ip_forward_start.StartError,
+            ip_forward_exposure.ExposureError) as exc:
+        parser.exit(2, str(exc) + "\n")
+    print(json.dumps(result, sort_keys=True))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
