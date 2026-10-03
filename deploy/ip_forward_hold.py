@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 import subprocess
 
+import candidate_write_fence
 import ip_forward_candidate
 import ip_forward_identity
 import ip_forward_stage
@@ -31,6 +32,13 @@ def _require(condition: bool, code: str) -> None:
 class HeldSource:
     ids: dict[str, str]
     names: dict[str, str]
+
+
+def prestart_baseline_path(config: protected_cutover.CutoverConfig,
+                           successor_revision: str) -> Path:
+    _require(protected_cutover.REVISION.fullmatch(successor_revision) is not None,
+             "invalid_forward_revision")
+    return config.state_dir / (successor_revision + ".forward-prestart-baseline.json")
 
 
 def _run(config: protected_cutover.CutoverConfig, *arguments: str,
@@ -124,7 +132,13 @@ def hold(*, config: protected_cutover.CutoverConfig,
         _inspect(config, ids[role], _canonical(config, role), running=False)
     _inspect(config, ids["caddy"], _canonical(config, "caddy"), running=True)
     try:
-        stage.journal.advance("candidate_intent")
+        baseline = candidate_write_fence.capture_baseline(
+            prestart_baseline_path(config, successor_revision),
+            candidate_directory=prepared.directory,
+            revision=successor_revision,
+            candidate_image=identity["successorImageId"])
+        stage.journal.advance("candidate_intent", evidence={
+            "preStartBaselineSha256": baseline})
         _run(config, "container", "stop", "--time", "15",
              ids["caddy"], timeout=35)
         _inspect(config, ids["caddy"], _canonical(config, "caddy"), running=False)

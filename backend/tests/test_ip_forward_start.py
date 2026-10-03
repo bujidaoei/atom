@@ -94,6 +94,8 @@ class ForwardStartTest(TestCase):
                           return_value=()), \
              patch.object(starter.candidate_write_fence, "capture_baseline",
                           side_effect=baseline), \
+             patch.object(starter, "_fence_partial_candidate",
+                          side_effect=lambda **_: self.events.append("fence")), \
              patch.object(starter, "_cleanup_candidate",
                           side_effect=lambda **_: self.events.append("cleanup")), \
              patch.object(starter.ip_forward_hold, "restore",
@@ -132,7 +134,7 @@ class ForwardStartTest(TestCase):
 
     def test_failed_support_service_cleans_candidate_before_source_restore(self):
         self._invoke(fail_compose=True)
-        self.assertEqual(self.events[-2:], ["cleanup", "source_restore"])
+        self.assertEqual(self.events[-3:], ["fence", "cleanup", "source_restore"])
         self.stage.journal.advance.assert_not_called()
 
     def test_caddy_profile_requires_exact_private_bind_and_public_ports(self):
@@ -237,6 +239,61 @@ class ForwardStartTest(TestCase):
         self.assertEqual(removed, [self.new_ids["preview"]])
         self.assertEqual(remaining, {"api": self.old_ids["api"],
                                      "broker": self.old_ids["broker"]})
+
+    def test_partial_start_stops_exact_writers_before_baseline_decision(self):
+        self.stage.journal.read.return_value = {
+            "phase": "candidate_intent", "events": [{
+                "phase": "candidate_intent",
+                "evidence": {"preStartBaselineSha256": "e" * 64}}]}
+        items = {
+            "api": {"Id": self.old_ids["api"], "State": {"Running": False}},
+            "preview": {"Id": self.new_ids["preview"],
+                        "State": {"Running": True}},
+            "public": {"Id": self.new_ids["public"],
+                       "State": {"Running": True}},
+        }
+        stopped = []
+
+        def run(_config, *_args, timeout):
+            identifier = _args[-1]
+            role = next(role for role, item in items.items()
+                        if item["Id"] == identifier)
+            items[role]["State"]["Running"] = False
+            stopped.append(role)
+
+        with patch.object(starter, "_current",
+                          side_effect=lambda _config, role: items.get(role)), \
+             patch.object(starter, "_profile",
+                          side_effect=lambda *, role, **_: self.new_ids[role]), \
+             patch.object(starter.ip_forward_hold, "_run", side_effect=run), \
+             patch.object(starter.candidate_write_fence,
+                          "compare_baseline", return_value=False) as compare:
+            with self.assertRaisesRegex(starter.StartError,
+                                        "forward_prestart_writes_detected"):
+                starter._fence_partial_candidate(
+                    config=self.config, stage=self.stage,
+                    prepared=self.prepared,
+                    successor_revision=self.successor,
+                    successor_image=self.image,
+                    source_ids=self.old_ids)
+        self.assertEqual(stopped, ["preview", "public"])
+        self.assertFalse(items["api"]["State"]["Running"])
+        self.assertEqual(compare.call_args.kwargs["expected_digest"], "e" * 64)
+
+    def test_unchanged_partial_start_can_be_cleaned_after_fence(self):
+        self.stage.journal.read.return_value = {
+            "phase": "candidate_intent", "events": [{
+                "phase": "candidate_intent",
+                "evidence": {"preStartBaselineSha256": "e" * 64}}]}
+        with patch.object(starter, "_current", return_value=None), \
+             patch.object(starter.candidate_write_fence,
+                          "compare_baseline", return_value=True):
+            starter._fence_partial_candidate(
+                config=self.config, stage=self.stage,
+                prepared=self.prepared,
+                successor_revision=self.successor,
+                successor_image=self.image,
+                source_ids=self.old_ids)
 
 
 if __name__ == "__main__":

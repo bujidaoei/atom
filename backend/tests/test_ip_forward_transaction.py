@@ -10,6 +10,7 @@ from unittest.mock import Mock, patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "deploy"))
 import ip_forward_transaction as transaction  # noqa: E402
 import ip_forward_exposure as exposure  # noqa: E402
+import ip_forward_start as starter  # noqa: E402
 
 
 class ForwardTransactionTest(TestCase):
@@ -80,11 +81,14 @@ class ForwardTransactionTest(TestCase):
              patch.object(transaction.ip_forward_identity, "read",
                           return_value={"containerIds": {"api": "a" * 64}}), \
              patch.object(transaction.ip_forward_start,
+                          "_fence_partial_candidate") as fence, \
+             patch.object(transaction.ip_forward_start,
                           "_cleanup_candidate") as cleanup, \
              patch.object(transaction.ip_forward_hold, "restore") as restore:
             with self.assertRaisesRegex(transaction.TransactionError,
                                         "forward_handoff_failed"):
                 transaction.run_locked(**self.values)
+        fence.assert_called_once()
         self.assertEqual(cleanup.call_args.kwargs["source_ids"],
                          {"api": "a" * 64})
         restore.assert_called_once()
@@ -154,6 +158,21 @@ class ForwardTransactionTest(TestCase):
                                         "forward_exposure_recovery_failed"):
                 transaction.run_locked(**self.values)
         recover.assert_not_called()
+
+    def test_failed_partial_start_recovery_is_not_replayed(self):
+        with patch.object(transaction.ip_forward_stage, "stage_locked",
+                          return_value=self.stage), \
+             patch.object(transaction.ip_forward_candidate, "prepare",
+                          return_value=self.prepared), \
+             patch.object(transaction.ip_forward_hold, "hold", return_value=Mock()), \
+             patch.object(transaction.ip_forward_start, "start",
+                          side_effect=starter.StartError(
+                              "forward_candidate_recovery_failed")), \
+             patch.object(transaction, "_restore_unexposed") as restore:
+            with self.assertRaisesRegex(transaction.TransactionError,
+                                        "forward_start_recovery_failed"):
+                transaction.run_locked(**self.values)
+        restore.assert_not_called()
 
 
 if __name__ == "__main__":

@@ -107,6 +107,11 @@ class ForwardJournal:
                      and type(event["evidence"]) is dict,
                      "invalid_forward_journal")
             phase = event["phase"]
+            if phase == "candidate_intent":
+                digest = event["evidence"].get("preStartBaselineSha256")
+                _require(type(digest) is str and len(digest) == 64
+                         and all(char in "0123456789abcdef" for char in digest),
+                         "invalid_forward_startup_baseline")
             if phase in PHASES:
                 _require(len(seen) < len(PHASES) and phase == PHASES[len(seen)],
                          "invalid_forward_journal_sequence")
@@ -220,6 +225,11 @@ class ForwardJournal:
         details = evidence or {}
         _require(all(type(key) is str and type(value) in (str, int, bool)
                      for key, value in details.items()), "invalid_forward_evidence")
+        if phase == "candidate_intent":
+            digest = details.get("preStartBaselineSha256")
+            _require(type(digest) is str and len(digest) == 64
+                     and all(char in "0123456789abcdef" for char in digest),
+                     "invalid_forward_startup_baseline")
         if phase == "captured":
             self._validate_capture(capture)
             record["capture"] = capture

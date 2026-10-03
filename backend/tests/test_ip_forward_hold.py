@@ -31,6 +31,7 @@ class ForwardHoldTest(TestCase):
         self.addresses = {"api": "172.30.0.8", "preview": "172.30.0.6",
                           "public": "172.30.0.7", "caddy": "172.30.0.4"}
         self.receipt = {"sourceRevision": self.revision,
+                        "successorImageId": "sha256:" + "d" * 64,
                         "candidateDirectory": "/backup/forward-candidate-bbbbbbbbbbbb",
                         "containerIds": self.ids, "heldNames": self.held_names,
                         "serviceIps": self.addresses,
@@ -69,7 +70,7 @@ class ForwardHoldTest(TestCase):
     def _call(self, *, fault: str | None = None):
         renames = 0
         if fault == "journal_intent":
-            def advance(phase):
+            def advance(phase, **_kwargs):
                 if phase == "candidate_intent":
                     raise hold.HoldError("injected_journal_failure")
             self.stage.journal.advance.side_effect = advance
@@ -105,6 +106,8 @@ class ForwardHoldTest(TestCase):
              patch.object(hold.protected_cutover, "_inspect",
                           side_effect=self._docker_inspect), \
              patch.object(hold, "_run", side_effect=run), \
+             patch.object(hold.candidate_write_fence, "capture_baseline",
+                          return_value="e" * 64), \
              patch.object(hold.ip_forward_stage, "_recover_pre_exposure",
                           side_effect=recovered):
             if fault:
@@ -126,7 +129,8 @@ class ForwardHoldTest(TestCase):
             self.assertEqual(self.containers[role]["Name"],
                              "/" + self.held_names[role])
             self.assertFalse(self.containers[role]["State"]["Running"])
-        self.stage.journal.advance.assert_called_once_with("candidate_intent")
+        self.stage.journal.advance.assert_called_once_with(
+            "candidate_intent", evidence={"preStartBaselineSha256": "e" * 64})
 
     def test_stop_timeout_after_effect_restores_caddy_and_source(self):
         self._call(fault="stop_after_effect")

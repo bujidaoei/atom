@@ -72,6 +72,9 @@ class ForwardJournalTest(TestCase):
                                      for index, role in enumerate(identity.ROLES)},
                     "baselineSha256": "b" * 64,
                     "caddySha256": "c" * 64})
+            elif phase == "candidate_intent":
+                self.log.advance(phase, evidence={
+                    "preStartBaselineSha256": "d" * 64})
             else:
                 self.log.advance(phase)
             if phase == last:
@@ -134,7 +137,12 @@ class ForwardJournalTest(TestCase):
             self.log.read()
 
     def test_candidate_handoff_requires_exact_new_ids_and_baseline(self):
-        self._through("candidate_intent")
+        self._through("captured")
+        with self.assertRaisesRegex(journal.JournalError,
+                                    "invalid_forward_startup_baseline"):
+            self.log.advance("candidate_intent")
+        self.log.advance("candidate_intent", evidence={
+            "preStartBaselineSha256": "d" * 64})
         bad = {"directory": self.receipt["candidateDirectory"],
                "imageId": self.receipt["successorImageId"],
                "containerIds": dict(self.receipt["containerIds"]),

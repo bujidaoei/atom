@@ -22,6 +22,7 @@ import ip_forward_hold
 import ip_forward_identity
 import ip_forward_preflight
 import ip_forward_stage
+import ip_forward_writers
 import protected_cutover
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
@@ -238,6 +239,49 @@ def _cleanup_candidate(*, config: protected_cutover.CutoverConfig,
                  "forward_candidate_cleanup_failed")
 
 
+def _fence_partial_candidate(*, config: protected_cutover.CutoverConfig,
+                             stage: ip_forward_stage.ForwardStage,
+                             prepared: ip_forward_candidate.PreparedCandidate,
+                             successor_revision: str, successor_image: str,
+                             source_ids: dict[str, str]) -> None:
+    """Stop any started successor writers before authorizing source restore."""
+    record = stage.journal.read()
+    _require(record is not None and record["phase"] == "candidate_intent"
+             and prepared.directory.is_absolute()
+             and set(source_ids) == set(ip_forward_identity.ROLES),
+             "forward_prestart_identity_mismatch")
+    baseline = next((event["evidence"]["preStartBaselineSha256"]
+                     for event in record["events"]
+                     if event["phase"] == "candidate_intent"), None)
+    _require(type(baseline) is str, "forward_prestart_baseline_missing")
+    for role in ip_forward_writers.STOP_ORDER:
+        item = _current(config, role)
+        if item is None or item.get("Id") == source_ids[role]:
+            continue
+        identifier = _profile(
+            config=config, role=role, item=item, image=successor_image,
+            prepared=prepared, project=_project(successor_revision),
+            publication=stage.publication)
+        if item.get("State", {}).get("Running") is True:
+            ip_forward_hold._run(
+                config, "container", "stop", "--time",
+                str(ip_forward_writers.GRACE[role]), identifier,
+                timeout=ip_forward_writers.GRACE[role] + 20)
+        current = _current(config, role)
+        _require(current is not None and current.get("Id") == identifier
+                 and current.get("State", {}).get("Running") is False,
+                 "forward_prestart_writer_not_stopped")
+    try:
+        unchanged = candidate_write_fence.compare_baseline(
+            ip_forward_hold.prestart_baseline_path(config, successor_revision),
+            candidate_directory=prepared.directory,
+            revision=successor_revision, candidate_image=successor_image,
+            expected_digest=baseline)
+    except candidate_write_fence.FenceError as exc:
+        raise StartError("forward_prestart_fence_unverified") from exc
+    _require(unchanged, "forward_prestart_writes_detected")
+
+
 def start(*, config: protected_cutover.CutoverConfig,
           stage: ip_forward_stage.ForwardStage,
           prepared: ip_forward_candidate.PreparedCandidate,
@@ -313,6 +357,11 @@ def start(*, config: protected_cutover.CutoverConfig,
                                 prepared.maintenance_sha256)
     except BaseException as failure:
         try:
+            _fence_partial_candidate(
+                config=config, stage=stage, prepared=prepared,
+                successor_revision=successor_revision,
+                successor_image=successor_image,
+                source_ids=identity["containerIds"])
             _cleanup_candidate(config=config, prepared=prepared,
                 image=successor_image, project=project,
                 publication=publication)

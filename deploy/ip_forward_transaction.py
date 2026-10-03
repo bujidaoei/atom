@@ -43,7 +43,26 @@ def _restore_unexposed(*, config: protected_cutover.CutoverConfig,
             publication_file=publication_file,
             revision=identity["sourceRevision"])
         return
-    if phase in ("candidate_intent", "candidate_ready"):
+    if phase == "candidate_ready":
+        candidate = stage.journal.read()["candidate"]
+        ip_forward_exposure.recover_after_exposure(
+            config=config, stage=stage, prepared=prepared,
+            held=ip_forward_hold.HeldSource(
+                identity["containerIds"], identity["heldNames"]),
+            started=ip_forward_start.StartedCandidate(
+                candidate["containerIds"],
+                config.state_dir / (successor_revision + ".forward-baseline.json"),
+                candidate["baselineSha256"], candidate["caddySha256"]),
+            successor_revision=successor_revision,
+            successor_image=successor_image,
+            publication_file=publication_file)
+        return
+    if phase == "candidate_intent":
+        ip_forward_start._fence_partial_candidate(
+            config=config, stage=stage, prepared=prepared,
+            successor_revision=successor_revision,
+            successor_image=successor_image,
+            source_ids=identity["containerIds"])
         ip_forward_start._cleanup_candidate(
             config=config, prepared=prepared, image=successor_image,
             project=ip_forward_start._project(successor_revision),
@@ -93,6 +112,9 @@ def run_locked(*, config: protected_cutover.CutoverConfig,
             successor_revision=successor_revision,
             publication_file=publication_file)
     except BaseException as failure:
+        if (isinstance(failure, ip_forward_hold.HoldError)
+                and str(failure) == "forward_held_source_recovery_failed"):
+            raise TransactionError("forward_handoff_recovery_failed") from failure
         try:
             _restore_unexposed(
                 config=config, stage=stage, prepared=prepared,
@@ -111,6 +133,9 @@ def run_locked(*, config: protected_cutover.CutoverConfig,
             successor_image=successor_image,
             publication_file=publication_file)
     except BaseException as failure:
+        if (isinstance(failure, ip_forward_start.StartError)
+                and str(failure) == "forward_candidate_recovery_failed"):
+            raise TransactionError("forward_start_recovery_failed") from failure
         try:
             _restore_unexposed(
                 config=config, stage=stage, prepared=prepared,
