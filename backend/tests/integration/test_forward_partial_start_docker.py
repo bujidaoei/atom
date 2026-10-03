@@ -66,7 +66,9 @@ class ForwardPartialStartDockerTest(unittest.TestCase):
                         "--read-only", "--label",
                         f"com.docker.compose.project={label}",
                         "--volume", f"{directory / 'data'}:/data", image_id,
-                        "sleep", "600")
+                        "python", "-c", "import signal,sys,time; "
+                        "signal.signal(signal.SIGTERM, lambda *_: sys.exit(0)); "
+                        "time.sleep(600)")
                     self.assertRegex(container_id, r"\A[0-9a-f]{64}\Z")
                     created.append(container_id)
                     return container_id
@@ -74,7 +76,8 @@ class ForwardPartialStartDockerTest(unittest.TestCase):
                 first = {role: create(role, project)
                          for role in ("preview", "public")}
                 config = SimpleNamespace(docker=docker, api=names["api"],
-                                         broker=names["broker"], network=network)
+                                         broker=names["broker"], network=network,
+                                         state_dir=directory)
                 prepared = SimpleNamespace(directory=directory,
                                            service_ips=addresses)
                 record = {"phase": "candidate_intent", "events": [{
