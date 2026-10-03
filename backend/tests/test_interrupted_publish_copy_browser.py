@@ -1,5 +1,7 @@
 """A saved, unfinished revision has truthful publish guidance in the built UI."""
 
+import os
+from pathlib import Path
 import sqlite3
 import time
 from types import SimpleNamespace
@@ -20,12 +22,23 @@ from test_revision_migrations import legacy  # imported fixture feeds prepared
 from test_rollback_v14_api import _configured_api, http_history
 
 
+@pytest.fixture
+def spa_dist(request):
+    """Accept exact-image assets for a target drill; otherwise build current source."""
+    supplied = os.environ.get('ATOM_TEST_BUILT_DIST')
+    if not supplied:
+        return request.getfixturevalue('built_dist')
+    dist = Path(supplied).resolve(strict=True)
+    assert dist.is_dir() and '/atom/assets/' in (dist / 'index.html').read_text('utf-8')
+    return dist
+
+
 @pytest.mark.parametrize('viewport', [
     pytest.param({'width': 1280, 'height': 800}, id='desktop'),
     pytest.param({'width': 390, 'height': 844}, id='mobile'),
 ])
 def test_saved_unfinished_version_distinguishes_ready_gate_from_optional_check(
-        http_history, tmp_path, monkeypatch, built_dist, viewport):
+        http_history, tmp_path, monkeypatch, spa_dist, viewport):
     path, store, intent, _source, _displaced = http_history
     for version in (14, 15, 16):
         migrate(path, tmp_path / f'before-interrupted-v{version}.db', target_version=version)
@@ -58,7 +71,7 @@ def test_saved_unfinished_version_distinguishes_ready_gate_from_optional_check(
     app.include_router(auth.router, prefix='/api')
     app.include_router(projects.router, prefix='/api')
     app.include_router(verifications.router, prefix='/api')
-    _static(app, built_dist)
+    _static(app, spa_dist)
     outer = FastAPI()
     outer.mount('/atom', app)
     server, thread, port = _serve(outer)
