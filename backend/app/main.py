@@ -86,7 +86,7 @@ async def lifespan(_app: FastAPI):
                     orchestrator.execution = None
 
 
-app = FastAPI(title="Atoms Demo API", version="1.0.0", lifespan=lifespan)
+app = FastAPI(title="Atom API", version="1.0.0", lifespan=lifespan)
 app.state.content_issuer = BoundedOperations()
 app.state.audit_reads = BoundedOperations(capacity=4)
 app.state.release_operations = BoundedOperations(capacity=2)

@@ -162,8 +162,8 @@ export function LandingPage() {
 
       <footer className="bg-utilities-footer">
         <div className="mx-auto flex max-w-[1120px] flex-col gap-xs px-l py-xl text-sm text-white/60">
-          <p className="text-white/80">Atom — Atoms 的教学复刻</p>
-          <p>本站为演示项目，产物仅供预览，不代表 atoms.dev 官方实现。</p>
+          <p className="text-white/80">Atom — 从想法到可发布的网站</p>
+          <p>自主构建、按需检查功能，并用发布快照管理每一次上线。</p>
         </div>
       </footer>
     </div>
