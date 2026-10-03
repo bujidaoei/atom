@@ -101,6 +101,19 @@ class ForwardJournalTest(TestCase):
         with self.assertRaisesRegex(journal.JournalError, "forward_journal_exists"):
             self.log.begin()
 
+    def test_capture_path_and_file_mode_tampering_refused(self):
+        self._through("captured")
+        record = self.log.read()
+        record["capture"]["backupDirectory"] = "/tmp/other"
+        self.log.path.write_text(json.dumps(record), encoding="utf-8")
+        with self.assertRaisesRegex(journal.JournalError,
+                                    "invalid_forward_capture_receipt"):
+            self.log.read()
+        self.log.path.chmod(0o644)
+        with self.assertRaisesRegex(journal.JournalError,
+                                    "insecure_forward_journal"):
+            self.log.read()
+
 
 if __name__ == "__main__":
     main()
