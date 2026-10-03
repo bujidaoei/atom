@@ -11,6 +11,7 @@ from __future__ import annotations
 import base64
 import binascii
 import hashlib
+import ipaddress
 import json
 import os
 from pathlib import Path
@@ -24,6 +25,7 @@ import protected_cutover
 ROLES = ("api", "broker", "preview", "public", "verifier", "caddy")
 SUPPORT_NAMES = {"preview": "atom-preview", "public": "atom-public",
                  "verifier": "atom-verifier", "caddy": "atom-tls"}
+PINNED_ROLES = ("api", "preview", "public", "caddy")
 HEX64 = re.compile(r"[0-9a-f]{64}\Z")
 FORMAT = 1
 MAX_FILE = 3 * 1024 * 1024
@@ -48,6 +50,20 @@ def _bytes_record(payload: bytes) -> dict[str, str]:
              "invalid_forward_caddy_bytes")
     return {"sha256": hashlib.sha256(payload).hexdigest(),
             "base64": base64.b64encode(payload).decode("ascii")}
+
+
+def _pinned_address(item: dict, network_name: str) -> str:
+    network = (item.get("NetworkSettings", {}).get("Networks", {})
+               .get(network_name, {}))
+    address = network.get("IPAddress")
+    pinned = (network.get("IPAMConfig") or {}).get("IPv4Address")
+    try:
+        parsed = ipaddress.ip_address(address)
+    except ValueError as exc:
+        raise IdentityError("forward_service_ip_invalid") from exc
+    _require(parsed.version == 4 and parsed.compressed == address
+             and pinned == address, "forward_service_ip_unpinned")
+    return address
 
 
 def _decode_bytes(value: object) -> bytes:
@@ -110,6 +126,7 @@ def _record(config: protected_cutover.CutoverConfig,
     _require(len(set(held.values())) == len(held)
              and all(ip_cutover_rollback.NAME.fullmatch(name) is not None
                      for name in held.values()), "invalid_forward_held_names")
+    service_ips: dict[str, str] = {}
     for role in ROLES:
         name = _name(config, role)
         item = protected_cutover._inspect(config.docker, "container", name)
@@ -118,6 +135,10 @@ def _record(config: protected_cutover.CutoverConfig,
                  "forward_live_identity_changed")
         _require(ip_cutover_rollback._inspect(held[role]) is None,
                  "forward_held_name_occupied")
+        if role in PINNED_ROLES:
+            service_ips[role] = _pinned_address(item, config.network)
+    _require(len(set(service_ips.values())) == len(PINNED_ROLES),
+             "forward_service_ip_collision")
     directory = source / "caddy"
     try:
         protected_cutover._trusted_parents(directory)
@@ -148,7 +169,8 @@ def _record(config: protected_cutover.CutoverConfig,
                                    ("forward-pre-" + successor_revision[:12])),
             "candidateDirectory": str(config.backup_root /
                                       ("forward-candidate-" + successor_revision[:12])),
-            "containerIds": ids, "heldNames": held, "caddy": contents}
+            "containerIds": ids, "heldNames": held, "serviceIps": service_ips,
+            "caddy": contents}
 
 
 def capture(config: protected_cutover.CutoverConfig, active: dict[str, object],
@@ -205,7 +227,8 @@ def read(path: Path, *, config: protected_cutover.CutoverConfig,
     _require(type(record) is dict and set(record) == {
         "format", "sourceRevision", "successorRevision", "sourceImageId",
         "successorImageId", "sourceDirectory", "backupDirectory",
-        "candidateDirectory", "containerIds", "heldNames", "caddy"}
+        "candidateDirectory", "containerIds", "heldNames", "serviceIps",
+        "caddy"}
         and record["format"] == FORMAT
         and record["successorRevision"] == successor_revision
         and type(record["sourceRevision"]) is str
@@ -223,6 +246,10 @@ def read(path: Path, *, config: protected_cutover.CutoverConfig,
         and record["heldNames"] == {
             role: _name(config, role) + "-forward-" + record["sourceRevision"][:7]
             for role in ROLES}
+        and type(record["serviceIps"]) is dict
+        and set(record["serviceIps"]) == set(PINNED_ROLES)
+        and all(type(record["serviceIps"][role]) is str
+                for role in PINNED_ROLES)
         and record["sourceDirectory"] == str(config.backup_root /
                                              ("candidate-" + record["sourceRevision"][:12]))
         and record["backupDirectory"] == str(config.backup_root /
@@ -232,6 +259,16 @@ def read(path: Path, *, config: protected_cutover.CutoverConfig,
         and type(record["caddy"]) is dict
         and set(record["caddy"]) == {"base", "active"},
         "invalid_forward_identity")
+    try:
+        addresses = [ipaddress.ip_address(record["serviceIps"][role])
+                     for role in PINNED_ROLES]
+    except ValueError as exc:
+        raise IdentityError("invalid_forward_service_ips") from exc
+    _require(all(address.version == 4 and address.compressed
+                 == record["serviceIps"][role]
+                 for role, address in zip(PINNED_ROLES, addresses))
+             and len(set(addresses)) == len(addresses),
+             "invalid_forward_service_ips")
     _decode_bytes(record["caddy"]["base"])
     _decode_bytes(record["caddy"]["active"])
     return record

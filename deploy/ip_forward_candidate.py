@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import hashlib
-import ipaddress
 import os
 from pathlib import Path
 import stat
@@ -20,6 +19,7 @@ import ip_cutover_env
 import ip_forward_identity
 import ip_forward_preflight
 import ip_forward_stage
+import ip_forward_writers
 import paired_backup
 import protected_cutover
 
@@ -79,34 +79,23 @@ def _private_bytes(path: Path, payload: bytes) -> None:
         raise
 
 
-def _service_ips(config: protected_cutover.CutoverConfig,
-                 ids: dict[str, str]) -> dict[str, str]:
-    """Capture four pinned bridge addresses from the exact running generation."""
-    names = {"api": config.api, "preview": "atom-preview",
-             "public": "atom-public", "caddy": "atom-tls"}
-    result: dict[str, str] = {}
-    _require(type(ids) is dict and all(role in ids for role in names),
-             "invalid_forward_service_ids")
-    for role, name in names.items():
-        item = protected_cutover._inspect(config.docker, "container", name)
-        network = (item.get("NetworkSettings", {}).get("Networks", {})
-                   .get(config.network, {}))
-        address = network.get("IPAddress")
-        pinned = (network.get("IPAMConfig") or {}).get("IPv4Address")
-        try:
-            parsed = ipaddress.ip_address(address)
-        except ValueError as exc:
-            raise CandidateError("forward_service_ip_invalid") from exc
-        _require(item.get("Name") == "/" + name
-                 and item.get("Id") == ids[role]
-                 and item.get("State", {}).get("Running") is True
-                 and parsed.version == 4 and parsed.compressed == address
-                 and pinned == address,
-                 "forward_service_ip_mismatch")
-        result[role] = address
-    _require(len(set(result.values())) == len(result),
-             "forward_service_ip_collision")
-    return result
+def _source_handoff(config: protected_cutover.CutoverConfig,
+                    stage: ip_forward_stage.ForwardStage,
+                    service_ips: dict[str, str]) -> None:
+    """Stopped writer IDs and still-running TLS ID match the sealed identity."""
+    _require(stage.stopped.ids == {role: stage.active["containerIds"][role]
+                                   for role in ip_forward_writers.STOP_ORDER},
+             "forward_stopped_identity_mismatch")
+    for role in ip_forward_writers.STOP_ORDER:
+        ip_forward_writers._identity(
+            config, role, stage.stopped.ids[role], running=False)
+    caddy = protected_cutover._inspect(config.docker, "container", "atom-tls")
+    _require(caddy.get("Name") == "/atom-tls"
+             and caddy.get("Id") == stage.active["containerIds"]["caddy"]
+             and caddy.get("State", {}).get("Running") is True
+             and ip_forward_identity._pinned_address(caddy, config.network)
+             == service_ips["caddy"],
+             "forward_caddy_identity_changed")
 
 
 def prepare(*, config: protected_cutover.CutoverConfig,
@@ -140,6 +129,8 @@ def prepare(*, config: protected_cutover.CutoverConfig,
              and identity["successorImageId"] == successor_image
              and identity["sourceImageId"] == stage.active["imageId"],
              "forward_candidate_identity_mismatch")
+    service_ips = identity["serviceIps"]
+    _source_handoff(config, stage, service_ips)
     _private_directory(candidate)
     _private_directory(backup)
     verified = paired_backup.verify(backup)
@@ -165,7 +156,6 @@ def prepare(*, config: protected_cutover.CutoverConfig,
              and hashlib.sha256(caddy_file.read_bytes()).hexdigest()
              == stage.captured.caddy_sha256,
              "forward_candidate_caddy_mismatch")
-    service_ips = _service_ips(config, stage.active["containerIds"])
     address = service_ips["caddy"]
     maintenance = ip_cutover_apply._maintenance_caddyfile(
         publication["ATOM_PUBLIC_IP"], publication["ATOM_ACME_DIRECTORY"])

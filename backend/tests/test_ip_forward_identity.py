@@ -49,6 +49,8 @@ class ForwardIdentityTest(TestCase):
             18, 3, Path('/usr/bin/docker'), Path('/var/run/docker.sock'))
         self.ids = {role: f'{index:064x}' for index, role in
                     enumerate(module.ROLES, start=1)}
+        self.service_ips = {role: f'172.30.0.{index + 2}'
+                            for index, role in enumerate(module.PINNED_ROLES)}
         self.active = {'revision': self.old_revision, 'imageId': self.old_image,
                        'candidateDirectory': str(source), 'containerIds': self.ids,
                        'caddySha256': hashlib.sha256(self.active_bytes).hexdigest(),
@@ -58,8 +60,14 @@ class ForwardIdentityTest(TestCase):
     def _inspect(self, _docker, _kind, name):
         role = next(role for role in module.ROLES
                     if module._name(self.config, role) == name)
-        return {'Name': '/' + name, 'Id': self.ids[role],
+        item = {'Name': '/' + name, 'Id': self.ids[role],
                 'State': {'Running': True}}
+        if role in self.service_ips:
+            address = self.service_ips[role]
+            item['NetworkSettings'] = {'Networks': {self.config.network: {
+                'IPAddress': address,
+                'IPAMConfig': {'IPv4Address': address}}}}
+        return item
 
     def test_receipt_preserves_exact_bytes_and_rejects_tampering(self):
         with patch.object(module.protected_cutover, '_inspect', side_effect=self._inspect), \
@@ -70,6 +78,7 @@ class ForwardIdentityTest(TestCase):
         record = module.read(path, config=self.config,
                              successor_revision=self.next_revision)
         self.assertEqual(record['containerIds'], self.ids)
+        self.assertEqual(record['serviceIps'], self.service_ips)
         self.assertEqual(module.caddy_bytes(record, 'base'), self.base)
         self.assertEqual(module.caddy_bytes(record, 'active'), self.active_bytes)
         record['caddy']['active']['base64'] = 'AAAA'

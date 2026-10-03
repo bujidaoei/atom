@@ -11,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "deploy"))
 import ip_forward_candidate as candidate  # noqa: E402
 import ip_forward_stage as stage_module  # noqa: E402
 import test_ip_forward_capture as capture_fixture  # noqa: E402
-REAL_SERVICE_IPS = candidate._service_ips
+REAL_SOURCE_HANDOFF = candidate._source_handoff
 
 
 def _setup(tmp_path, monkeypatch):
@@ -38,6 +38,8 @@ def _setup(tmp_path, monkeypatch):
         "candidateDirectory": str(captured.candidate),
         "sourceImageId": active["imageId"],
         "successorImageId": successor_image,
+        "serviceIps": {"api": "172.30.0.8", "preview": "172.30.0.6",
+                       "public": "172.30.0.7", "caddy": "172.30.0.10"},
         "caddy": {"base": "unused"},
     }
     log = Mock()
@@ -50,9 +52,7 @@ def _setup(tmp_path, monkeypatch):
                         **_kwargs: identity)
     monkeypatch.setattr(candidate.ip_forward_identity, "caddy_bytes",
                         lambda *_args: b"original console base")
-    monkeypatch.setattr(candidate, "_service_ips", lambda *_args: {
-        "api": "172.30.0.8", "preview": "172.30.0.6",
-        "public": "172.30.0.7", "caddy": "172.30.0.10"})
+    monkeypatch.setattr(candidate, "_source_handoff", lambda *_args: None)
     monkeypatch.setattr(candidate, "_private_directory",
                         lambda path, *, create=False:
                         path.mkdir(mode=0o700) if create else None)
@@ -111,50 +111,36 @@ def test_changed_candidate_origin_refuses_before_creating_inputs(
     assert not (forward.captured.candidate / "private-env").exists()
 
 
-@pytest.mark.parametrize("fault", ["changed_id", "address_collision",
-                                   "unpinned"])
-def test_live_service_addresses_refuse_changed_identity_or_collision(
+@pytest.mark.parametrize("fault", ["changed_id", "changed_caddy_ip"])
+def test_stopped_source_handoff_refuses_changed_caddy_identity(
         tmp_path, monkeypatch, fault):
     config, forward, _image = _setup(tmp_path, monkeypatch)
-    addresses = {"api": "172.30.0.8", "preview": "172.30.0.6",
-                 "public": "172.30.0.7", "caddy": "172.30.0.10"}
-    names = {"api": config.api, "preview": "atom-preview",
-             "public": "atom-public", "caddy": "atom-tls"}
-    def inspect(_docker, _kind, name):
-        role = next(role for role, label in names.items() if label == name)
-        address = addresses[role]
-        return {"Name": "/" + name,
-                "Id": "f" * 64 if fault == "changed_id" and role == "caddy"
-                else forward.active["containerIds"][role],
-                "State": {"Running": True},
-                "NetworkSettings": {"Networks": {config.network: {
-                    "IPAddress": address,
-                    "IPAMConfig": {"IPv4Address": "" if fault == "unpinned"
-                                   and role == "caddy" else address}}}}}
-    if fault == "address_collision":
-        addresses["caddy"] = addresses["api"]
+    address = "172.30.0.11" if fault == "changed_caddy_ip" else "172.30.0.10"
     monkeypatch.setattr(candidate.protected_cutover, "_inspect",
-                        inspect)
-    with pytest.raises(candidate.CandidateError):
-        REAL_SERVICE_IPS(config, forward.active["containerIds"])
+        lambda *_args: {"Name": "/atom-tls",
+                        "Id": "f" * 64 if fault == "changed_id" else
+                        forward.active["containerIds"]["caddy"],
+                        "State": {"Running": True},
+                        "NetworkSettings": {"Networks": {config.network: {
+                            "IPAddress": address,
+                            "IPAMConfig": {"IPv4Address": address}}}}})
+    with pytest.raises(candidate.CandidateError,
+                       match="forward_caddy_identity_changed"):
+        REAL_SOURCE_HANDOFF(config, forward,
+            {"api": "172.30.0.8", "preview": "172.30.0.6",
+             "public": "172.30.0.7", "caddy": "172.30.0.10"})
 
 
-def test_live_addresses_override_old_staging_template(tmp_path, monkeypatch):
+def test_sealed_addresses_survive_stopped_writer_handoff(tmp_path, monkeypatch):
     config, forward, _image = _setup(tmp_path, monkeypatch)
     addresses = {"api": "172.30.0.8", "preview": "172.30.0.6",
                  "public": "172.30.0.7", "caddy": "172.30.0.10"}
-    names = {"api": config.api, "preview": "atom-preview",
-             "public": "atom-public", "caddy": "atom-tls"}
-    def inspect(_docker, _kind, name):
-        role = next(role for role, label in names.items() if label == name)
-        address = addresses[role]
-        return {"Name": "/" + name,
-                "Id": forward.active["containerIds"][role],
-                "State": {"Running": True},
-                "NetworkSettings": {"Networks": {config.network: {
-                    "IPAddress": address,
-                    "IPAMConfig": {"IPv4Address": address}}}}}
     monkeypatch.setattr(candidate.protected_cutover, "_inspect",
-                        inspect)
-    assert REAL_SERVICE_IPS(config, forward.active["containerIds"]) == addresses
+        lambda *_args: {"Name": "/atom-tls",
+                        "Id": forward.active["containerIds"]["caddy"],
+                        "State": {"Running": True},
+                        "NetworkSettings": {"Networks": {config.network: {
+                            "IPAddress": addresses["caddy"],
+                            "IPAMConfig": {"IPv4Address": addresses["caddy"]}}}}})
+    REAL_SOURCE_HANDOFF(config, forward, addresses)
     assert forward.publication["ATOM_CADDY_PROXY_IP"] == "172.30.0.2"

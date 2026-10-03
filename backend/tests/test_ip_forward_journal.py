@@ -44,6 +44,8 @@ class ForwardJournalTest(TestCase):
             "heldNames": {role: identity._name(self.config, role) +
                           "-forward-" + source_revision[:7]
                           for role in identity.ROLES},
+            "serviceIps": {role: f"172.30.0.{index + 2}" for index, role in
+                           enumerate(identity.PINNED_ROLES)},
             "caddy": {"base": identity._bytes_record(b"base"),
                       "active": identity._bytes_record(b"active")},
         }
