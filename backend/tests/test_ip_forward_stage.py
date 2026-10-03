@@ -40,7 +40,8 @@ class ForwardStageTest(TestCase):
             "d" * 64, "e" * 64, 62, 72, "f" * 64)
         self.order = []
 
-    def _call(self, *, capture_failure=False):
+    def _call(self, *, capture_failure=False, stop_failure=False,
+              resume_failure=False):
         controller = Mock()
         controller.transition_base.side_effect = lambda _payload, maintenance: (
             self.order.append("maintenance" if maintenance else "restore") or "e" * 64)
@@ -48,7 +49,13 @@ class ForwardStageTest(TestCase):
         log.advance.side_effect = lambda phase, **kwargs: self.order.append(phase)
         def stop(*_args):
             self.order.append("stop")
+            if stop_failure:
+                raise writers.WriterError("writer_recovery_failed")
             return self.stopped
+        def resume(*_args):
+            self.order.append("resume")
+            if resume_failure:
+                raise writers.WriterError("writer_health_timeout")
         def take(**_kwargs):
             self.order.append("capture")
             if capture_failure:
@@ -74,18 +81,23 @@ class ForwardStageTest(TestCase):
              patch.object(stage.ip_cutover_apply, "_maintenance_probe"), \
              patch.object(stage.ip_forward_writers, "stop", side_effect=stop), \
              patch.object(stage.ip_forward_writers, "resume",
-                          side_effect=lambda *_: self.order.append("resume")), \
+                          side_effect=resume) as resume_call, \
              patch.object(stage.ip_forward_capture, "capture", side_effect=take):
-            if capture_failure:
-                with self.assertRaisesRegex(stage.StageError,
-                                            "forward_stage_failed"):
+            if capture_failure or stop_failure:
+                expected_error = ("forward_source_recovery_failed"
+                                  if resume_failure else "forward_stage_failed")
+                with self.assertRaisesRegex(stage.StageError, expected_error):
                     stage.stage_locked(config=self.config,
                         publication_file=Path("/etc/atom/publication"),
                         revision=self.revision,
                         successor_source=Path("/source"),
                         successor_revision=self.successor,
                         successor_image="sha256:" + "d" * 64)
-                self.assertEqual(inspect.call_count, 2)
+                self.assertEqual(inspect.call_count,
+                                 1 if resume_failure else 2)
+                if stop_failure:
+                    self.assertEqual(resume_call.call_args.args[1],
+                                     self.stopped)
             else:
                 result = stage.stage_locked(config=self.config,
                     publication_file=Path("/etc/atom/publication"),
@@ -105,6 +117,16 @@ class ForwardStageTest(TestCase):
         self._call(capture_failure=True)
         self.assertLess(self.order.index("resume"), self.order.index("restore"))
         self.assertEqual(self.order[-1], "source_restored")
+
+    def test_stop_recovery_failure_retries_exact_ids_before_reopening_ingress(self):
+        self._call(stop_failure=True)
+        self.assertLess(self.order.index("resume"), self.order.index("restore"))
+        self.assertEqual(self.order[-1], "source_restored")
+
+    def test_stop_recovery_failure_keeps_maintenance_if_retry_is_unhealthy(self):
+        self._call(stop_failure=True, resume_failure=True)
+        self.assertNotIn("restore", self.order)
+        self.assertNotIn("source_restored", self.order)
 
 
 if __name__ == "__main__":

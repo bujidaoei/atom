@@ -136,6 +136,12 @@ def stage_locked(*, config: protected_cutover.CutoverConfig,
         journal.advance("maintenance_verified",
                         evidence={"caddySha256": caddy_digest})
         journal.advance("writers_intent")
+        # A stop can fail after Docker has stopped a writer, including when
+        # its own recovery attempt also fails. Keep exact IDs available to
+        # the outer recovery before invoking that fallible operation.
+        stopped = ip_forward_writers.StoppedWriters(
+            {role: active["containerIds"][role]
+             for role in ip_forward_writers.STOP_ORDER})
         stopped = ip_forward_writers.stop(config, active["containerIds"], source)
         journal.advance("writers_stopped")
         captured = ip_forward_capture.capture(
