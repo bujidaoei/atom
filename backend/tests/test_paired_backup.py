@@ -104,3 +104,43 @@ def test_capture_rejects_invalid_image_before_creating_backup(tmp_path):
     finally:
         app.close()
         registry.close()
+
+
+def test_schema18_backup_retains_release_history_and_origin_inventory(tmp_path):
+    data, broker, caddy, private, app, registry = _sources(tmp_path)
+    try:
+        app.execute("PRAGMA user_version=18")
+        app.executescript("""
+            CREATE TABLE release_records(id TEXT PRIMARY KEY, publication_generation INTEGER);
+            CREATE TABLE release_publications(project_id TEXT PRIMARY KEY, release_id TEXT);
+            CREATE TABLE release_rollback_sources(id TEXT PRIMARY KEY);
+            CREATE TABLE project_origin_ports(project_id TEXT, purpose TEXT, port INTEGER);
+            INSERT INTO release_records VALUES ('release-1', 1), ('release-2', 2);
+            INSERT INTO release_publications VALUES ('one', 'release-2');
+            INSERT INTO release_rollback_sources VALUES ('restore-2');
+            INSERT INTO project_origin_ports VALUES ('one', 'preview', 20000),
+                ('one', 'public', 20001);
+        """)
+        app.commit()
+        backup = private / "schema18"
+        receipt = paired.capture(data=data, broker=broker, caddy=caddy,
+                                 destination=backup, image_id=IMAGE,
+                                 app_schema=18, broker_schema=3)
+        assert receipt["counts"]["data"] == {
+            "projects": 1, "revision_records": 0, "revision_artifacts": 0,
+            "release_records": 2, "release_publications": 1,
+            "release_rollback_sources": 1, "project_origin_ports": 2}
+        restored = private / "schema18-restored"
+        assert paired.restore(backup, restored) == receipt
+        with sqlite3.connect(restored / "data" / "atom.db") as db:
+            assert db.execute("SELECT id FROM release_records "
+                              "ORDER BY publication_generation").fetchall() == [
+                                  ("release-1",), ("release-2",)]
+            assert db.execute("SELECT release_id FROM release_publications").fetchone() == (
+                "release-2",)
+            assert db.execute("SELECT purpose,port FROM project_origin_ports "
+                              "ORDER BY port").fetchall() == [
+                                  ("preview", 20000), ("public", 20001)]
+    finally:
+        app.close()
+        registry.close()
