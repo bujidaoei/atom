@@ -148,7 +148,7 @@ export function RaceTab({
           <div>
             <h2 className="text-md font-medium text-neutral-95">竞速构建</h2>
             <p className="mt-xxs text-sm text-neutral-60">
-              同一份契约交给 2–4 个模型并行构建，挑一个合入主工作区。每个 heat 各扣 1 credit。
+              同一份需求交给 2–4 个模型分别生成。你可以预览结果，再选择一个作为工作区草稿。每个候选版本消耗 1 点额度。
             </p>
           </div>
 
@@ -206,7 +206,7 @@ export function RaceTab({
                 <span className="text-sm text-neutral-60">
                   已选 {selected.length} 个
                   {selected.length < 2 ? "，至少要 2 个" : selected.length > 4 ? "，最多 4 个" : ""}
-                  {canStart ? "" : " · 需要先确认契约"}
+                  {canStart ? "" : " · 需要先确认需求"}
                 </span>
               </div>
             </>
@@ -224,7 +224,7 @@ export function RaceTab({
         ) : (
           <section className="flex flex-col gap-m">
             <div className="flex items-center gap-s">
-              <h3 className="text-md font-medium text-neutral-95">本轮 heats</h3>
+              <h3 className="text-md font-medium text-neutral-95">本轮候选版本</h3>
               <Badge
                 tone={
                   race.status === "running"
@@ -357,8 +357,8 @@ function HeatCard({
       <dl className="grid grid-cols-2 gap-x-m gap-y-xs border-t border-neutral-8 px-m py-s text-xs">
         <Stat label="耗时" value={formatElapsed(liveElapsed)} />
         <Stat label="文件" value={`${heat.fileCount} 个 · ${formatBytes(heat.bytes)}`} />
-        <Stat label="入 token" value={formatNumber(heat.inputTokens)} />
-        <Stat label="出 token" value={formatNumber(heat.outputTokens)} />
+        <Stat label="输入 Token" value={formatNumber(heat.inputTokens)} />
+        <Stat label="输出 Token" value={formatNumber(heat.outputTokens)} />
       </dl>
 
       {activity && heat.status === "running" ? (
@@ -380,7 +380,10 @@ function HeatCard({
       ) : null}
 
       {heat.error && !["running", "queued", "done"].includes(heat.status) ? (
-        <p className="border-t border-neutral-8 px-m py-s text-xs text-neutral-60">{heat.error}。可在上方调整时间上限后{retryLabel}；这次竞速未完成，不能采用这个候选。你仍可在「发布与历史」查看当前草稿的发布状态。</p>
+        <div className="space-y-xxs border-t border-neutral-8 px-m py-s text-xs text-neutral-60">
+          <p className="break-words">{heat.error}</p>
+          <p>可点击「{retryLabel}」重试{heat.status === "timed_out" ? "；如果经常超时，可先调高上方时间上限" : ""}。这个候选尚未完成，暂不能采用。当前草稿是否可以发布，请到「发布与历史」查看。</p>
+        </div>
       ) : null}
 
       <footer className="mt-auto flex flex-wrap items-center gap-s border-t border-neutral-8 px-m py-s">
