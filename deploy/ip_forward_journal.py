@@ -86,15 +86,20 @@ class ForwardJournal:
             raise JournalError("forward_journal_unreadable") from exc
         _require(type(record) is dict and set(record) == {
             "format", "successorRevision", "identitySha256", "phase",
-            "events", "capture"} and record["format"] == FORMAT
+            "events", "capture", "candidate"} and record["format"] == FORMAT
             and record["successorRevision"] == self.revision
             and record["identitySha256"] == self._identity_digest(),
             "forward_journal_identity_mismatch")
         events = record["events"]
-        _require(type(events) is list and 1 <= len(events) <= len(PHASES) + 1
-                 and type(record["capture"]) is (dict if "captured" in
-                     [event.get("phase") for event in events if type(event) is dict]
-                     else type(None)), "invalid_forward_journal")
+        _require(type(events) is list and 1 <= len(events) <= len(PHASES) + 1,
+                 "invalid_forward_journal")
+        observed_phases = [event.get("phase") for event in events
+                           if type(event) is dict]
+        _require(type(record["capture"]) is
+                 (dict if "captured" in observed_phases else type(None))
+                 and type(record["candidate"]) is
+                 (dict if "candidate_ready" in observed_phases else type(None)),
+                 "invalid_forward_journal")
         seen: list[str] = []
         for event in events:
             _require(type(event) is dict and set(event) == {"phase", "at", "evidence"}
@@ -119,6 +124,8 @@ class ForwardJournal:
         _require(record["phase"] == seen[-1], "invalid_forward_journal")
         if record["capture"] is not None:
             self._validate_capture(record["capture"])
+        if record["candidate"] is not None:
+            self._validate_candidate(record["candidate"])
         return record
 
     def _validate_capture(self, capture: object) -> None:
@@ -139,6 +146,28 @@ class ForwardJournal:
                  and all(type(capture[key]) is int and 0 <= capture[key] <= 10000
                          for key in ("artifactCount", "originCount")),
                  "invalid_forward_capture_receipt")
+
+    def _validate_candidate(self, candidate: object) -> None:
+        _require(type(candidate) is dict and set(candidate) == {
+            "directory", "imageId", "containerIds", "baselineSha256",
+            "caddySha256"}, "invalid_forward_candidate_receipt")
+        identity = ip_forward_identity.read(
+            self.identity_path, config=self.config,
+            successor_revision=self.revision)
+        ids = candidate["containerIds"]
+        _require(candidate["directory"] == identity["candidateDirectory"]
+                 and candidate["imageId"] == identity["successorImageId"]
+                 and type(ids) is dict and set(ids) == set(ip_forward_identity.ROLES)
+                 and all(type(value) is str and len(value) == 64
+                         and all(character in "0123456789abcdef"
+                                 for character in value) for value in ids.values())
+                 and len(set(ids.values())) == len(ids)
+                 and not set(ids.values()) & set(identity["containerIds"].values())
+                 and all(type(candidate[key]) is str and len(candidate[key]) == 64
+                         and all(character in "0123456789abcdef"
+                                 for character in candidate[key])
+                         for key in ("baselineSha256", "caddySha256")),
+                 "invalid_forward_candidate_receipt")
 
     def _write(self, record: dict[str, object]) -> None:
         _private_directory(self.config.state_dir)
@@ -171,13 +200,15 @@ class ForwardJournal:
         record: dict[str, object] = {
             "format": FORMAT, "successorRevision": self.revision,
             "identitySha256": digest, "phase": "prepared", "capture": None,
+            "candidate": None,
             "events": [{"phase": "prepared", "at": _utc_now(), "evidence": {}}],
         }
         self._write(record)
         return self.read()
 
     def advance(self, phase: str, *, evidence: dict[str, object] | None = None,
-                capture: dict[str, object] | None = None) -> dict[str, object]:
+                capture: dict[str, object] | None = None,
+                candidate: dict[str, object] | None = None) -> dict[str, object]:
         record = self.read()
         _require(record is not None, "forward_journal_missing")
         previous = record["phase"]
@@ -194,6 +225,11 @@ class ForwardJournal:
             record["capture"] = capture
         else:
             _require(capture is None, "unexpected_forward_capture")
+        if phase == "candidate_ready":
+            self._validate_candidate(candidate)
+            record["candidate"] = candidate
+        else:
+            _require(candidate is None, "unexpected_forward_candidate")
         if phase == "accepted":
             _require(previous == "awaiting_acceptance",
                      "invalid_forward_phase_transition")

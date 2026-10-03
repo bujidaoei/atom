@@ -64,6 +64,14 @@ class ForwardJournalTest(TestCase):
                     "manifestSha256": "e" * 64, "caddySha256": "f" * 64,
                     "cosInventorySha256": "a" * 64, "artifactCount": 62,
                     "originCount": 72})
+            elif phase == "candidate_ready":
+                self.log.advance(phase, candidate={
+                    "directory": self.receipt["candidateDirectory"],
+                    "imageId": self.receipt["successorImageId"],
+                    "containerIds": {role: f"{index + 100:064x}"
+                                     for index, role in enumerate(identity.ROLES)},
+                    "baselineSha256": "b" * 64,
+                    "caddySha256": "c" * 64})
             else:
                 self.log.advance(phase)
             if phase == last:
@@ -115,6 +123,22 @@ class ForwardJournalTest(TestCase):
         with self.assertRaisesRegex(journal.JournalError,
                                     "insecure_forward_journal"):
             self.log.read()
+
+    def test_candidate_handoff_requires_exact_new_ids_and_baseline(self):
+        self._through("candidate_intent")
+        bad = {"directory": self.receipt["candidateDirectory"],
+               "imageId": self.receipt["successorImageId"],
+               "containerIds": dict(self.receipt["containerIds"]),
+               "baselineSha256": "b" * 64, "caddySha256": "c" * 64}
+        with self.assertRaisesRegex(journal.JournalError,
+                                    "invalid_forward_candidate_receipt"):
+            self.log.advance("candidate_ready", candidate=bad)
+        self.assertEqual(self.log.read()["phase"], "candidate_intent")
+        good = dict(bad)
+        good["containerIds"] = {role: f"{index + 100:064x}"
+                                for index, role in enumerate(identity.ROLES)}
+        self.log.advance("candidate_ready", candidate=good)
+        self.assertEqual(self.log.read()["candidate"]["baselineSha256"], "b" * 64)
 
 
 if __name__ == "__main__":
