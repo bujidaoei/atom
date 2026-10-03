@@ -237,11 +237,23 @@ def _maintenance_caddyfile(address: str, acme_directory: str) -> bytes:
     except ValueError:
         valid = False
     _require(valid, "invalid_maintenance_config")
-    return ("{\n  default_sni " + address + "\n}\n\n" + address + " {\n"
+    return ("{\n  default_sni " + address + "\n  grace_period 5s\n}\n\n" + address + " {\n"
             "  tls {\n    issuer acme {\n      dir " + acme_directory + "\n"
             "      profile shortlived\n      disable_tlsalpn_challenge\n"
             "    }\n  }\n  header Cache-Control \"no-store\"\n"
             "  respond \"正在更新，请稍后刷新\" 503\n}\n").encode("utf-8")
+
+
+def _bounded_ingress_grace(base: bytes) -> bool:
+    """Require a finite drain for clients already connected before a reload."""
+    if not isinstance(base, bytes):
+        return False
+    try:
+        opening, _remainder = base.decode("utf-8").split("\n}\n", 1)
+    except (UnicodeError, ValueError):
+        return False
+    return (opening.startswith("{\n")
+            and "grace_period 5s" in {line.strip() for line in opening.splitlines()[1:]})
 
 
 def _write_caddy_inputs(candidate: Path,

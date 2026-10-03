@@ -327,6 +327,9 @@ def _inspect_locked(*, config: protected_cutover.CutoverConfig,
                  and not (directory / "Caddyfile.base").is_symlink()
                  and not (directory / "Caddyfile").is_symlink(),
                  "active_ingress_file_invalid")
+        if successor_source is not None:
+            _require(ip_cutover_apply._bounded_ingress_grace(base),
+                     "active_ingress_unbounded_grace")
         expected = render_ip_routes(base.decode("utf-8"), routes,
             IpIngressConfig(publication["ATOM_PUBLIC_IP"],
                             publication["ATOM_PREVIEW_UPSTREAM"],

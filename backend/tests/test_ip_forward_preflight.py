@@ -112,6 +112,21 @@ class ForwardPreflightTest(unittest.TestCase):
                 self.assertEqual(result["containerIds"], ids)
                 self.assertFalse(load_publication.call_args.kwargs[
                     "require_template_image"])
+                with patch.object(module, "_target", return_value={
+                        "revision": "e" * 40, "imageId": IMAGE}):
+                    with self.assertRaisesRegex(module.ForwardPreflightError,
+                                                "active_ingress_unbounded_grace"):
+                        module._inspect_locked(
+                            config=config, publication_file=root / "publication.env",
+                            revision=revision, successor_source=root,
+                            successor_revision="e" * 40, successor_image=IMAGE)
+                    (caddy / "Caddyfile.base").write_bytes(
+                        b"{\n  grace_period 5s\n}\nbase")
+                    successor = module._inspect_locked(
+                        config=config, publication_file=root / "publication.env",
+                        revision=revision, successor_source=root,
+                        successor_revision="e" * 40, successor_image=IMAGE)
+                    self.assertEqual(successor["successor"]["imageId"], IMAGE)
                 services.return_value = dict(ids, api="f" * 64)
                 with self.assertRaisesRegex(module.ForwardPreflightError,
                                             "active_forward_container_identity_mismatch"):

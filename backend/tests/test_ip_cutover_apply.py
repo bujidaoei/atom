@@ -57,6 +57,10 @@ class CutoverApplyTest(unittest.TestCase):
             self.assertEqual(active.read_bytes(), maintenance)
             self.assertIn(b"respond", maintenance)
             self.assertIn(b"503", maintenance)
+            self.assertIn(b"  grace_period 5s\n", maintenance)
+            self.assertTrue(module._bounded_ingress_grace(maintenance))
+            self.assertFalse(module._bounded_ingress_grace(
+                maintenance.replace(b"  grace_period 5s\n", b"")))
             self.assertNotIn(b"reverse_proxy atom-candidate", maintenance)
             self.assertEqual((root / "caddy" / "Caddyfile.console").read_bytes(), original)
             module._promote_console_base(root)
