@@ -1,6 +1,8 @@
 """Rollback protects preserved container IDs before any candidate removal."""
 
+from contextlib import nullcontext, redirect_stdout
 import importlib.util
+import io
 from pathlib import Path
 import sys
 import unittest
@@ -67,6 +69,56 @@ class FakeDocker:
 
 
 class RollbackTest(unittest.TestCase):
+    def test_manual_rollback_preserves_forward_phase_history(self):
+        class Ledger:
+            latest = {"phaseHistory": [{"phase": "awaiting_acceptance"}]}
+
+            def __init__(self, _directory, _revision):
+                pass
+
+            def read(self):
+                return Ledger.latest
+
+            def write(self, *, outcome, image_id, details):
+                Ledger.latest = {"outcome": outcome, "imageId": image_id, **details}
+
+        identity = IDENTITY | {"revision": "f" * 40, "stateDirectory": "/private"}
+        with patch.object(module, "host_lock", return_value=nullcontext()), patch.object(
+                module, "_identity", return_value=identity), patch.object(
+                module, "PhaseLedger", Ledger), patch.object(module, "rollback") as recover, \
+                redirect_stdout(io.StringIO()):
+            result = module.main(["rollback", "--identity", "/private/identity.json",
+                                  "--console-url", "https://159.75.231.98/atom/"])
+        self.assertEqual(result, 0)
+        recover.assert_called_once()
+        self.assertEqual([event["phase"] for event in Ledger.latest["phaseHistory"]],
+                         ["awaiting_acceptance", "rollback_started", "rolled_back"])
+
+    def test_failed_manual_rollback_retains_forward_history(self):
+        class Ledger:
+            latest = {"phaseHistory": [{"phase": "awaiting_acceptance"}]}
+
+            def __init__(self, _directory, _revision):
+                pass
+
+            def read(self):
+                return Ledger.latest
+
+            def write(self, *, outcome, image_id, details):
+                Ledger.latest = {"outcome": outcome, "imageId": image_id, **details}
+
+        identity = IDENTITY | {"revision": "f" * 40, "stateDirectory": "/private"}
+        with patch.object(module, "host_lock", return_value=nullcontext()), patch.object(
+                module, "_identity", return_value=identity), patch.object(
+                module, "PhaseLedger", Ledger), patch.object(
+                module, "rollback", side_effect=module.RollbackError("restore_failed")), \
+                redirect_stdout(io.StringIO()), patch("sys.stderr", io.StringIO()):
+            result = module.main(["rollback", "--identity", "/private/identity.json",
+                                  "--console-url", "https://159.75.231.98/atom/"])
+        self.assertEqual(result, 2)
+        self.assertEqual([event["phase"] for event in Ledger.latest["phaseHistory"]],
+                         ["awaiting_acceptance", "rollback_started", "rollback_failed"])
+
     def test_namespaced_identity_uses_only_its_own_containers(self):
         prefix = "atom-rollback-drill"
         names = {role: prefix + "-" + role for role in module.DEFAULT_NAMES}

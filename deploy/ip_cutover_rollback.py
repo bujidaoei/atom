@@ -8,6 +8,7 @@ candidate or starts the old pair. The new data directory remains for diagnosis.
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
@@ -55,6 +56,18 @@ def _rollback_name(name: str) -> str:
 
 class RollbackError(RuntimeError):
     """Stable non-secret code suitable for a phase receipt."""
+
+
+def _record_phase(ledger: PhaseLedger, *, outcome: str,
+                  image_id: str, details: dict[str, object]) -> None:
+    previous = ledger.read()
+    history = [] if previous is None else previous.get("phaseHistory", [])
+    if type(history) is not list or len(history) >= 32:
+        raise RollbackError("invalid_phase_history")
+    event = {"phase": outcome, "at": datetime.now(timezone.utc).isoformat(),
+             "details": details}
+    ledger.write(outcome=outcome, image_id=image_id,
+                 details={**details, "phaseHistory": [*history, event]})
 
 
 def _run(*args: str, timeout: int = 120, allow_missing: bool = False) -> str | None:
@@ -353,17 +366,20 @@ def main(argv: list[str] | None = None) -> int:
                 raise RollbackError("missing_console_probe")
             identity = _identity(arguments.identity)
             ledger = PhaseLedger(Path(identity["stateDirectory"]), identity["revision"])
-            ledger.write(outcome="rollback_started", image_id=identity["candidateImageId"],
-                         details={"oldImageId": identity["oldImageId"]})
+            _record_phase(ledger, outcome="rollback_started",
+                          image_id=identity["candidateImageId"],
+                          details={"oldImageId": identity["oldImageId"]})
             try:
                 rollback(identity, console_url=arguments.console_url,
                          ca_file=arguments.ca_file)
             except RollbackError as exc:
-                ledger.write(outcome="rollback_failed", image_id=identity["candidateImageId"],
-                             details={"reason": str(exc)})
+                _record_phase(ledger, outcome="rollback_failed",
+                              image_id=identity["candidateImageId"],
+                              details={"reason": str(exc)})
                 raise
-            ledger.write(outcome="rolled_back", image_id=identity["candidateImageId"],
-                         details={"oldImageId": identity["oldImageId"]})
+            _record_phase(ledger, outcome="rolled_back",
+                          image_id=identity["candidateImageId"],
+                          details={"oldImageId": identity["oldImageId"]})
     except (RollbackError, CutoverError, OSError) as exc:
         print(str(exc) if isinstance(exc, (RollbackError, CutoverError))
               else "rollback_io_failed", file=sys.stderr)
