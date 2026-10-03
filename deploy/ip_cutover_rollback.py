@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 import re
 import stat
@@ -88,6 +89,54 @@ def _identity(path: Path) -> dict:
             or not isinstance(record["stateDirectory"], str)
             or not Path(record["stateDirectory"]).is_absolute()):
         raise RollbackError("invalid_rollback_identity")
+    return record
+
+
+def capture_identity(path: Path, *, revision: str, candidate_image: str) -> dict:
+    """Persist the current old IDs before a writer is stopped or renamed."""
+    if (not path.is_absolute() or not isinstance(revision, str)
+            or re.fullmatch(r"[0-9a-f]{40}", revision) is None
+            or not isinstance(candidate_image, str)
+            or IMAGE.fullmatch(candidate_image) is None):
+        raise RollbackError("invalid_identity_capture")
+    parent = path.parent
+    info = parent.stat()
+    if (not stat.S_ISDIR(info.st_mode) or info.st_uid != 0
+            or stat.S_IMODE(info.st_mode) != 0o700):
+        raise RollbackError("insecure_identity_directory")
+    containers = {}
+    old_image = None
+    for role, name in CONTAINERS.items():
+        item = _inspect(name)
+        if (item is None or item.get("State", {}).get("Running") is not True
+                or not isinstance(item.get("Id"), str)
+                or IDENTITY.fullmatch(item["Id"]) is None
+                or _inspect(ROLLBACK_NAMES[role]) is not None):
+            raise RollbackError("old_container_not_ready")
+        if role != "caddy":
+            if old_image is None:
+                old_image = item.get("Image")
+            elif old_image != item.get("Image"):
+                raise RollbackError("old_pair_image_mismatch")
+        containers[role] = item["Id"]
+    if (not isinstance(old_image, str) or IMAGE.fullmatch(old_image) is None
+            or old_image == candidate_image or any(_inspect(name) is not None for name in EXTRA)):
+        raise RollbackError("candidate_not_isolated")
+    record = {"schemaVersion": 1, "revision": revision, "oldImageId": old_image,
+              "candidateImageId": candidate_image, "containers": containers,
+              "stateDirectory": str(parent)}
+    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL
+                         | getattr(os, "O_NOFOLLOW", 0), 0o600)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            json.dump(record, stream, sort_keys=True, separators=(",", ":"))
+            stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        _identity(path)
+    except BaseException:
+        path.unlink(missing_ok=True)
+        raise
     return record
 
 
@@ -226,12 +275,24 @@ def rollback(identity: dict, *, console_url: str) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("mode", choices=("capture", "rollback"))
     parser.add_argument("--identity", required=True, type=Path)
-    parser.add_argument("--console-url", required=True)
+    parser.add_argument("--console-url")
+    parser.add_argument("--revision")
+    parser.add_argument("--candidate-image")
     arguments = parser.parse_args(argv)
     try:
-        identity = _identity(arguments.identity)
         with host_lock():
+            if arguments.mode == "capture":
+                if arguments.revision is None or arguments.candidate_image is None:
+                    raise RollbackError("missing_capture_inputs")
+                capture_identity(arguments.identity, revision=arguments.revision,
+                                 candidate_image=arguments.candidate_image)
+                print("old_container_identity_recorded")
+                return 0
+            if arguments.console_url is None:
+                raise RollbackError("missing_console_probe")
+            identity = _identity(arguments.identity)
             ledger = PhaseLedger(Path(identity["stateDirectory"]), identity["revision"])
             ledger.write(outcome="rollback_started", image_id=identity["candidateImageId"],
                          details={"oldImageId": identity["oldImageId"]})
