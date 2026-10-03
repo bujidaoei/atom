@@ -1,10 +1,12 @@
 # Protected forward recovery after publication writes
 
-Status: design contract; **not implemented or production-accepted**.
+Status: read-only current-generation gate implemented; forward transaction **not implemented or production-accepted**.
 
 ## Trigger and source of truth
 
 When the old-schema rollback fence reports `candidate_has_unmerged_writes`, the active schema18 candidate is the only authoritative application and broker state. The preserved schema10 pair is an audit/recovery artifact, never a source for the next deployment. A new operation must identify the active candidate by exact container IDs, image digest, database schema, data and broker bind paths, origin ledger and current release generation before stopping a writer.
+
+`deploy/ip_forward_preflight.py` is the implemented read-only gate. It checks the active phase/identity receipts, six live service identities, image labels, binds, schema/idle-writer state, complete project-origin allocations, generated Caddy bytes and all published port binds under the host lock. Its optional successor inputs require a clean exact Git revision and matching image label. The old private publication template still names the schema10 bind paths; the gate uses live Docker mounts and the current-generation receipt for data authority. A passing result does not exclude a writer after the lock is released. The future transaction must repeat the gate and quiesce writers before capturing a backup. The historical cutover Caddy digest is not the current digest after new project origins are assigned.
 
 ## Transaction
 
