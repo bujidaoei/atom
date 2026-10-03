@@ -110,8 +110,8 @@ class ForwardWritersTest(unittest.TestCase):
             with self.assertRaisesRegex(module.WriterError, "writer_stop_failed"):
                 module.stop(config, fake.ids, source)
         self.assertEqual(fake.actions, [("stop", "verifier"), ("stop", "preview"),
-                                        ("stop", "public"), ("start", "public"),
-                                        ("start", "preview"), ("start", "verifier")])
+                                        ("stop", "public"), ("start", "verifier"),
+                                        ("start", "preview"), ("start", "public")])
         self.assertTrue(all(fake.running.values()))
 
     def test_late_identity_mismatch_recovers_previously_stopped_writers(self):
@@ -125,7 +125,7 @@ class ForwardWritersTest(unittest.TestCase):
         self.assertTrue(all(fake.running.values()))
         self.assertEqual(fake.actions, [("stop", role) for role in module.STOP_ORDER[:-1]]
                          + [("start", role) for role in
-                            reversed(module.STOP_ORDER[:-1])])
+                            ("verifier", "broker", "preview", "public")])
 
     def test_post_stop_database_check_failure_restores_all_writers(self):
         fake = FakeDocker()
@@ -135,7 +135,26 @@ class ForwardWritersTest(unittest.TestCase):
             with self.assertRaisesRegex(module.WriterError, "writer_stop_failed"):
                 module.stop(config, fake.ids, source)
         self.assertEqual(fake.actions, [("stop", role) for role in module.STOP_ORDER]
-                         + [("start", role) for role in reversed(module.STOP_ORDER)])
+                         + [("start", role) for role in
+                            ("verifier", "api", "broker", "preview", "public")])
+        self.assertTrue(all(fake.running.values()))
+
+    def test_stop_failure_after_api_shutdown_starts_dependencies_first(self):
+        fake = FakeDocker(fail_role="api", stop_before_failure=True)
+        config, source, inspect, database, run = self.setup(fake)
+
+        def healthy(_config, role, _identifier, **_kwargs):
+            if role == "api":
+                self.assertTrue(fake.running["broker"])
+                self.assertTrue(fake.running["verifier"])
+
+        with inspect, database, run, patch.object(module, "_healthy",
+                                                   side_effect=healthy):
+            with self.assertRaisesRegex(module.WriterError,
+                                        "writer_stop_failed"):
+                module.stop(config, fake.ids, source)
+        self.assertEqual(fake.actions[5:], [("start", role) for role in
+            ("verifier", "api", "broker", "preview", "public")])
         self.assertTrue(all(fake.running.values()))
 
     def test_interrupted_stop_finishes_exact_ids_without_restarting_them(self):

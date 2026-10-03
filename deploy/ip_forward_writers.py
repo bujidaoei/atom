@@ -136,10 +136,16 @@ def stop(config: protected_cutover.CutoverConfig,
                                     broker=True)
     except BaseException as failure:
         try:
-            for role in reversed(attempted):
+            startup_order = ("verifier", "api", "broker", "preview", "public")
+            for role in startup_order:
+                if role not in attempted:
+                    continue
                 item = _identity(config, role, ids[role], running=None)
                 if item.get("State", {}).get("Running") is not True:
                     _run(config.docker, "container", "start", ids[role], timeout=45)
+            for role in startup_order:
+                if role not in attempted:
+                    continue
                 _healthy(config, role, ids[role])
         except BaseException as recovery_failure:
             raise WriterError("writer_recovery_failed") from recovery_failure
