@@ -2,7 +2,7 @@
 
 **Feature Branch**: `codex/009-publish-experience`
 **Created**: 2026-10-02
-**Status**: IP-only isolation, owner snapshot publication, proof-authenticated streaming and cross-port denial deployed; timer recovery of an interrupted transaction passed, while actual host-restart recovery, remaining fault branches and certificate renewal remain open
+**Status**: IP-only isolation, owner snapshot publication, proof-authenticated streaming, cross-port denial and revision-bound race adoption deployed; timer and controlled host-restart recovery passed, while literal power loss, remaining browser gates and observed certificate renewal remain open
 **Input**: Repair check HTTP500, restore simple publication, make publishing a comprehensible history of restorable published snapshots; retain Atom runtime.
 
 ## User Scenarios & Testing
