@@ -1,6 +1,6 @@
 """Focused forward-cutover failover and bounded preflight tests."""
 
-from contextlib import nullcontext
+from contextlib import ExitStack, nullcontext
 from email.message import Message
 import importlib.util
 from pathlib import Path
@@ -223,6 +223,141 @@ class CutoverApplyTest(unittest.TestCase):
 
     def test_failed_recovery_records_retryable_outcome(self):
         self._failure_case(True)
+
+    def _late_failure_case(self, failed_phase: str):
+        """Exercise the real forward control flow with disposable phase receipts."""
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            config = SimpleNamespace(state_dir=root, backup_root=root,
+                                     data=root / "old-data",
+                                     broker_data=root / "old-broker-data",
+                                     api="old-api", broker="old-broker",
+                                     network="test-network", app_schema=10,
+                                     broker_schema=1)
+            inputs = module.Inputs(root / "protected.json", root / "publication.env",
+                                   root / "source", REVISION, IMAGE, "172.19.0.4")
+            backup = root / ("pre-" + REVISION[:12])
+            candidate = root / ("candidate-" + REVISION[:12])
+            old_image = "sha256:" + "a" * 64
+            identity = {"containers": {"caddy": "1" * 64}}
+            publication = {
+                "ATOM_PUBLIC_IP": "159.75.231.98",
+                "ATOM_CADDY_IMAGE": "caddy:2",
+                "ATOM_STORAGE_ENV_FILE": str(root / "storage.env"),
+                "ATOM_VERIFIER_ENV_FILE": str(root / "verifier.env"),
+                "ATOM_VERIFIER_NETWORK": "verifier-private",
+                "ATOM_VERIFIER_WORKER_IMAGE": "worker:fixed",
+                "ATOM_VERIFIER_POLICY_PATH": str(root / "policy.json"),
+                "ATOM_CANDIDATE_API_IP": "172.19.0.8",
+                "ATOM_FIRST_PORT": "20000", "ATOM_LAST_PORT": "20127",
+            }
+            events = []
+            receipt = {"status": "verified", "manifestSha256": "2" * 64}
+
+            def backup_command(args, **_kwargs):
+                action = args[2]
+                if action == "capture":
+                    backup.mkdir()
+                    (backup / "manifest.json").write_text(
+                        '{"entries":{"data":{"atom.db":{"sha256":"'
+                        + "3" * 64 + '"}}},"counts":{"data":'
+                        '{"projects":1,"revision_records":1,"revision_artifacts":1}}}',
+                        encoding="utf-8")
+                elif action == "restore":
+                    candidate.mkdir()
+                return receipt
+
+            def image_python(_image, _data, command, _args, **_kwargs):
+                if command == "app.publication_prepare":
+                    return {"schema": 18, "originPairs": 1,
+                            "databaseSha256": "4" * 64}
+                return {"artifact_count": 1, "inventory_sha256": "5" * 64}
+
+            def phase(name):
+                events.append(name)
+                if name == failed_phase:
+                    raise module.ApplyError(name + "_injected")
+
+            with ExitStack() as stack:
+                def replace(owner, name, **kwargs):
+                    return stack.enter_context(patch.object(owner, name, **kwargs))
+
+                replace(module.os, "geteuid", return_value=0, create=True)
+                replace(module.protected_cutover, "load_config", return_value=config)
+                replace(module.protected_cutover, "host_lock", return_value=nullcontext())
+                replace(module.protected_cutover, "preflight", return_value={
+                    "oldImageId": old_image, "backupDirectory": str(backup)})
+                replace(module.protected_cutover, "PhaseLedger", new=Ledger)
+                replace(module, "_publication_inputs", return_value=publication)
+                replace(module, "_caddy_source", return_value=root / "Caddyfile")
+                replace(module.ip_cutover_rollback, "capture_identity",
+                        return_value=identity)
+                replace(module, "_hash", return_value="6" * 64)
+                replace(module, "_command", return_value="")
+                replace(module, "_json_command", side_effect=backup_command)
+                replace(module, "_image_python", side_effect=image_python)
+                replace(module, "_legacy_candidates", return_value=[{"slug": "old"}])
+                replace(module, "_write_caddy_inputs")
+                replace(module, "_compose_environment", return_value=root / "compose.env")
+                replace(module, "_private_directory",
+                        side_effect=lambda path: path.mkdir(exist_ok=True))
+                replace(module.ip_cutover_env, "build")
+                replace(module, "_compose")
+                replace(module, "_health")
+                replace(module, "_start_candidate_pair")
+                replace(module, "_ingress", return_value="7" * 64)
+                replace(module, "_maintenance_probe",
+                        side_effect=lambda _ip: phase("maintenance_probe"))
+                replace(module, "_import_legacy",
+                        side_effect=lambda *_args, **_kwargs:
+                        events.append("legacy_import") or [{}])
+                replace(module.candidate_write_fence, "capture_baseline",
+                        side_effect=lambda *_args, **_kwargs:
+                        events.append("baseline") or "8" * 64)
+                replace(module, "_promote_console_base",
+                        side_effect=lambda _candidate: phase("promote_console"))
+                replace(module, "_reconcile_ingress",
+                        side_effect=lambda *_args, **_kwargs:
+                        phase("reconcile_console") or "9" * 64)
+                replace(module.ip_cutover_rollback, "_await_console")
+                recover = replace(module.ip_cutover_rollback, "rollback",
+                                  side_effect=lambda *_args, **_kwargs:
+                                  events.append("rollback"))
+                with self.assertRaisesRegex(module.ApplyError,
+                                            "cutover_rolled_back"):
+                    module.apply(inputs)
+                recover.assert_called_once_with(
+                    identity, console_url="https://159.75.231.98/atom/")
+
+            phases = [record[0] for record in Ledger.records]
+            self.assertEqual(phases[-1], "rolled_back")
+            self.assertNotIn("awaiting_acceptance", phases)
+            self.assertEqual(Ledger.records[-1][2]["reason"],
+                             failed_phase + "_injected")
+            self.assertEqual([event["phase"] for event in
+                              Ledger.records[-1][2]["phaseHistory"]], phases)
+            if failed_phase == "maintenance_probe":
+                self.assertNotIn("candidate_state_sealed", phases)
+                self.assertNotIn("legacy_import", events)
+                self.assertNotIn("promote_console", events)
+            elif failed_phase == "promote_console":
+                self.assertIn("candidate_state_sealed", phases)
+                self.assertEqual(events, ["maintenance_probe", "legacy_import",
+                                          "baseline", "promote_console", "rollback"])
+            else:
+                self.assertIn("candidate_state_sealed", phases)
+                self.assertEqual(events, ["maintenance_probe", "legacy_import",
+                                          "baseline", "promote_console",
+                                          "reconcile_console", "rollback"])
+
+    def test_maintenance_probe_failure_restores_old_pair(self):
+        self._late_failure_case("maintenance_probe")
+
+    def test_promotion_failure_after_baseline_restores_old_pair(self):
+        self._late_failure_case("promote_console")
+
+    def test_console_reconcile_failure_after_promotion_restores_old_pair(self):
+        self._late_failure_case("reconcile_console")
 
 
 if __name__ == "__main__":
