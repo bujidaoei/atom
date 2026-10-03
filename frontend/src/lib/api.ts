@@ -59,6 +59,38 @@ export function withBase(path: string): string {
   return `${BASE}${path}`;
 }
 
+/** Native EventSource cannot send the proof header required by durable sessions. */
+export async function openProjectStream(
+  projectId: string, after: number, signal: AbortSignal,
+): Promise<ReadableStream<Uint8Array>> {
+  let response: Response;
+  try {
+    const proof = readConsoleProof();
+    response = await fetch(withBase(
+      `/api/projects/${encodeURIComponent(projectId)}/events?after=${after}`), {
+      method: "GET",
+      credentials: "include",
+      signal,
+      headers: {
+        Accept: "text/event-stream",
+        ...(proof ? { "X-Atom-Console-Proof": proof } : {}),
+      },
+    });
+  } catch {
+    throw new ApiError(0, "实时连接失败，请检查网络后重试。");
+  }
+  if (response.status === 401) {
+    clearConsoleProof();
+    onUnauthorized?.();
+    throw new ApiError(401, "登录态已失效，请重新登录。");
+  }
+  if (!response.ok || !response.headers.get("content-type")?.includes("text/event-stream")
+      || !response.body) {
+    throw new ApiError(response.status, "实时连接不可用，请稍后重试。");
+  }
+  return response.body;
+}
+
 export class ApiError extends Error {
   readonly status: number;
 

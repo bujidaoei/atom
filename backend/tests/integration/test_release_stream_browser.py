@@ -28,6 +28,7 @@ import uvicorn
 from app import events as events_module
 from app.artifacts import ArtifactStore
 from app.config import get_settings
+from app.console_auth import proof_for_new_session
 from app.migrations import migrate
 from app.revisions import RevisionRepository
 from app.routers import auth, projects, verifications
@@ -107,7 +108,9 @@ def test_release_workbench_keeps_real_event_stream_and_recovers(
     store = ArtifactStore(root)
     assert store.put(payload) == artifact
 
+    monkeypatch.setenv('ATOM_CONSOLE_PROOF_REQUIRED', 'true')
     app, token, engine = _configured_api(path, store, intent, tmp_path, monkeypatch)
+    proof = proof_for_new_session(token)
     @contextmanager
     def event_session():
         with Session(engine) as session:
@@ -137,6 +140,13 @@ def test_release_workbench_keeps_real_event_stream_and_recovers(
         await events_module.bus.publish('project', 'stream.resync', {})
         return {'ok': True}
 
+    @app.post('/__test/emit-stream')
+    async def emit_stream():
+        await events_module.bus.publish('project', 'message.completed',
+                                        {'text': 'stream-live-marker'},
+                                        run_id='stream-check', role='alex')
+        return {'ok': True}
+
     outer = FastAPI()
     outer.mount('/atom', app)
     key, cert = _certificate(tmp_path)
@@ -156,6 +166,12 @@ def test_release_workbench_keeps_real_event_stream_and_recovers(
             cleanup.callback(context.close)
             context.add_cookies([{'name': '__Host-atom_console', 'value': token,
                 'url': origin, 'secure': True, 'httpOnly': True, 'sameSite': 'Lax'}])
+            without_proof = context.request.get(
+                origin + '/atom/api/projects/project/events?after=0')
+            assert without_proof.status == 401
+            context.add_init_script(
+                script="localStorage.setItem('atom.console.proof.v1', "
+                       + repr(proof) + ")")
             page = context.new_page()
             page.on('pageerror', lambda error: errors.append(str(error)))
             page.on('response', lambda response: stream_responses.append(response)
@@ -170,6 +186,9 @@ def test_release_workbench_keeps_real_event_stream_and_recovers(
                 page.wait_for_timeout(100)
             assert stream_responses and stream_responses[0].status == 200
             assert 'text/event-stream' in stream_responses[0].headers['content-type']
+            emitted = page.request.post(origin + '/atom/__test/emit-stream')
+            assert emitted.status == 200 and emitted.json() == {'ok': True}
+            page.get_by_text('stream-live-marker').wait_for(timeout=10000)
 
             fault = page.request.post(origin + '/atom/__test/close-stream')
             assert fault.status == 200 and fault.json() == {'ok': True}
