@@ -1,4 +1,4 @@
-"""Real Chromium and TLS on one IP with separate immutable project ports."""
+"""Real browsers and TLS on one IP with separate immutable project ports."""
 from datetime import datetime, timedelta, timezone
 from ipaddress import ip_address
 import socket
@@ -10,7 +10,7 @@ from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import NameOID
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import Error as PlaywrightError, sync_playwright
 import pytest
 import uvicorn
 from sqlalchemy import create_engine
@@ -81,6 +81,22 @@ def _start(app, listener, key, cert):
         assert thread.is_alive() and time.monotonic() < deadline
         time.sleep(.02)
     return server, thread
+
+
+def _assert_private_navigation_denied(page, context, url, browser_name):
+    try:
+        response = page.goto(url)
+    except PlaywrightError as error:
+        # Firefox reports an empty denied navigation as a network error.
+        # Independently require the authenticated context's HTTP request to
+        # receive the service's explicit 404 before accepting that behavior.
+        if browser_name != 'firefox' or 'NS_ERROR_NET_EMPTY_RESPONSE' not in str(error):
+            raise
+    else:
+        assert response is not None and response.status == 404
+        assert page.locator('body').inner_text() == ''
+    assert context.request.get(url).status == 404
+    assert page.locator('#project').count() == 0
 
 
 def test_browser_preview_exchange_storage_and_public_port_separation(historical, tmp_path):
@@ -177,7 +193,9 @@ def test_browser_preview_exchange_storage_and_public_port_separation(historical,
             listener.close()
 
 
-def test_two_projects_have_independent_browser_storage_and_preview_authority(historical, tmp_path):
+@pytest.mark.parametrize('browser_name', ('chromium', 'firefox', 'webkit'))
+def test_two_projects_have_independent_browser_storage_and_preview_authority(
+        historical, tmp_path, browser_name):
     path, _original_store, _intent, _source, _displaced = historical
     for version in range(15, 19):
         migrate(path, tmp_path / f'before-two-v{version}.db', target_version=version)
@@ -231,7 +249,9 @@ def test_two_projects_have_independent_browser_storage_and_preview_authority(his
             services.append(_start(preview if purpose == 'preview' else public,
                                    listener, key, cert))
         with sync_playwright() as playwright:
-            browser = playwright.chromium.launch()
+            browser_type = getattr(playwright, browser_name)
+            browser = browser_type.launch(
+                args=['--no-proxy-server'] if browser_name == 'chromium' else [])
             context = browser.new_context(ignore_https_errors=True, service_workers='block')
             try:
                 owner = context.new_page()
@@ -251,14 +271,18 @@ def test_two_projects_have_independent_browser_storage_and_preview_authority(his
                     page.reload()
                     assert page.locator('#project').inner_text() == expected
                 foreign_preview = context.new_page()
-                foreign_preview.goto(f'https://127.0.0.1:{b.preview_port}/')
-                assert foreign_preview.locator('body').inner_text() == ''
+                foreign_url = f'https://127.0.0.1:{b.preview_port}/'
+                _assert_private_navigation_denied(foreign_preview, context,
+                                                  foreign_url, browser_name)
                 # The browser sends IP-scoped cookies to every port. A forged
                 # cookie from project B must not grant access to project B's preview.
-                public_b.evaluate("document.cookie='__Host-atom_preview_" +
-                    str(b.preview_port) + "=forged; Secure; Path=/'")
-                foreign_preview.reload()
-                assert foreign_preview.locator('body').inner_text() == ''
+                forged_name = '__Host-atom_preview_' + str(b.preview_port)
+                public_b.evaluate("(name) => { document.cookie=name + '=forged; Secure; Path=/'; }",
+                                  forged_name)
+                assert any(cookie['name'] == forged_name and cookie['value'] == 'forged'
+                           for cookie in context.cookies([f'https://127.0.0.1:{b.public_port}/']))
+                _assert_private_navigation_denied(foreign_preview, context,
+                                                  foreign_url, browser_name)
                 assert owner.locator('#project').inner_text() == 'owner-a'
             finally:
                 context.close()
