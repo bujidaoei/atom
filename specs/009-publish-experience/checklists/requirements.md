@@ -6,4 +6,5 @@ Feature: ../spec.md | Reviewed: 2026-10-03
 - [x] Scope, assumptions and dependencies explicit.
 - [x] Acceptance covers optional checks, snapshot restoration, isolation and recovery.
 - [x] Operational old-schema rollback after new user writes is specified separately from owner-facing publication restore, with an explicit fail-closed outcome and test task.
+- [x] Protected activation distinguishes write-blocked console maintenance from live HTTPS content readiness before the candidate baseline is sealed.
 This is specification review only, not delivery acceptance.

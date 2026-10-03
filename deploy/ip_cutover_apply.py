@@ -19,10 +19,14 @@ from pathlib import Path
 import re
 import socket
 import sqlite3
+import ssl
 import stat
 import subprocess
 import sys
 import time
+from urllib.error import HTTPError, URLError
+from urllib.parse import urlsplit
+from urllib.request import HTTPSHandler, ProxyHandler, Request, build_opener
 
 import ip_cutover_env
 import ip_cutover_rollback
@@ -218,20 +222,90 @@ def _image_python(image: str, data: Path, module: str, args: list[str], *,
     return _json_command(command, timeout=timeout)
 
 
-def _write_caddy_inputs(candidate: Path) -> tuple[Path, Path]:
+def _maintenance_caddyfile(address: str, acme_directory: str) -> bytes:
+    """Serve project TLS origins while denying every console request."""
+    if not isinstance(address, str) or not isinstance(acme_directory, str):
+        raise ApplyError("invalid_maintenance_config")
+    try:
+        parsed_address = ipaddress.ip_address(address)
+        directory = urlsplit(acme_directory)
+        valid = (parsed_address.version == 4 and parsed_address.compressed == address
+                 and re.fullmatch(r"https://[A-Za-z0-9./:_-]+", acme_directory) is not None
+                 and directory.scheme == "https" and directory.hostname is not None
+                 and directory.port is None and directory.username is None
+                 and directory.password is None and bool(directory.path))
+    except ValueError:
+        valid = False
+    _require(valid, "invalid_maintenance_config")
+    return ("{\n  default_sni " + address + "\n}\n\n" + address + " {\n"
+            "  tls {\n    issuer acme {\n      dir " + acme_directory + "\n"
+            "      profile shortlived\n      disable_tlsalpn_challenge\n"
+            "    }\n  }\n  header Cache-Control \"no-store\"\n"
+            "  respond \"正在更新，请稍后刷新\" 503\n}\n").encode("utf-8")
+
+
+def _write_caddy_inputs(candidate: Path,
+                        publication: dict[str, str]) -> tuple[Path, Path]:
     directory = candidate / "caddy"
     _private_directory(directory)
     base = directory / "Caddyfile.base"
     active = directory / "Caddyfile"
-    contents = (candidate / "Caddyfile").read_bytes()
-    _require(0 < len(contents) <= 1024 * 1024, "invalid_old_caddyfile")
-    for path in (base, active):
+    console = directory / "Caddyfile.console"
+    original = (candidate / "Caddyfile").read_bytes()
+    _require(0 < len(original) <= 1024 * 1024, "invalid_old_caddyfile")
+    maintenance = _maintenance_caddyfile(publication["ATOM_PUBLIC_IP"],
+                                         publication["ATOM_ACME_DIRECTORY"])
+    for path, contents in ((console, original), (base, maintenance),
+                           (active, maintenance)):
         descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         with os.fdopen(descriptor, "wb") as stream:
             stream.write(contents)
             stream.flush()
             os.fsync(stream.fileno())
     return base, active
+
+
+def _maintenance_probe(address: str) -> None:
+    """Certificate-verified 443 must refuse both reads and writes before import."""
+    opener = build_opener(ProxyHandler({}), HTTPSHandler(context=ssl.create_default_context()))
+    for path, method in (("/atom/", "GET"), ("/atom/api/projects", "POST")):
+        try:
+            with opener.open(Request("https://" + address + path, method=method),
+                             timeout=5) as response:
+                status, headers = response.status, response.headers
+        except HTTPError as error:
+            status, headers = error.code, error.headers
+        except (URLError, TimeoutError, OSError, ssl.SSLError) as exc:
+            raise ApplyError("maintenance_probe_unavailable") from exc
+        _require(status == 503 and headers.get("Cache-Control") == "no-store"
+                 and not headers.get_all("Set-Cookie"),
+                 "maintenance_console_exposed")
+
+
+def _promote_console_base(candidate: Path) -> None:
+    """Atomically replace the maintenance base after a sealed candidate baseline."""
+    directory = candidate / "caddy"
+    base, console = directory / "Caddyfile.base", directory / "Caddyfile.console"
+    _require(base.is_file() and not base.is_symlink() and console.is_file()
+             and not console.is_symlink(), "candidate_caddy_config_missing")
+    contents = console.read_bytes()
+    _require(0 < len(contents) <= 1024 * 1024, "invalid_old_caddyfile")
+    temporary = directory / "Caddyfile.base.next"
+    descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(contents)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, base)
+        if os.name != "nt":
+            directory_fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def _legacy_rows(database: Path) -> list[tuple[str, str]]:
@@ -314,6 +388,11 @@ def _ingress(source: Path, compose_env: Path, candidate: Path,
     item = ip_cutover_rollback._inspect("atom-tls")
     _require(item is not None and item.get("State", {}).get("Running") is True,
              "candidate_caddy_unavailable")
+    return _reconcile_ingress(source, candidate, publication)
+
+
+def _reconcile_ingress(source: Path, candidate: Path,
+                       publication: dict[str, str]) -> str:
     environment = os.environ.copy()
     environment["PYTHONPATH"] = str(source / "backend")
     return _command([sys.executable, "-m", "app.ip_ingress_controller",
@@ -500,7 +579,7 @@ def apply(inputs: Inputs, *, rehearsal: bool = False) -> dict[str, object]:
                                       "candidateDirectory": str(candidate)})
                 return ledger.read()
 
-            _write_caddy_inputs(candidate)
+            _write_caddy_inputs(candidate, publication)
             compose_env = _compose_environment(publication, candidate,
                                                inputs.image_id,
                                                inputs.candidate_caddy_ip)
@@ -536,6 +615,15 @@ def apply(inputs: Inputs, *, rehearsal: bool = False) -> dict[str, object]:
             _record(ledger, outcome="candidate_pair_ready", image_id=inputs.image_id,
                          details={"candidateDirectory": str(candidate)})
 
+            maintenance_digest = _ingress(inputs.source, compose_env, candidate,
+                                          publication, config,
+                                          identity["containers"]["caddy"])
+            _require(re.fullmatch(r"[0-9a-f]{64}", maintenance_digest) is not None,
+                     "invalid_ingress_receipt")
+            _maintenance_probe(publication["ATOM_PUBLIC_IP"])
+            _record(ledger, outcome="content_ingress_ready", image_id=inputs.image_id,
+                         details={"caddySha256": maintenance_digest})
+
             imported = _import_legacy(legacy, image=inputs.image_id,
                                       data=candidate / "data", storage_env=storage_file,
                                       publication=publication)
@@ -548,11 +636,11 @@ def apply(inputs: Inputs, *, rehearsal: bool = False) -> dict[str, object]:
                          details={"candidateStateSha256": baseline_digest,
                                   "legacyImported": len(imported)})
 
-            ingress_digest = _ingress(inputs.source, compose_env, candidate,
-                                      publication, config,
-                                      identity["containers"]["caddy"])
+            _promote_console_base(candidate)
+            ingress_digest = _reconcile_ingress(inputs.source, candidate, publication)
             _require(re.fullmatch(r"[0-9a-f]{64}", ingress_digest) is not None,
                      "invalid_ingress_receipt")
+            ip_cutover_rollback._await_console(console_url)
             _record(ledger, outcome="ingress_ready", image_id=inputs.image_id,
                          details={"caddySha256": ingress_digest})
             _record(ledger, outcome="awaiting_acceptance", image_id=inputs.image_id,

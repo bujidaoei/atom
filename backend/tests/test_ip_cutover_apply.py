@@ -1,6 +1,7 @@
 """Focused forward-cutover failover and bounded preflight tests."""
 
 from contextlib import nullcontext
+from email.message import Message
 import importlib.util
 from pathlib import Path
 import socket
@@ -9,6 +10,7 @@ import tempfile
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
+from urllib.error import HTTPError
 
 
 DEPLOY = Path(__file__).resolve().parents[2] / "deploy"
@@ -41,6 +43,51 @@ class Ledger:
 
 
 class CutoverApplyTest(unittest.TestCase):
+    def test_maintenance_base_blocks_console_until_explicit_promotion(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            original = b"159.75.231.98 {\n reverse_proxy atom-candidate:80\n}\n"
+            (root / "Caddyfile").write_bytes(original)
+            publication = {"ATOM_PUBLIC_IP": "159.75.231.98",
+                           "ATOM_ACME_DIRECTORY": "https://acme.example/directory"}
+            with patch.object(module, "_private_directory", side_effect=lambda path:
+                              path.mkdir(mode=0o700)):
+                base, active = module._write_caddy_inputs(root, publication)
+            maintenance = base.read_bytes()
+            self.assertEqual(active.read_bytes(), maintenance)
+            self.assertIn(b"respond", maintenance)
+            self.assertIn(b"503", maintenance)
+            self.assertNotIn(b"reverse_proxy atom-candidate", maintenance)
+            self.assertEqual((root / "caddy" / "Caddyfile.console").read_bytes(), original)
+            module._promote_console_base(root)
+            self.assertEqual(base.read_bytes(), original)
+            self.assertEqual(active.read_bytes(), maintenance)
+
+    def test_maintenance_base_rejects_config_injection(self):
+        for address, directory in (("159.75.231.98\nrespond 200", "https://acme.example/d"),
+                                   ("159.75.231.98", "https://acme.example/d\nrespond 200")):
+            with self.subTest(address=address), self.assertRaisesRegex(
+                    module.ApplyError, "invalid_maintenance_config"):
+                module._maintenance_caddyfile(address, directory)
+
+    def test_maintenance_probe_requires_503_without_cookie_for_reads_and_writes(self):
+        calls = []
+        headers = Message()
+        headers["Cache-Control"] = "no-store"
+
+        class Opener:
+            def open(self, request, timeout):
+                calls.append((request.full_url, request.get_method()))
+                raise HTTPError(request.full_url, 503, "maintenance", headers, None)
+
+        with patch.object(module, "build_opener", return_value=Opener()):
+            module._maintenance_probe("159.75.231.98")
+        self.assertEqual([method for _url, method in calls], ["GET", "POST"])
+        headers["Set-Cookie"] = "session=unexpected"
+        with patch.object(module, "build_opener", return_value=Opener()), \
+                self.assertRaisesRegex(module.ApplyError, "maintenance_console_exposed"):
+            module._maintenance_probe("159.75.231.98")
+
     def test_ingress_requires_the_exact_stopped_old_caddy(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()
