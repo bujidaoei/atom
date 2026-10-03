@@ -65,7 +65,7 @@ def reconcile_locked(*, config: protected_cutover.CutoverConfig,
         raise OriginReconcileError("active_image_revision_unavailable")
     active = ip_forward_preflight._inspect_locked(
         config=config, publication_file=publication_file, revision=revision,
-        allow_ingress_drift=True)
+        allow_ingress_drift=True, allow_live_activity=True)
     if not active["ingressDrift"]:
         return {"status": "origin_ingress_current", "revision": revision,
                 "originCount": active["activeOriginCount"]}
@@ -77,7 +77,8 @@ def reconcile_locked(*, config: protected_cutover.CutoverConfig,
         source=Path(active["candidateDirectory"]))
     digest = controller.reconcile()
     verified = ip_forward_preflight._inspect_locked(
-        config=config, publication_file=publication_file, revision=revision)
+        config=config, publication_file=publication_file, revision=revision,
+        allow_live_activity=True)
     if (verified["containerIds"] != active["containerIds"]
             or verified["caddySha256"] != digest):
         raise OriginReconcileError("origin_reconcile_verification_failed")

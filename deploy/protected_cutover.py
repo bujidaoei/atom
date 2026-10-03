@@ -143,7 +143,8 @@ def _inspect(docker: Path, kind: str, target: str) -> dict:
     return rows[0]
 
 
-def _database(path: Path, expected_version: int, *, broker: bool) -> None:
+def _database(path: Path, expected_version: int, *, broker: bool,
+              require_idle: bool = True) -> None:
     _require(path.is_file() and not path.is_symlink(), "missing_database")
     try:
         uri = "file:" + quote(str(path), safe="/") + "?mode=ro"
@@ -154,10 +155,10 @@ def _database(path: Path, expected_version: int, *, broker: bool) -> None:
                      "database_integrity_failed")
             _require(db.execute("PRAGMA foreign_key_check").fetchall() == [],
                      "database_foreign_key_failed")
-            if broker:
+            if broker and require_idle:
                 _require(db.execute("SELECT count(*) FROM attempts WHERE state != 'terminated'")
                          .fetchone()[0] == 0, "live_broker_attempt")
-            else:
+            elif not broker and require_idle:
                 _require(db.execute("SELECT count(*) FROM projects WHERE active_run_id IS NOT NULL")
                          .fetchone()[0] == 0, "active_project")
                 _require(db.execute("SELECT count(*) FROM revision_attempts WHERE state != 'closed'")

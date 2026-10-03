@@ -126,8 +126,10 @@ def _publication(path: Path, config: protected_cutover.CutoverConfig,
         raise ForwardPreflightError("publication_config_invalid") from exc
 
 
-def _active_routes(database: Path, first: int, last: int) -> tuple[OriginRoute, ...]:
-    protected_cutover._database(database, 18, broker=False)
+def _active_routes(database: Path, first: int, last: int, *,
+                   require_idle: bool = True) -> tuple[OriginRoute, ...]:
+    protected_cutover._database(database, 18, broker=False,
+                                require_idle=require_idle)
     try:
         with closing(sqlite3.connect(database.as_uri() + "?mode=ro", uri=True,
                                      timeout=3)) as db:
@@ -254,7 +256,8 @@ def _inspect_locked(*, config: protected_cutover.CutoverConfig,
                     successor_source: Path | None = None,
                     successor_revision: str | None = None,
                     successor_image: str | None = None,
-                    allow_ingress_drift: bool = False) -> dict[str, object]:
+                    allow_ingress_drift: bool = False,
+                    allow_live_activity: bool = False) -> dict[str, object]:
     """Inspect under the caller's already-held host deployment lock."""
     _require(getattr(os, "geteuid", lambda: -1)() == 0, "root_required")
     _require(protected_cutover.REVISION.fullmatch(revision) is not None,
@@ -264,6 +267,7 @@ def _inspect_locked(*, config: protected_cutover.CutoverConfig,
              or (successor_source is not None and successor_revision is not None
                  and successor_image is not None), "incomplete_successor_identity")
     _require(type(allow_ingress_drift) is bool, "invalid_ingress_drift_option")
+    _require(type(allow_live_activity) is bool, "invalid_live_activity_option")
     forward = ip_forward_journal.ForwardJournal(config, revision).read()
     if forward is None:
         record = protected_cutover.PhaseLedger(config.state_dir, revision).read()
@@ -295,10 +299,12 @@ def _inspect_locked(*, config: protected_cutover.CutoverConfig,
     _require(image.get("Id") == image_id and image.get("Config", {})
              .get("Labels", {}).get("atom.revision") == revision,
              "active_image_revision_mismatch")
-    protected_cutover._database(candidate / "broker" / "registry.db", 3, broker=True)
+    protected_cutover._database(candidate / "broker" / "registry.db", 3,
+                                broker=True, require_idle=not allow_live_activity)
     routes = _active_routes(candidate / "data" / "atom.db",
                             int(publication["ATOM_FIRST_PORT"]),
-                            int(publication["ATOM_LAST_PORT"]))
+                            int(publication["ATOM_LAST_PORT"]),
+                            require_idle=not allow_live_activity)
     ids = _services(config, candidate, image_id, publication)
     if expected_ids is None:
         identity = ip_cutover_rollback._identity(config.state_dir /
