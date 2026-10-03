@@ -30,6 +30,7 @@ from urllib.request import HTTPSHandler, ProxyHandler, Request, build_opener
 
 import ip_cutover_env
 import ip_cutover_rollback
+import ip_caddy_logging
 import candidate_write_fence
 import paired_backup
 import protected_cutover
@@ -237,7 +238,8 @@ def _maintenance_caddyfile(address: str, acme_directory: str) -> bytes:
     except ValueError:
         valid = False
     _require(valid, "invalid_maintenance_config")
-    return ("{\n  default_sni " + address + "\n  grace_period 5s\n}\n\n" + address + " {\n"
+    return ("{\n  default_sni " + address + "\n  grace_period 5s\n"
+            + ip_caddy_logging.LOGGER_BLOCK + "\n}\n\n" + address + " {\n"
             "  tls {\n    issuer acme {\n      dir " + acme_directory + "\n"
             "      profile shortlived\n      disable_tlsalpn_challenge\n"
             "    }\n  }\n  header Cache-Control \"no-store\"\n"
