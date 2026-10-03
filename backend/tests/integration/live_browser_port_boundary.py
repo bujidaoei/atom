@@ -8,6 +8,7 @@ separate context, so the owner's normal Chrome session is unaffected.
 import json
 import os
 import subprocess
+import secrets
 
 from playwright.sync_api import sync_playwright
 
@@ -102,12 +103,19 @@ def main() -> None:
                 original = [cookie for cookie in context.cookies([session['console']])
                             if cookie['name'] == '__Host-atom_console']
                 assert len(original) == 1 and original[0]['httpOnly']
+                storage_marker = secrets.token_urlsafe(12)
                 for public_url in session['public']:
                     page = context.new_page()
                     response = page.goto(public_url, wait_until='domcontentloaded')
                     assert response is not None and response.status == 200
                     assert page.evaluate("localStorage.getItem('atom.console.proof.v1')") is None
                     assert page.evaluate('window.opener === null')
+                    assert page.evaluate("localStorage.getItem('atom.origin.probe')") is None
+                    page.evaluate("value => localStorage.setItem('atom.origin.probe', value)",
+                                  storage_marker)
+                    assert page.evaluate("localStorage.getItem('atom.origin.probe')") == storage_marker
+                    page.reload(wait_until='domcontentloaded')
+                    assert page.evaluate("localStorage.getItem('atom.origin.probe')") == storage_marker
                     prior_status = console.evaluate(me)
                     assert prior_status == 200, f'console_lost_before_attack={prior_status}'
                     observed = []
@@ -143,6 +151,7 @@ def main() -> None:
                 assert logout == 200
                 assert console.evaluate(me) == 401
                 print('live_browser_port_boundary_verified: two_public_origins=200 '
+                      'native_storage_isolated_and_persistent=true '
                       'console_authenticated=200 cross_port_logout=blocked '
                       'cookie_unchanged=true logout=200 revoked_me=401')
             finally:
