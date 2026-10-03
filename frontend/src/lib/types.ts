@@ -133,16 +133,18 @@ export type ProjectDetail = ProjectSummary & {
   latestRun: { id: string; status: string; phase: string; error: string | null; startedAt: string; finishedAt: string | null } | null;
   buildBudgetSeconds: number;
   legacyPublicationAvailable: boolean;
-  legacyAdoptionAvailable: boolean;
+  revisionAdoptionAvailable: boolean;
+  isolatedPreviewEnabled: boolean;
   race: RaceSummary | null;
 };
 
 export type VerifiedPublication = {
   releaseId: string;
   revisionId: string;
-  verificationId: string;
-  contractDigest: string;
-  policyDigest: string;
+  verificationId: string | null;
+  verificationMode: "advisory" | "required";
+  contractDigest: string | null;
+  policyDigest: string | null;
   audience: "owner" | "public";
   slug: string;
   generation: number;
@@ -152,7 +154,28 @@ export type VerifiedPublication = {
   sharingUrl: string | null;
 };
 
+export type PublicationSnapshot = {
+  releaseId: string;
+  version: number;
+  revisionId: string;
+  createdAt: string;
+  audience: "owner" | "public";
+  verificationMode: "advisory" | "required";
+  verificationId: string | null;
+  bindingId: string;
+  previewUrl: string | null;
+  isLive: boolean;
+  restoredFrom: string | null;
+};
+
+export type PublicationHistory = {
+  items: PublicationSnapshot[];
+  nextCursor: string | null;
+  publicationPolicy: "advisory" | "required";
+};
+
 export type VerificationStatus = {
+  current?: boolean;
   requestId: string;
   revisionId: string;
   contractDigest: string;
@@ -161,6 +184,7 @@ export type VerificationStatus = {
   total: number | null;
   passed: number | null;
   completedAt: number | null;
+  results: AcceptanceResult[] | null;
 };
 
 export type LedgerEntry = {

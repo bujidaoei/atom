@@ -11,6 +11,7 @@ import type {
   Usage,
   User,
   VerifiedPublication,
+  PublicationHistory,
   VerificationStatus,
 } from "./types";
 
@@ -22,6 +23,33 @@ import type {
  * routes /api and /preview to whatever else lives at the root.
  */
 const BASE = import.meta.env.BASE_URL.replace(/\/+$/, "");
+const CONSOLE_PROOF_KEY = "atom.console.proof.v1";
+
+function readConsoleProof(): string | null {
+  try { return window.localStorage.getItem(CONSOLE_PROOF_KEY); }
+  catch { return null; }
+}
+
+function clearConsoleProof(): void {
+  try { window.localStorage.removeItem(CONSOLE_PROOF_KEY); }
+  catch { /* the browser may disable storage; no proof can be sent then */ }
+}
+
+type LoginResponse = User & { consoleProof?: string };
+
+function acceptLogin(response: LoginResponse): User {
+  if (response.consoleProof !== undefined) {
+    if (!/^[A-Za-z0-9_-]{43}$/.test(response.consoleProof)) {
+      throw new ApiError(0, "登录凭据无效，请重新登录。");
+    }
+    try { window.localStorage.setItem(CONSOLE_PROOF_KEY, response.consoleProof); }
+    catch { throw new ApiError(0, "浏览器无法保存登录凭据，请允许本站使用本地存储。"); }
+  } else {
+    clearConsoleProof();
+  }
+  const { consoleProof: _proof, ...user } = response;
+  return user;
+}
 
 function commandKey(): string {
   return Array.from(crypto.getRandomValues(new Uint8Array(16)), b => b.toString(16).padStart(2, "0")).join("");
@@ -29,6 +57,38 @@ function commandKey(): string {
 
 export function withBase(path: string): string {
   return `${BASE}${path}`;
+}
+
+/** Native EventSource cannot send the proof header required by durable sessions. */
+export async function openProjectStream(
+  projectId: string, after: number, signal: AbortSignal,
+): Promise<ReadableStream<Uint8Array>> {
+  let response: Response;
+  try {
+    const proof = readConsoleProof();
+    response = await fetch(withBase(
+      `/api/projects/${encodeURIComponent(projectId)}/events?after=${after}`), {
+      method: "GET",
+      credentials: "include",
+      signal,
+      headers: {
+        Accept: "text/event-stream",
+        ...(proof ? { "X-Atom-Console-Proof": proof } : {}),
+      },
+    });
+  } catch {
+    throw new ApiError(0, "实时连接失败，请检查网络后重试。");
+  }
+  if (response.status === 401) {
+    clearConsoleProof();
+    onUnauthorized?.();
+    throw new ApiError(401, "登录态已失效，请重新登录。");
+  }
+  if (!response.ok || !response.headers.get("content-type")?.includes("text/event-stream")
+      || !response.body) {
+    throw new ApiError(response.status, "实时连接不可用，请稍后重试。");
+  }
+  return response.body;
 }
 
 export class ApiError extends Error {
@@ -55,7 +115,7 @@ type RequestOptions = {
   silent401?: boolean;
   accept?: string;
   commandKey?: string;
-  intent?: "inspect-private-content" | "open-private-content" | "revoke-account-sessions" | "inspect-verified-release" | "publish-verified-release" | "unpublish-verified-release";
+  intent?: "inspect-private-content" | "open-private-content" | "open-revision-preview" | "revoke-account-sessions" | "inspect-verified-release" | "publish-verified-release" | "unpublish-verified-release" | "rollback-verified-release" | "adopt-heat-revision";
   signal?: AbortSignal;
 };
 
@@ -64,18 +124,22 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
 
   let response: Response;
   try {
-    const send = () => fetch(withBase(path), {
-      method,
-      credentials: "include",
-      signal: options.signal,
-      headers: {
-        Accept: accept,
-        ...(options.intent ? { "X-Atom-Intent": options.intent } : {}),
-        ...(body === undefined ? {} : { "Content-Type": "application/json" }),
-        ...(options.commandKey ? { "Idempotency-Key": options.commandKey } : {}),
-      },
-      body: body === undefined ? undefined : JSON.stringify(body),
-    });
+    const send = () => {
+      const proof = readConsoleProof();
+      return fetch(withBase(path), {
+        method,
+        credentials: "include",
+        signal: options.signal,
+        headers: {
+          Accept: accept,
+          ...(proof ? { "X-Atom-Console-Proof": proof } : {}),
+          ...(options.intent ? { "X-Atom-Intent": options.intent } : {}),
+          ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+          ...(options.commandKey ? { "Idempotency-Key": options.commandKey } : {}),
+        },
+        body: body === undefined ? undefined : JSON.stringify(body),
+      });
+    };
     try { response = await send(); }
     catch (error) {
       if (!options.commandKey) throw error;
@@ -86,6 +150,7 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
   }
 
   if (response.status === 401) {
+    clearConsoleProof();
     if (!silent401) onUnauthorized?.();
     throw new ApiError(401, "登录态已失效，请重新登录。");
   }
@@ -117,15 +182,23 @@ export const api = {
   lookup: (email: string) =>
     request<LookupResult>("/api/auth/lookup", { method: "POST", body: { email } }),
   login: (email: string, password: string) =>
-    request<User>("/api/auth/login", { method: "POST", body: { email, password } }),
+    request<LoginResponse>("/api/auth/login", { method: "POST", body: { email, password } }).then(acceptLogin),
   register: (email: string, password: string, name?: string) =>
-    request<User>("/api/auth/register", {
+    request<LoginResponse>("/api/auth/register", {
       method: "POST",
       body: name ? { email, password, name } : { email, password },
-    }),
-  logout: (signal: AbortSignal) => request<{ ok: true }>("/api/auth/logout", { method: "POST", signal, silent401: true }),
-  logoutAll: (signal: AbortSignal) => request<{ ok: true }>("/api/auth/logout-all",
-    { method: "POST", signal, silent401: true, intent: "revoke-account-sessions" }),
+    }).then(acceptLogin),
+  logout: async (signal: AbortSignal) => {
+    const result = await request<{ ok: true }>("/api/auth/logout", { method: "POST", signal, silent401: true });
+    clearConsoleProof();
+    return result;
+  },
+  logoutAll: async (signal: AbortSignal) => {
+    const result = await request<{ ok: true }>("/api/auth/logout-all",
+      { method: "POST", signal, silent401: true, intent: "revoke-account-sessions" });
+    clearConsoleProof();
+    return result;
+  },
   me: (silent401 = false, signal?: AbortSignal) => request<User>("/api/auth/me", { silent401, signal }),
 
   // ---- settings
@@ -172,6 +245,13 @@ export const api = {
   currentVerifiedRelease: (id: string, signal?: AbortSignal) =>
     request<{ publication: VerifiedPublication | null }>(`/api/projects/${id}/releases/current`,
       { intent: "inspect-verified-release", signal }),
+  publicationHistory: (id: string, cursor?: string, signal?: AbortSignal) =>
+    request<PublicationHistory>(`/api/projects/${id}/releases/history${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`,
+      { intent: "inspect-verified-release", signal }),
+  issueRevisionPreview: (id: string, revisionId: string) =>
+    request<{ url: string; expiresAt: number; revisionId: string }>(
+      `/api/projects/${id}/preview-access`,
+      { method: "POST", body: { revisionId }, intent: "open-revision-preview" }),
   getVerification: (id: string, requestId: string, signal?: AbortSignal) =>
     request<VerificationStatus>(`/api/projects/${id}/verifications/${requestId}`, { signal }),
   latestVerification: (id: string, signal?: AbortSignal) =>
@@ -183,7 +263,7 @@ export const api = {
     request<VerificationStatus>(`/api/projects/${id}/verifications/${requestId}/run`,
       { method: "POST" }),
   publishVerifiedRelease: (id: string, command: {
-    releaseId: string; verificationId: string; expectedRevision: string;
+    releaseId: string; verificationId?: string; expectedRevision: string;
     expectedGeneration: number; audience: "owner" | "public"; slug: string;
   }) => request<{ releaseId: string; revisionId: string; generation: number; slug: string }>(
     `/api/projects/${id}/releases`,
@@ -193,6 +273,12 @@ export const api = {
   }) => request<{ commandId: string; releaseId: string; generation: number }>(
     `/api/projects/${id}/releases/${releaseId}/unpublish`,
     { method: "POST", body: command, intent: "unpublish-verified-release" }),
+  restorePublication: (id: string, releaseId: string, command: {
+    commandId: string; newReleaseId: string; sourceReleaseId: string;
+    expectedRevision: string; expectedGeneration: number;
+  }) => request<{ releaseId: string; generation: number }>(
+    `/api/projects/${id}/releases/${releaseId}/rollback`,
+    { method: "POST", body: command, intent: "rollback-verified-release" }),
 
   // ---- acceptance
   postAcceptance: (id: string, results: AcceptanceResult[]) =>
@@ -213,8 +299,14 @@ export const api = {
       method: "POST", body: { budgetSeconds }, commandKey: commandKey(),
     }),
   getRace: (id: string) => request<{ race: RaceSummary | null }>(`/api/projects/${id}/race`),
-  adoptHeat: (id: string, heatId: string) =>
-    request<{ ok: true }>(`/api/projects/${id}/race/${heatId}/adopt`, { method: "POST" }),
+  adoptHeat: (id: string, heatId: string, sourceRevisionId: string, expectedMainRevisionId: string | null) => {
+    const commandId = commandKey();
+    return request<{ commandId: string; sourceRevisionId: string; revisionId: string }>(
+      `/api/projects/${encodeURIComponent(id)}/race/${encodeURIComponent(heatId)}/adopt`, {
+        method: "POST", body: { commandId, sourceRevisionId, expectedMainRevisionId },
+        commandKey: commandId, intent: "adopt-heat-revision",
+      });
+  },
 
   // ---- usage
   getUsage: () => request<Usage>("/api/usage"),

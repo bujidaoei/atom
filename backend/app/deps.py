@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from .db import get_db
 from .models import Project, User
 from .security import read_session
-from .console_auth import request_session_token
+from .console_auth import request_session_token, require_authenticated_console_request
 
 SESSION_COOKIE = "atom_session"
 
@@ -17,6 +17,7 @@ def current_user(
     session: Annotated[Session, Depends(get_db)],
     request: Request,
 ) -> User:
+    require_authenticated_console_request(request)
     atom_session = request_session_token(request)
     if not atom_session:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "请先登录")
@@ -33,6 +34,7 @@ def optional_user(
     session: Annotated[Session, Depends(get_db)],
     request: Request,
 ) -> User | None:
+    require_authenticated_console_request(request)
     atom_session = request_session_token(request)
     if not atom_session:
         return None

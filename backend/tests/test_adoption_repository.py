@@ -1,4 +1,4 @@
-"""Fenced adoption ledger tests; production v10 remains deliberately unwired."""
+"""Fenced adoption ledger tests, including an initially empty main workspace."""
 import base64
 from concurrent.futures import ThreadPoolExecutor
 import hashlib

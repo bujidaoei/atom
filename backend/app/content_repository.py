@@ -21,7 +21,7 @@ class ContentRepository:
         db.row_factory = None
         version = _schema(db)
         db.row_factory = sqlite3.Row
-        if version not in (3, 4, 5, 6, 7, 9, 10, 12, 13, 14, 15):
+        if version not in (3, 4, 5, 6, 7, 9, 10, 12, 13, 14, 15, 16, 17, 18):
             raise VerificationError('content_schema_required')
 
     def bind(self, *, owner: str, project_id: str, release_id: str) -> ContentBinding:
@@ -67,3 +67,22 @@ class ContentRepository:
             if row['id'] is None:
                 raise VerificationError('content_binding_unavailable')
             return ContentBinding(row['id'],row['project_id'],row['release_id'])
+
+    def public_project_binding(self, *, project_id: str) -> ContentBinding:
+        """Capture the current public release for a stable project origin."""
+        if (not isinstance(project_id, str)
+                or re.fullmatch(r'[A-Za-z0-9_.-]{1,100}', project_id) is None):
+            raise VerificationError('content_not_found')
+        with self._releases._ledger._transaction() as db:
+            self._require_schema(db)
+            row = db.execute('''SELECT p.project_id,p.release_id,b.id FROM release_publications p
+                JOIN release_records r ON r.id=p.release_id AND r.project_id=p.project_id
+                JOIN projects project ON project.id=p.project_id
+                LEFT JOIN content_bindings b ON b.release_id=r.id AND b.project_id=p.project_id
+                WHERE p.project_id=? AND p.live=1 AND r.audience='public' ''',
+                (project_id,)).fetchone()
+            if row is None:
+                raise VerificationError('content_not_found')
+            if row['id'] is None:
+                raise VerificationError('content_binding_unavailable')
+            return ContentBinding(row['id'], row['project_id'], row['release_id'])

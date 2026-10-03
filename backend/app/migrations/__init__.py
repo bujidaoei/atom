@@ -47,7 +47,7 @@ def _open(path, *, readonly=False, timeout=3):
 
 def _schema(db):
     version = db.execute("PRAGMA user_version").fetchone()[0]
-    if version not in (0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15):
+    if version not in (0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18):
         raise MigrationError("unsupported_schema")
     expected = SCHEMA
     hashes = [(1, MIGRATION_HASH)]
@@ -107,6 +107,18 @@ def _schema(db):
         from . import verification_index_v15
         expected = {**expected, **verification_index_v15.SCHEMA}
         hashes.append((15, verification_index_v15.MIGRATION_HASH))
+    if version >= 16:
+        from . import publication_policy_v16
+        expected = {**expected, **publication_policy_v16.SCHEMA}
+        hashes.append((16, publication_policy_v16.MIGRATION_HASH))
+    if version >= 17:
+        from . import project_origins_v17
+        expected = {**expected, **project_origins_v17.SCHEMA}
+        hashes.append((17, project_origins_v17.MIGRATION_HASH))
+    if version >= 18:
+        from . import preview_access_v18
+        expected = {**expected, **preview_access_v18.SCHEMA}
+        hashes.append((18, preview_access_v18.MIGRATION_HASH))
     rows = db.execute("SELECT type,name,sql FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' AND sql IS NOT NULL ORDER BY type,name").fetchall()
     extension = {name: sql for kind, name, sql in rows if name in expected}
     baseline = [(kind, name, sql) for kind, name, sql in rows if name not in expected]
@@ -147,13 +159,25 @@ def _integrity(db):
         raise MigrationError("invalid_database_integrity")
 
 
-def verify_backup(path: Path, *, expected_version: int = 0) -> str:
-    if type(expected_version) is not int or expected_version not in (0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15):
+def verify_backup(path: Path, *, expected_version: int = 0, immutable: bool = False) -> str:
+    if type(expected_version) is not int or expected_version not in (0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18):
         raise MigrationError("invalid_backup_version")
+    if type(immutable) is not bool:
+        raise MigrationError("invalid_backup_mode")
     db = None
     try:
         path = _path(path, existing=True)
-        db = _open(path, readonly=True)
+        if immutable:
+            # An immutable SQLite connection ignores WAL. Require a completed,
+            # checkpointed backup so the audit cannot silently miss writes.
+            if any(Path(str(path) + suffix).exists() for suffix in ('-wal', '-shm')):
+                raise MigrationError("backup_not_quiesced")
+            db = sqlite3.connect(path.as_uri() + '?mode=ro&immutable=1', uri=True,
+                                 timeout=3, isolation_level=None)
+            db.execute('PRAGMA foreign_keys=ON')
+            db.execute('PRAGMA query_only=ON')
+        else:
+            db = _open(path, readonly=True)
         if _schema(db) != expected_version:
             raise MigrationError("invalid_backup_version")
         _integrity(db)
@@ -226,7 +250,7 @@ def backup_database(path: Path, backup: Path, *, lock_timeout: float = 3) -> Bac
 
 
 def migrate(path: Path, backup: Path, *, lock_timeout: float = 3, target_version: int = 1) -> MigrationResult:
-    if type(target_version) is not int or target_version not in (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15):
+    if type(target_version) is not int or target_version not in (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18):
         raise MigrationError("invalid_target_version")
     if isinstance(lock_timeout, bool) or not isinstance(lock_timeout, (int, float)) or not 0 < lock_timeout <= 10:
         raise MigrationError("invalid_migration_timeout")
@@ -236,10 +260,10 @@ def migrate(path: Path, backup: Path, *, lock_timeout: float = 3, target_version
         if path.resolve() == backup.resolve():
             raise MigrationError("invalid_backup_path")
         db = _open(path, timeout=lock_timeout)
-        if target_version == 12:
+        if target_version in (12, 16):
             # SQLite requires this outside a transaction for a table rebuild.
-            if _schema(db) not in (11, 12):
-                raise MigrationError("migration_requires_v11")
+            if _schema(db) not in (target_version - 1, target_version):
+                raise MigrationError(f"migration_requires_v{target_version - 1}")
             db.execute("PRAGMA foreign_keys=OFF")
             if db.execute("PRAGMA foreign_keys").fetchone() != (0,):
                 raise MigrationError("migration_failed")
@@ -253,11 +277,17 @@ def migrate(path: Path, backup: Path, *, lock_timeout: float = 3, target_version
         version = _schema(db)
         _integrity(db)
         if target_version == 12 and version not in (11, 12):
-            raise MigrationError("migration_requires_v11")
+            raise MigrationError(f"migration_requires_v{target_version - 1}")
         if target_version == 13 and version not in (12, 13):
             raise MigrationError("migration_requires_v12")
         if target_version == 14 and version not in (13, 14):
             raise MigrationError("migration_requires_v13")
+        if target_version == 16 and version not in (15, 16):
+            raise MigrationError("migration_requires_v15")
+        if target_version == 17 and version not in (16, 17):
+            raise MigrationError("migration_requires_v16")
+        if target_version == 18 and version not in (17, 18):
+            raise MigrationError("migration_requires_v17")
         if target_version == 15 and version not in (14, 15):
             raise MigrationError("migration_requires_v14")
         if version > target_version:
@@ -326,6 +356,18 @@ def migrate(path: Path, backup: Path, *, lock_timeout: float = 3, target_version
             from . import verification_index_v15
             verification_index_v15.apply(db)
             db.execute("INSERT INTO atom_schema_migrations VALUES (15,?,?,?)", (verification_index_v15.MIGRATION_HASH, digest, int(time.time())))
+        if version < 16 <= target_version:
+            from . import publication_policy_v16
+            publication_policy_v16.apply(db)
+            db.execute("INSERT INTO atom_schema_migrations VALUES (16,?,?,?)", (publication_policy_v16.MIGRATION_HASH, digest, int(time.time())))
+        if version < 17 <= target_version:
+            from . import project_origins_v17
+            project_origins_v17.apply(db)
+            db.execute("INSERT INTO atom_schema_migrations VALUES (17,?,?,?)", (project_origins_v17.MIGRATION_HASH, digest, int(time.time())))
+        if version < 18 <= target_version:
+            from . import preview_access_v18
+            preview_access_v18.apply(db)
+            db.execute("INSERT INTO atom_schema_migrations VALUES (18,?,?,?)", (preview_access_v18.MIGRATION_HASH, digest, int(time.time())))
         db.execute(f"PRAGMA user_version={target_version}")
         _schema(db)
         _integrity(db)

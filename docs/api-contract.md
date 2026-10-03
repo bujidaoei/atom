@@ -1,6 +1,6 @@
 # Atoms Demo — API 契约
 
-后端 FastAPI，挂在 `/api` 下。除标注 `public` 外都要求登录态（HttpOnly Cookie `atom_session`）。
+后端 FastAPI，挂在 `/api` 下。除标注 `public` 外都要求登录态（旧模式使用 HttpOnly Cookie `atom_session`；durable 模式使用 `__Host-atom_console`）。
 所有请求/响应均为 JSON，时间为 ISO-8601 UTC 字符串。
 
 `GET /api/health` 为 public 的运行时依赖检查：运行时鉴权或连接失败时返回 HTTP 503、`{"ok":false,"runtime":false}`；成功返回 200、两个字段为 true。不表示模型、数据库恢复或整个平台已验收。Node 内部服务的 `/healthz`、`/v1/roles`、运行与取消接口均要求共享 Bearer 令牌，浏览器不持有该令牌。
@@ -52,6 +52,8 @@ Atoms 用的是两步式：先填邮箱，后端回答这个邮箱是否已注�
 ```
 
 密码规则：至少 8 位，且不能是纯数字。
+
+独立 IP 端口发布的待启用会话模式：仅在 `ATOM_CONSOLE_PROOF_REQUIRED=true` 且 durable 会话已配置时，register/login 的 user 响应增加 `consoleProof`（43 字符 URL-safe 值），并禁止缓存。前端将其保存在控制台来源的浏览器存储中，之后每个需要登录的 API 请求携带 `X-Atom-Console-Proof`。服务端同时验证签名 HttpOnly Cookie、活动会话、该证明和控制台 Host；不安全方法还要验证精确 Origin。`/auth/me` 不返回证明。旧 Cookie 没有客户端证明时返回 401，用户重新登录。该模式必须与独立预览来源同时启用，不能在生成脚本仍与控制台同源时单独切换。未启用时不返回证明，现有登录响应保持原样。独立发布入口和浏览器验收仍在开发中。
 
 ### `POST /api/auth/logout` → `{ "ok": true }`
 

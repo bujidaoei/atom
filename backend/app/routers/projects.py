@@ -16,6 +16,7 @@ from ..errors import AtomError
 from ..events import bus
 from ..revision_http import project_revision_view, project_catalog
 from ..models import AcceptanceRun, Message, Project, Race, RaceHeat, Requirement
+from ..project_origins import ProjectOriginError, ProjectOriginRepository
 from ..serialize import acceptance_json, project_detail, project_summary, race_json
 from ..services.orchestrator import orchestrator
 from ..services.parsing import fallback_title
@@ -91,9 +92,27 @@ def create_project(
     body: CreateProject, user: CurrentUser, session: DbSession, request: Request
 ) -> dict[str, object]:
     prompt = body.prompt.strip()
+    settings = get_settings()
+    origins = None
+    if settings.ip_preview_enabled:
+        try:
+            origins = ProjectOriginRepository(settings.db_path,
+                first_port=settings.ip_preview_first_port,
+                last_port=settings.ip_preview_last_port)
+        except ProjectOriginError:
+            raise HTTPException(503, '项目地址服务暂不可用') from None
     project = Project(user_id=user.id, prompt=prompt, title=fallback_title(prompt))
     session.add(project)
     session.flush()
+    if origins is not None:
+        try:
+            origins.reserve_in_transaction(session.connection().connection.driver_connection,
+                                           project.id)
+        except ProjectOriginError as error:
+            session.rollback()
+            raise HTTPException(409 if str(error) == 'origin_capacity' else 503,
+                                '项目地址容量已满' if str(error) == 'origin_capacity'
+                                else '项目地址服务暂不可用') from None
     session.add(Message(project_id=project.id, role="user", content=prompt))
     session.commit()
     storage.ensure_project_dirs(project.id)
@@ -406,32 +425,3 @@ async def retry_heat(
 def read_race(project: OwnedProject, session: DbSession, request: Request) -> dict[str, object]:
     session.expire_all()
     return {"race": race_json(session, project.id, catalog=project_catalog(request, project) if get_settings().sandbox_mode == "broker" else None)}
-
-
-@router.post("/{project_id}/race/{heat_id}/adopt")
-def adopt_heat(
-    project: OwnedProject, heat_id: str, session: DbSession
-) -> dict[str, bool]:
-    if get_settings().sandbox_mode == "broker":
-        raise HTTPException(
-            status.HTTP_409_CONFLICT,
-            "隔离赛道尚无按修订确认的采用入口，不能通过旧目录复制采用",
-        )
-    if orchestrator.active(project.id):
-        raise HTTPException(status.HTTP_409_CONFLICT, "请等待所有赛道结束后再采用")
-    heat = session.get(RaceHeat, heat_id)
-    race = session.get(Race, heat.race_id) if heat else None
-    if heat is None or race is None or race.project_id != project.id:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "该赛道不存在")
-    if heat.status != "done":
-        raise HTTPException(status.HTTP_409_CONFLICT, "该赛道还没有完成")
-
-    source = storage.workspace_dir(project.id, heat_id)
-    if not source.is_dir():
-        raise HTTPException(status.HTTP_409_CONFLICT, "该赛道没有产出文件")
-
-    storage.copy_tree(source, storage.workspace_dir(project.id))
-    race.winner_heat_id = heat_id
-    project.status = "ready"
-    session.commit()
-    return {"ok": True}

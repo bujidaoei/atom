@@ -140,7 +140,7 @@ def test_actual_transport_rejects_uncertain_responses_without_retry(case):
             assert self.headers['Authorization'] == 'Bearer ' + admin
             self.rfile.read(int(self.headers['Content-Length']))
             if case == 'slow':
-                threading.Event().wait(0.15)
+                threading.Event().wait(1)
             self.send_response(307 if case == 'redirect' else 202)
             if case == 'redirect':
                 self.send_header('Location','/must-not-follow')
@@ -149,7 +149,7 @@ def test_actual_transport_rejects_uncertain_responses_without_retry(case):
                 self.send_header('Content-Encoding','gzip')
             self.end_headers()
             if case == 'slow_body':
-                threading.Event().wait(0.15)
+                threading.Event().wait(1)
             body = b'not json' if case == 'malformed' else b'x'*20000 if case == 'oversized' else json.dumps({
                 'attempt_id':'a'*32,'state':'provisioning','deadline':999}).encode()
             try:
@@ -163,7 +163,7 @@ def test_actual_transport_rejects_uncertain_responses_without_retry(case):
         import time
         now = int(time.time())
         grant = Grant('g','o','p','r','a',1,'b'*64,now,now+120)
-        async with BrokerClient(f'http://127.0.0.1:{server.server_port}',admin,GrantCodec(b'k'*32),timeout=0.05 if case.startswith('slow') else 3) as client:
+        async with BrokerClient(f'http://127.0.0.1:{server.server_port}',admin,GrantCodec(b'k'*32),timeout=0.25 if case.startswith('slow') else 3) as client:
             with pytest.raises(BrokerClientError) as raised:
                 await client.provision(grant)
             assert admin not in str(raised.value) and '999' not in str(raised.value)

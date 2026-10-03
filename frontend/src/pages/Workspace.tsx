@@ -6,12 +6,12 @@ import { Badge, StatusBadge } from "../components/ui/Badge";
 import { Icon } from "../components/ui/Icon";
 import type { IconName } from "../components/ui/Icon";
 import { ErrorState, LoadingState } from "../components/ui/States";
-import { api, errorMessage, publishedUrl } from "../lib/api";
+import { api, ApiError, errorMessage, publishedUrl } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { agentMeta } from "../lib/agents";
 import { isRunningStatus } from "../lib/format";
 import { useProjects } from "../lib/projects";
-import type { ProjectDetail, RunEventPayload } from "../lib/types";
+import type { ProjectDetail, RunEventPayload, VerificationStatus } from "../lib/types";
 import { Conversation } from "../workspace/Conversation";
 import { ContractTab } from "../workspace/ContractTab";
 import { CodeTab } from "../workspace/CodeTab";
@@ -51,6 +51,7 @@ function ProjectWorkspace({ id }: { id: string | undefined }) {
   const [approveError, setApproveError] = useState<string | null>(null);
   const [acceptanceRunning, setAcceptanceRunning] = useState(false);
   const [acceptanceError, setAcceptanceError] = useState<string | null>(null);
+  const [verification, setVerification] = useState<VerificationStatus | null>(null);
   const [publishBusy, setPublishBusy] = useState(false);
   const [previewToken, setPreviewToken] = useState(0);
 
@@ -131,6 +132,26 @@ function ProjectWorkspace({ id }: { id: string | undefined }) {
     if (fileSignature) setPreviewToken((token) => token + 1);
   }, [fileSignature]);
 
+  useEffect(() => {
+    if (!id || !project?.isolatedPreviewEnabled) { setVerification(null); return; }
+    const controller = new AbortController();
+    void api.latestVerification(id, controller.signal)
+      .then(data => { if (!controller.signal.aborted) setVerification(
+        data.verification?.current && data.verification.revisionId === project.revisionId ? data.verification : null); })
+      .catch(error => { if (!controller.signal.aborted) setAcceptanceError(errorMessage(error)); });
+    return () => controller.abort();
+  }, [id, project?.isolatedPreviewEnabled, project?.revisionId]);
+
+  useEffect(() => {
+    if (!id || verification?.state !== "running") return;
+    const timer = window.setTimeout(() => {
+      void api.latestVerification(id)
+        .then(data => setVerification(data.verification?.current ? data.verification : null))
+        .catch(error => setAcceptanceError(errorMessage(error)));
+    }, 3000);
+    return () => window.clearTimeout(timer);
+  }, [id, verification]);
+
   const running = project ? isRunningStatus(project.status) : false;
   useEffect(() => {
     if (!running && stream.connection !== "retrying") return;
@@ -196,6 +217,23 @@ function ProjectWorkspace({ id }: { id: string | undefined }) {
     setAcceptanceError(null);
     setTab("contract");
     try {
+      if (project.isolatedPreviewEnabled) {
+        if (!project.revisionId) throw new Error("当前还没有可检查的已保存版本。");
+        const requestId = Array.from(crypto.getRandomValues(new Uint8Array(16)),
+          value => value.toString(16).padStart(2, "0")).join("");
+        const reserved = await api.reserveVerification(id, requestId);
+        if (reserved.revisionId !== project.revisionId) throw new Error("检查版本已变化，请刷新后重试。");
+        setVerification(reserved);
+        try {
+          const result = await api.runVerification(id, requestId);
+          setVerification(result);
+        } catch (error) {
+          const latest = await api.getVerification(id, requestId);
+          setVerification(latest);
+          if (latest.state !== "passed" && latest.state !== "failed") throw error;
+        }
+        return;
+      }
       let doc = iframeRef.current?.contentDocument;
       const deadline = Date.now() + 10000;
       while ((!doc?.body || doc.readyState !== "complete" || doc.URL === "about:blank") && Date.now() < deadline) {
@@ -209,7 +247,9 @@ function ProjectWorkspace({ id }: { id: string | undefined }) {
       const data = await api.postAcceptance(id, results);
       setProject((current) => (current ? { ...current, acceptance: data.acceptance } : current));
     } catch (err) {
-      setAcceptanceError(errorMessage(err));
+      setAcceptanceError(err instanceof ApiError && err.status >= 500
+        ? "检查结果暂时无法保存，请稍后重试。这不代表网页功能不合格。"
+        : errorMessage(err));
     } finally {
       setAcceptanceRunning(false);
     }
@@ -308,7 +348,7 @@ function ProjectWorkspace({ id }: { id: string | undefined }) {
               {project.slug ? "取消发布" : "发布"}
             </Button>
           ) : (
-            <Button variant="secondary" size="sm" onClick={() => setTab("release")}>发布工作台</Button>
+            <Button variant="secondary" size="sm" onClick={() => setTab("release")}>发布与历史</Button>
           )}
 
           <IconButton label="刷新项目" onClick={() => void load(true)}>
@@ -320,7 +360,7 @@ function ProjectWorkspace({ id }: { id: string | undefined }) {
       {["error", "cancelled", "timed_out", "interrupted"].includes(project.status) ? (
         <div role="status" className="flex shrink-0 items-center gap-m border-b border-neutral-12 px-l py-s text-sm">
           <div className="flex-1">{project.latestRun?.error || "本轮未完成。"} {project.incompleteSavedRevisionId
-            ? "已保存未完成版本，可预览文件；尚未通过验收，不能发布。"
+            ? "已保存未完成版本，可预览文件；完成生成后才能发布这个版本。功能检查可按需运行。"
             : hasFiles ? "可预览之前已登记的文件；本轮未完成的文件未保存。" : "可以重新尝试。"}</div>
           <Button size="sm" variant="secondary" loading={starting} onClick={() => void resume()}>{project.incompleteSavedRevisionId
             ? "从已保存版本继续生成" : hasFiles ? "基于已有版本重新生成" : "重新生成"}</Button>
@@ -424,6 +464,8 @@ function ProjectWorkspace({ id }: { id: string | undefined }) {
               projectId={project.id}
               status={project.status}
               hasFiles={hasFiles}
+              isolated={project.isolatedPreviewEnabled}
+              revisionId={project.revisionId}
               iframeRef={iframeRef}
               reloadToken={previewToken}
             />
@@ -451,13 +493,16 @@ function ProjectWorkspace({ id }: { id: string | undefined }) {
                 status={project.status}
                 requirements={project.requirements}
                 acceptance={project.acceptance}
+                isolated={project.isolatedPreviewEnabled}
+                verification={verification}
                 onApprove={approve}
                 approving={approving}
                 approveError={approveError}
                 onRunAcceptance={runChecksNow}
                 acceptanceRunning={acceptanceRunning}
                 acceptanceError={acceptanceError}
-                canRunAcceptance={!running && hasFiles && project.requirements.length > 0}
+                canRunAcceptance={!running && hasFiles && project.requirements.length > 0 &&
+                  (!project.isolatedPreviewEnabled || (Boolean(project.revisionId) && verification?.state !== "running"))}
               />
             </div>
           ) : null}
@@ -471,7 +516,9 @@ function ProjectWorkspace({ id }: { id: string | undefined }) {
             >
               <RaceTab
                 projectId={project.id}
-                legacyAdoptionAvailable={project.legacyAdoptionAvailable}
+                isolatedPreview={project.isolatedPreviewEnabled}
+                revisionAdoptionAvailable={project.revisionAdoptionAvailable}
+                mainRevisionId={project.revisionId}
                 initialRace={project.race}
                 onChanged={() => { void load(true); }}
                 heatActivity={stream.heatActivity}

@@ -39,7 +39,7 @@ class AuditDeliveryRepository:
         self.path = Path(path)
         self.destination_id, self.scope_kind, self.scope_id = destination_id, scope_kind, scope_id
         try:
-            if verify(self.path) not in (5,7,9,10,13,14,15):
+            if verify(self.path) not in (5,7,9,10,13,14,15,16, 17, 18):
                 raise AuditDeliveryError('audit_schema_required')
         except MigrationError:
             raise AuditDeliveryError('audit_schema_required') from None
@@ -55,7 +55,7 @@ class AuditDeliveryRepository:
             deadline = time.monotonic()+5
             db.set_progress_handler(lambda: int(time.monotonic() >= deadline), 1000)
             db.execute('BEGIN' if read_only else 'BEGIN IMMEDIATE')
-            if _schema(db) not in (5,7,9,10,13,14,15):
+            if _schema(db) not in (5,7,9,10,13,14,15,16, 17, 18):
                 raise AuditDeliveryError('audit_schema_required')
             conflicting = db.execute('SELECT 1 FROM security_audit_delivery d '
                 'JOIN security_audit_events e ON e.event_id=d.event_id WHERE d.destination_id=? '

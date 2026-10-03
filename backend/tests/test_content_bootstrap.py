@@ -27,6 +27,31 @@ def test_console_origin_must_be_canonical(origin):
     with pytest.raises(ValueError):ContentNavigation(origin)
 
 
+@pytest.mark.parametrize('origin', ['https://159.75.231.98', 'https://[2001:db8::1]'])
+def test_console_origin_accepts_canonical_https_ip(origin):
+    assert ContentNavigation(origin).console_origin == origin
+
+
+@pytest.mark.parametrize('origin', ['https://159.75.231.98:443', 'https://159.75.231.098',
+    'https://[2001:0db8::1]', 'https://[2001:db8::1]:443', 'https://159.75.231.98/atom'])
+def test_console_origin_rejects_noncanonical_ip(origin):
+    with pytest.raises(ValueError, match='invalid_content_console_origin'):
+        ContentNavigation(origin)
+
+
+@pytest.mark.parametrize('path', ['/', '//evil.test', '/atom/', '/a/../b', '/atom?x', '/%61tom', '/a\\b', None])
+def test_console_base_path_rejects_ambiguous_redirects(path):
+    with pytest.raises(ValueError, match='invalid_content_console_path'):
+        ContentNavigation('https://console.example.org', path)
+
+
+def test_console_subpath_is_preserved_in_bootstrap(private):
+    app, scope = bootstrap_setup(private)
+    app.navigation = ContentNavigation('https://console.example.org', '/atom')
+    result = asyncio.run(request(app, scope, b''))
+    assert urlsplit(dict(result[0]['headers'])[b'location'].decode()).path == '/atom/content-access'
+
+
 def test_bootstrap_cookie_and_fixed_public_challenge_can_issue_handoff(private):
     app,scope=bootstrap_setup(private)
     result=asyncio.run(request(app,scope,b''))

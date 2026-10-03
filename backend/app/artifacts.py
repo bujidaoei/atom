@@ -10,6 +10,7 @@ import stat
 import sys
 import time
 import uuid
+from typing import Protocol
 
 from .snapshots import MAX_ARCHIVE_BYTES, SnapshotError, verify_snapshot
 
@@ -30,6 +31,22 @@ class Artifact:
     size: int
 
 
+class SnapshotStore(Protocol):
+    @property
+    def local_root(self) -> Path | None: ...
+    def read(self, key: str) -> bytes: ...
+    def put(self, payload: bytes) -> Artifact: ...
+
+
+def configured_artifact_store(settings, local_root: Path) -> SnapshotStore:
+    if settings.storage_backend == 'cos':
+        from .cos_artifacts import CosArtifactStore
+        return CosArtifactStore(settings)
+    if settings.storage_backend == 'local':
+        return ArtifactStore(local_root)
+    raise ArtifactError('invalid_artifact_configuration')
+
+
 def _describe(payload: bytes) -> Artifact:
     if not isinstance(payload, bytes) or len(payload) > MAX_ARCHIVE_BYTES:
         raise ArtifactError("invalid_artifact")
@@ -41,6 +58,10 @@ def _describe(payload: bytes) -> Artifact:
 
 
 class ArtifactStore:
+    @property
+    def local_root(self) -> Path:
+        return self.root
+
     def __init__(self, root: Path, *, lock_timeout: float = 3, scan_limit: int = 10000):
         if sys.platform != "linux":
             raise ArtifactError("unsupported_artifact_platform")

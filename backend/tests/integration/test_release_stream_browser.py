@@ -28,6 +28,7 @@ import uvicorn
 from app import events as events_module
 from app.artifacts import ArtifactStore
 from app.config import get_settings
+from app.console_auth import proof_for_new_session
 from app.migrations import migrate
 from app.revisions import RevisionRepository
 from app.routers import auth, projects, verifications
@@ -99,6 +100,7 @@ def test_release_workbench_keeps_real_event_stream_and_recovers(
     migrate(path, tmp_path / 'before-stream-v13.db', target_version=13)
     migrate(path, tmp_path / 'before-stream-v14.db', target_version=14)
     migrate(path, tmp_path / 'before-stream-v15.db', target_version=15)
+    migrate(path, tmp_path / 'before-stream-v16.db', target_version=16)
     payload, artifact = snapshot(b'<html>heat</html>')
     assert artifact == receipt.artifact
     root = tmp_path / 'artifacts'
@@ -106,7 +108,9 @@ def test_release_workbench_keeps_real_event_stream_and_recovers(
     store = ArtifactStore(root)
     assert store.put(payload) == artifact
 
+    monkeypatch.setenv('ATOM_CONSOLE_PROOF_REQUIRED', 'true')
     app, token, engine = _configured_api(path, store, intent, tmp_path, monkeypatch)
+    proof = proof_for_new_session(token)
     @contextmanager
     def event_session():
         with Session(engine) as session:
@@ -136,6 +140,13 @@ def test_release_workbench_keeps_real_event_stream_and_recovers(
         await events_module.bus.publish('project', 'stream.resync', {})
         return {'ok': True}
 
+    @app.post('/__test/emit-stream')
+    async def emit_stream():
+        await events_module.bus.publish('project', 'message.completed',
+                                        {'text': 'stream-live-marker'},
+                                        run_id='stream-check', role='alex')
+        return {'ok': True}
+
     outer = FastAPI()
     outer.mount('/atom', app)
     key, cert = _certificate(tmp_path)
@@ -155,13 +166,19 @@ def test_release_workbench_keeps_real_event_stream_and_recovers(
             cleanup.callback(context.close)
             context.add_cookies([{'name': '__Host-atom_console', 'value': token,
                 'url': origin, 'secure': True, 'httpOnly': True, 'sameSite': 'Lax'}])
+            without_proof = context.request.get(
+                origin + '/atom/api/projects/project/events?after=0')
+            assert without_proof.status == 401
+            context.add_init_script(
+                script="localStorage.setItem('atom.console.proof.v1', "
+                       + repr(proof) + ")")
             page = context.new_page()
             page.on('pageerror', lambda error: errors.append(str(error)))
             page.on('response', lambda response: stream_responses.append(response)
                 if '/api/projects/project/events?' in response.url else None)
             page.goto(origin + '/atom/app/p/project', wait_until='domcontentloaded')
             page.get_by_role('tab', name='发布', exact=True).click()
-            page.get_by_label('发布工作台').get_by_text('暂无已登记的发布指针').wait_for()
+            page.get_by_label('发布与历史', exact=True).get_by_text('准备好分享你的作品了吗？').wait_for()
             page.get_by_role('button', name='连接中断，点击重连').wait_for(
                 state='hidden', timeout=15000)
             deadline = time.monotonic() + 10
@@ -169,6 +186,12 @@ def test_release_workbench_keeps_real_event_stream_and_recovers(
                 page.wait_for_timeout(100)
             assert stream_responses and stream_responses[0].status == 200
             assert 'text/event-stream' in stream_responses[0].headers['content-type']
+            emitted = page.request.post(origin + '/atom/__test/emit-stream')
+            assert emitted.status == 200 and emitted.json() == {'ok': True}
+            # The conversation panel is hidden behind the release tab on mobile.
+            # Attachment proves the decoded event reached React in both layouts.
+            page.get_by_text('stream-live-marker').wait_for(
+                state='attached', timeout=10000)
 
             fault = page.request.post(origin + '/atom/__test/close-stream')
             assert fault.status == 200 and fault.json() == {'ok': True}

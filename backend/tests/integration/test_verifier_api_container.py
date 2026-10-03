@@ -129,6 +129,7 @@ def test_authenticated_main_routes_reconcile_real_browser_result(adopted, tmp_pa
             'ATOM_DATA_DIR':str(tmp_path / 'data'), 'ATOM_DB_PATH':str(path),
             'ATOM_ARTIFACT_DIR':str(root),
             'ATOM_CONTENT_HOST_SUFFIX':'apps.example.net',
+            'ATOM_PUBLICATION_VERIFICATION':'required',
             'ATOM_VERIFIER_ORIGIN':f'http://127.0.0.1:{port}',
             'ATOM_VERIFIER_CONTROL_TOKEN':token,
             'ATOM_VERIFIER_POLICY_DIGEST':'c' * 64,
@@ -182,7 +183,8 @@ def test_authenticated_main_routes_reconcile_real_browser_result(adopted, tmp_pa
                     assert before.status_code == 200 and before.json()['state'] == 'reserved'
                     latest_reserved = await client.get(route + '/latest')
                     assert latest_reserved.status_code == 200
-                    assert latest_reserved.json()['verification'] == before.json()
+                    assert latest_reserved.json()['verification'] == {
+                        **before.json(), 'current': True}
                     result = await client.post(route + '/' + key + '/run',
                                                headers=intent_headers)
                     assert result.status_code == 200, result.text
@@ -192,7 +194,8 @@ def test_authenticated_main_routes_reconcile_real_browser_result(adopted, tmp_pa
                     assert settled.status_code == 200 and settled.json() == result.json()
                     latest_passed = await client.get(route + '/latest')
                     assert latest_passed.status_code == 200
-                    assert latest_passed.json()['verification'] == settled.json()
+                    assert latest_passed.json()['verification'] == {
+                        **settled.json(), 'current': True}
                     repeat = await client.post(route + '/' + key + '/run',
                                                headers=intent_headers)
                     assert repeat.status_code == 200 and repeat.json() == result.json()

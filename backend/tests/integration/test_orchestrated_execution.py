@@ -112,7 +112,8 @@ os.environ.update(ATOM_ENVIRONMENT='production',ATOM_SANDBOX_MODE='broker',ATOM_
     ATOM_COMPLETION_GRANT_KEY='c'*32,ATOM_LLM_API_KEY='synthetic-model-fixture-key',
     ATOM_LLM_BASE_URL='https://synthetic.invalid/v1',ATOM_RUNTIME_URL='http://127.0.0.1:1')
 if data['verify_output']:
-    os.environ.update(ATOM_VERIFIER_ORIGIN='http://127.0.0.1:8799',
+    os.environ.update(ATOM_PUBLICATION_VERIFICATION='required',
+        ATOM_VERIFIER_ORIGIN='http://127.0.0.1:8799',
         ATOM_VERIFIER_CONTROL_TOKEN='synthetic-verifier-control-key-32-characters',
         ATOM_VERIFIER_POLICY_DIGEST='c'*64,ATOM_VERIFIER_RUNNER_VERSION='runner-1',
         ATOM_VERIFIER_DB_PATH='/tmp/data/api.db',ATOM_VERIFIER_ARTIFACT_DIR='/tmp/artifacts',

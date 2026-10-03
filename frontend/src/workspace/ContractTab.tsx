@@ -5,13 +5,15 @@ import { Icon } from "../components/ui/Icon";
 import { TextAreaField } from "../components/ui/Field";
 import { EmptyState, ErrorState } from "../components/ui/States";
 import { formatDateTime } from "../lib/format";
-import type { AcceptanceRun, ProjectStatus, Requirement } from "../lib/types";
+import type { AcceptanceRun, ProjectStatus, Requirement, VerificationStatus } from "../lib/types";
 import { countChecks, describeCheck } from "./acceptance";
 
 type ContractTabProps = {
   status: ProjectStatus;
   requirements: Requirement[];
   acceptance: AcceptanceRun | null;
+  isolated: boolean;
+  verification: VerificationStatus | null;
   onApprove: (note: string) => Promise<void>;
   approving: boolean;
   approveError: string | null;
@@ -25,6 +27,8 @@ export function ContractTab({
   status,
   requirements,
   acceptance,
+  isolated,
+  verification,
   onApprove,
   approving,
   approveError,
@@ -38,11 +42,20 @@ export function ContractTab({
 
   const outcomes = useMemo(() => {
     const map = new Map<string, { passed: boolean; note: string }>();
-    for (const result of acceptance?.results ?? []) {
+    const results = isolated ? verification?.results : acceptance?.results;
+    for (const result of results ?? []) {
       map.set(`${result.key}:${result.checkIndex}`, { passed: result.passed, note: result.note });
     }
     return map;
-  }, [acceptance]);
+  }, [acceptance, isolated, verification]);
+  const completed = isolated
+    ? verification?.state === "passed" || verification?.state === "failed"
+    : acceptance !== null;
+  const passed = isolated ? verification?.passed : acceptance?.passed;
+  const checked = isolated ? verification?.total : acceptance?.total;
+  const checkedAt = isolated && verification?.completedAt
+    ? new Date(verification.completedAt * 1000).toISOString()
+    : acceptance?.createdAt;
 
   if (requirements.length === 0) {
     return (
@@ -101,9 +114,10 @@ export function ContractTab({
       <div className="mx-auto flex max-w-[720px] flex-col gap-l p-l">
         <div className="flex flex-wrap items-center justify-between gap-m">
           <div>
-            <h2 className="text-md font-medium text-neutral-95">需求与验收条件</h2>
+            <h2 className="text-md font-medium text-neutral-95">需求与功能检查</h2>
             <p className="mt-xxs text-sm text-neutral-60">
-              每条检查都会在预览页面里真实执行，不是 Emma 自己说通过。
+              {isolated ? "在隔离浏览器中检查已保存的版本，帮助你发现功能问题。" :
+                "在预览中操作按钮、填写输入并检查结果，帮助你发现功能问题。"}
             </p>
           </div>
           <Button
@@ -111,39 +125,45 @@ export function ContractTab({
             onClick={() => void onRunAcceptance()}
             loading={acceptanceRunning}
             disabled={!canRunAcceptance}
-            title={canRunAcceptance ? "在预览中执行全部检查" : "先构建出可预览的页面"}
+            title={canRunAcceptance ? "执行全部功能检查" : "先构建出可检查的页面"}
           >
             <Icon name="check" size={14} />
-            运行验收
+            检查功能
           </Button>
         </div>
 
-        {acceptanceError ? <ErrorState title="验收失败" message={acceptanceError} compact /> : null}
+        {acceptanceError ? <ErrorState title="检查未完成" message={acceptanceError} compact /> : null}
 
-        {acceptance ? (
+        {isolated && verification?.state === "running" ?
+          <p role="status" className="text-sm text-neutral-60">隔离浏览器正在检查版本，结果会自动更新。</p> : null}
+        {isolated && verification && ["cancelled", "timed_out", "unresolved", "expired"].includes(verification.state) ?
+          <p role="status" className="text-sm text-neutral-60">这次检查没有完成，请重新运行；发布仍按项目策略处理。</p> : null}
+
+        {completed && passed !== null && passed !== undefined && checked !== null && checked !== undefined ? (
           <div
             className={[
               "hairline flex flex-wrap items-center gap-m rounded-l px-l py-m",
-              acceptance.passed === acceptance.total
+              passed === checked
                 ? "border-success-edge bg-success-surface"
                 : "border-danger-edge bg-danger-surface",
             ].join(" ")}
           >
             <p className="text-2xl font-medium tabular-nums text-neutral-95">
-              {acceptance.passed}
-              <span className="text-neutral-40"> / {acceptance.total}</span>
+              {passed}
+              <span className="text-neutral-40"> / {checked}</span>
             </p>
             <div className="flex flex-col">
+              {acceptanceError ? <p className="text-xs text-neutral-60">上次已保存的检查结果</p> : null}
               <p className="text-base font-medium text-neutral-95">
-                {acceptance.passed === acceptance.total ? "全部通过" : "有检查没过"}
+                {passed === checked ? "功能检查通过" : "发现功能问题"}
               </p>
-              <p className="text-sm text-neutral-60">{formatDateTime(acceptance.createdAt)}</p>
+              {checkedAt ? <p className="text-sm text-neutral-60">{formatDateTime(checkedAt)}</p> : null}
             </div>
             <div className="ml-auto flex h-[6px] w-[140px] overflow-hidden rounded-full bg-neutral-12">
               <span
                 className="h-full bg-success transition-[width] duration-ui ease-ui"
                 style={{
-                  width: `${acceptance.total ? (acceptance.passed / acceptance.total) * 100 : 0}%`,
+                  width: `${checked ? (passed / checked) * 100 : 0}%`,
                 }}
               />
             </div>

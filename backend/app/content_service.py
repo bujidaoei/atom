@@ -1,6 +1,7 @@
 """Standalone content ASGI service; no console credentials or API proxy."""
 import asyncio
 from dataclasses import dataclass
+import json
 import mimetypes
 from threading import BoundedSemaphore
 
@@ -15,6 +16,10 @@ from .content_exchange import (EXCHANGE_PATH, EXCHANGE_HEADERS, ExchangeRequestE
                                validate_exchange, receive_handoff, exchange_response)
 from .content_policy import ContentPolicyError, is_control_path
 from .content_hosts import ContentHostError
+from .project_origins import ProjectOriginError
+from .project_port_hosts import ProjectPortHosts
+from .project_public_hosts import ProjectPublicHosts
+from .ip_ingress import HEALTH_PATH
 from .release_view import materialized_content, materialized_private_content
 from .snapshots import SnapshotError
 from .verification_repository import VerificationError
@@ -82,30 +87,27 @@ class ContentService:
     def _response(self, scope, handoff=None):
         method = scope.get('method')
         try:
-            binding = self.hosts.route(scope.get('headers',[]))
-            if self.navigation is not None and scope.get('path')==BOOTSTRAP_PATH:
-                response=bootstrap_response(scope,self.hosts,self.access,self.navigation)
-            elif self.access is not None and scope.get('path')==EXCHANGE_PATH:
-                response=exchange_response(scope,self.hosts,self.access,handoff)
-            elif method not in ('GET','HEAD'):
-                response = Response(status_code=405,headers={**HEADERS,'Allow':'GET, HEAD'})
-            elif binding is None:
-                path = scope.get('path','/')
-                if not path.startswith('/s/'):
-                    response = Response(status_code=404,headers=HEADERS)
+            path = scope.get('path')
+            if (isinstance(self.hosts, ProjectPublicHosts) and path == HEALTH_PATH):
+                if (method not in ('GET', 'HEAD') or scope.get('scheme') != 'https'
+                        or scope.get('query_string', b'')
+                        or scope.get('raw_path', b'') != HEALTH_PATH.encode('ascii')):
+                    response = Response(status_code=404, headers=HEADERS)
                 else:
-                    destination = self.repository.sharing_binding(slug=path[3:])
-                    response = Response(status_code=307,headers={**HEADERS,
-                        'Location':self.hosts.url(destination.id)})
+                    route = ProjectPortHosts(self.hosts.address, self.hosts.origins).route(
+                        scope.get('headers', []), purpose='public')
+                    body = json.dumps({'purpose':'public', 'projectId':route.project_id},
+                                      sort_keys=True, separators=(',', ':'))
+                    response = Response(body, media_type='application/json', headers=HEADERS)
             else:
-                # Browser navigation metadata is a fallback hint, never auth.
-                navigation = any(k.lower()==b'sec-fetch-mode' and v==b'navigate' for k,v in scope['headers'])
-                response = self._read(binding,scope.get('path','/'),navigation,
-                    content_session_cookie(scope.get('headers',[])))
+                binding = self.hosts.route(scope.get('headers',[]))
+                response = self._routed_response(scope, method, binding, handoff)
         except ExchangeRequestError as error:
             response=Response(status_code=error.status,headers={**EXCHANGE_HEADERS,**({'Allow':error.allow} if error.allow else {})})
         except ContentHostError:
             response = Response(status_code=404,headers=HEADERS)
+        except ProjectOriginError:
+            response = Response(status_code=503,headers=HEADERS)
         except AccessError as error:
             code=404 if str(error) in ('content_access_denied','session_not_found') else 503
             response=Response(status_code=code,headers=HEADERS)
@@ -116,6 +118,28 @@ class ContentService:
             response = Response(status_code=503,headers=HEADERS)
         if method=='HEAD':
             response.body=b''
+        return response
+
+    def _routed_response(self, scope, method, binding, handoff):
+        if self.navigation is not None and scope.get('path')==BOOTSTRAP_PATH:
+            response=bootstrap_response(scope,self.hosts,self.access,self.navigation)
+        elif self.access is not None and scope.get('path')==EXCHANGE_PATH:
+            response=exchange_response(scope,self.hosts,self.access,handoff)
+        elif method not in ('GET','HEAD'):
+            response = Response(status_code=405,headers={**HEADERS,'Allow':'GET, HEAD'})
+        elif binding is None:
+            path = scope.get('path','/')
+            if not path.startswith('/s/'):
+                response = Response(status_code=404,headers=HEADERS)
+            else:
+                destination = self.repository.sharing_binding(slug=path[3:])
+                response = Response(status_code=307,headers={**HEADERS,
+                    'Location':self.hosts.url(destination.id)})
+        else:
+            # Browser navigation metadata is a fallback hint, never auth.
+            navigation = any(k.lower()==b'sec-fetch-mode' and v==b'navigate' for k,v in scope['headers'])
+            response = self._read(binding,scope.get('path','/'),navigation,
+                content_session_cookie(scope.get('headers',[])))
         return response
 
     def _release(self, token):
