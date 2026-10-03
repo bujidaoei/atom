@@ -18,6 +18,7 @@ When the old-schema rollback fence reports `candidate_has_unmerged_writes`, the 
 5. Record each phase, exact image/data IDs, backup manifest and terminal outcome. On failure before exposure, restore the previous compatible generation and HTTPS routes by exact ID. After exposure, use a fresh write fence: if the new generation has owner writes, retain it and refuse an older data generation. Recovery never automatically copies SQL rows between schemas or manufactures publication receipts.
 
 `app.ip_ingress.render_ip_maintenance_routes` and `probe_ip_maintenance_routes` now provide the project-origin configuration and write-denial check for step 2. They have not been connected to a host transaction or applied to production. The render preserves exact allocated TLS authorities and ACME settings while replacing upstream proxying with 503/no-store; the probe requires each HTTPS origin to reject POST with 503/no-store and no cookie.
+`IpIngressController.maintain()` now applies that rendered configuration through the existing file lock, Caddy validation, atomic replace, reload, per-origin probe and restoration-on-failure path. The CLI exposes this as `--maintenance` with a caller-supplied write-blocked console base. The forward host transaction must create and validate that console base and must still independently probe console GET/POST before stopping writers.
 
 ## Verification boundary
 

@@ -119,6 +119,45 @@ def test_forward_maintenance_probe_requires_tls_503_no_store_without_cookies(ing
         probe_ip_maintenance_routes(origins.active_routes(), config.address)
 
 
+def test_forward_maintenance_apply_and_recovery_reuse_atomic_caddy_controller(ingress):
+    origins, config, base, active = ingress
+    normal_base = base.read_bytes()
+    base.write_text('https://192.0.2.10 {\n  header Cache-Control "no-store"\n'
+                    '  respond "maintenance" 503\n}\n', encoding='utf-8')
+    caddy = ObservedCaddy()
+    calls = []
+    controller = IpIngressController(origins, config, base, active, caddy,
+        probe=lambda _routes, _address: calls.append('normal'),
+        maintenance_probe=lambda routes, address: calls.append(
+            ('maintenance', len(routes), address)), probe_budget_seconds=0)
+    maintenance_digest = controller.maintain()
+    maintenance = active.read_bytes()
+    assert hashlib.sha256(maintenance).hexdigest() == maintenance_digest
+    assert b'reverse_proxy' not in maintenance and maintenance.count(b'  respond ') == 3
+    assert calls == [('maintenance', 2, config.address)]
+    base.write_bytes(normal_base)
+    normal_digest = controller.reconcile()
+    assert hashlib.sha256(active.read_bytes()).hexdigest() == normal_digest
+    assert active.read_bytes() != maintenance
+    assert calls[-1] == 'normal' and caddy.reloads == 2
+
+
+def test_forward_maintenance_probe_failure_restores_prior_caddyfile(ingress):
+    origins, config, base, active = ingress
+    before = active.read_bytes()
+    base.write_text('https://192.0.2.10 {\n  respond "maintenance" 503\n}\n',
+                    encoding='utf-8')
+    caddy = ObservedCaddy()
+    controller = IpIngressController(origins, config, base, active, caddy,
+        maintenance_probe=lambda _routes, _address: (_ for _ in ())
+            .throw(IngressError('maintenance_probe_mismatch')),
+        probe_budget_seconds=0)
+    with pytest.raises(IngressError, match='ingress_apply_failed'):
+        controller.maintain()
+    assert active.read_bytes() == before
+    assert caddy.reloads == 2
+
+
 @pytest.mark.parametrize('failure', ['mount', 'validation', 'reload', 'probe'])
 def test_failed_stage_preserves_previous_caddyfile(ingress, failure):
     origins, config, base, active = ingress

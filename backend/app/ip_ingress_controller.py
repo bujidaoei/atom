@@ -14,7 +14,8 @@ import subprocess
 import tempfile
 import time
 
-from .ip_ingress import IngressError, IpIngressConfig, probe_ip_routes, render_ip_routes
+from .ip_ingress import (IngressError, IpIngressConfig, probe_ip_maintenance_routes,
+                         probe_ip_routes, render_ip_maintenance_routes, render_ip_routes)
 from .project_origins import ProjectOriginRepository
 
 
@@ -120,21 +121,24 @@ class DockerCaddy:
 class IpIngressController:
     def __init__(self, repository: ProjectOriginRepository, config: IpIngressConfig,
                  base: Path, active: Path, caddy: DockerCaddy, *,
-                 probe=probe_ip_routes, probe_budget_seconds: float = 90):
+                 probe=probe_ip_routes, maintenance_probe=probe_ip_maintenance_routes,
+                 probe_budget_seconds: float = 90):
         if (not isinstance(repository, ProjectOriginRepository)
                 or not isinstance(config, IpIngressConfig)
                 or not isinstance(base, Path) or not isinstance(active, Path)
                 or not base.is_absolute() or not active.is_absolute()
                 or base == active or base.parent != active.parent
                 or not isinstance(caddy, DockerCaddy)
-                or not callable(probe)
+                or not callable(probe) or not callable(maintenance_probe)
                 or isinstance(probe_budget_seconds, bool)
                 or not isinstance(probe_budget_seconds, (int, float))
                 or not 0 <= probe_budget_seconds <= 300):
             raise IngressError('invalid_ingress_controller')
         self.repository, self.config = repository, config
         self.base, self.active, self.caddy = base, active, caddy
-        self.probe, self.probe_budget_seconds = probe, probe_budget_seconds
+        self.probe = probe
+        self.maintenance_probe = maintenance_probe
+        self.probe_budget_seconds = probe_budget_seconds
 
     def reconcile(self) -> str:
         """Validate, replace, reload and probe; restore prior bytes on failure.
@@ -143,6 +147,13 @@ class IpIngressController:
         process restart repairs a missing listener. New ledger rows that appear
         during application trigger another pass under the same host lock.
         """
+        return self._apply(maintenance=False)
+
+    def maintain(self) -> str:
+        """Atomically deny project-origin writes and verify every TLS port."""
+        return self._apply(maintenance=True)
+
+    def _apply(self, *, maintenance: bool) -> str:
         with _exclusive(self.active.parent / '.atom-ingress.lock'):
             self.caddy.ensure_directory_bind(self.active.parent)
             for _attempt in range(3):
@@ -158,7 +169,9 @@ class IpIngressController:
                 except UnicodeError:
                     raise IngressError('invalid_base_caddyfile') from None
                 routes = self.repository.active_routes()
-                candidate = render_ip_routes(base_text, routes, self.config).encode('utf-8')
+                renderer = render_ip_maintenance_routes if maintenance else render_ip_routes
+                candidate = renderer(base_text, routes, self.config).encode('utf-8')
+                probe = self.maintenance_probe if maintenance else self.probe
                 mode = stat.S_IMODE(self.active.stat().st_mode)
                 self.caddy.validate(candidate)
                 # _replace can fail after os.replace (for example during the
@@ -170,7 +183,7 @@ class IpIngressController:
                     deadline = time.monotonic() + self.probe_budget_seconds
                     while True:
                         try:
-                            self.probe(routes, self.config.address)
+                            probe(routes, self.config.address)
                             break
                         except IngressError:
                             if time.monotonic() >= deadline:
@@ -196,6 +209,7 @@ def main() -> int:
         parser.add_argument('--' + name, required=True)
     parser.add_argument('--first-port', type=int, required=True)
     parser.add_argument('--last-port', type=int, required=True)
+    parser.add_argument('--maintenance', action='store_true')
     arguments = parser.parse_args()
     repository = ProjectOriginRepository(Path(arguments.db), first_port=arguments.first_port,
                                          last_port=arguments.last_port)
@@ -203,7 +217,7 @@ def main() -> int:
                              arguments.public_upstream, arguments.acme_directory)
     controller = IpIngressController(repository, config, Path(arguments.base),
         Path(arguments.active), DockerCaddy(arguments.container, '/etc/caddy/Caddyfile'))
-    print(controller.reconcile())
+    print(controller.maintain() if arguments.maintenance else controller.reconcile())
     return 0
 
 
