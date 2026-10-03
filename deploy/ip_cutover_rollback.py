@@ -211,13 +211,17 @@ def _old_locations(identity: dict) -> dict[str, str]:
     return locations
 
 
-def _stop_remove_candidate(name: str, expected_image: str | None) -> None:
+def _stop_remove_candidate(name: str, expected_image: str | None,
+                           *, grace_seconds: int) -> None:
     item = _inspect(name)
     if item is None:
         return
     if expected_image is not None and item.get("Image") != expected_image:
         raise RollbackError("candidate_image_mismatch")
-    _run("container", "stop", "--time", "90", name)
+    if type(grace_seconds) is not int or not 1 <= grace_seconds <= 90:
+        raise RollbackError("invalid_stop_grace")
+    _run("container", "stop", "--time", str(grace_seconds), name,
+         timeout=grace_seconds + 15)
     _run("container", "rm", name)
 
 
@@ -282,7 +286,8 @@ def rollback(identity: dict, *, console_url: str,
     for role in ("broker", "api"):
         canonical = names[role]
         if locations[role] != canonical:
-            _stop_remove_candidate(canonical, identity["candidateImageId"])
+            _stop_remove_candidate(canonical, identity["candidateImageId"],
+                                   grace_seconds=90 if role == "broker" else 30)
             _run("container", "rename", _rollback_name(canonical), canonical)
     _start_if_needed(names["api"])
     _start_if_needed(names["broker"])
@@ -298,7 +303,7 @@ def rollback(identity: dict, *, console_url: str,
                 "com.docker.compose.project")
             if project != "atom-ip-ingress":
                 raise RollbackError("candidate_caddy_identity_mismatch")
-            _stop_remove_candidate(names["caddy"], None)
+            _stop_remove_candidate(names["caddy"], None, grace_seconds=15)
         _run("container", "rename", _rollback_name(names["caddy"]), names["caddy"])
     _start_if_needed(names["caddy"])
     _await_console(console_url, ca_file=ca_file)
@@ -314,7 +319,8 @@ def rollback(identity: dict, *, console_url: str,
                 item.get("Config", {}).get("Labels", {}).get(
                     "com.docker.compose.project") != project):
             raise RollbackError("candidate_support_identity_mismatch")
-        _stop_remove_candidate(name, identity["candidateImageId"])
+        _stop_remove_candidate(name, identity["candidateImageId"],
+                               grace_seconds=75 if role == "verifier" else 15)
     for role in DEFAULT_CONTAINERS:
         name = names[role]
         item = _inspect(name)

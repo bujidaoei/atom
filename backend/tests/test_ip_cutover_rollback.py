@@ -104,7 +104,7 @@ class RollbackTest(unittest.TestCase):
         self.assertFalse(any(name in docker.items for name in module.DEFAULT_EXTRA.values()))
         self.assertLess(docker.commands.index(("container", "stop", "--time", "90",
                                                "atom-candidate-broker")),
-                        docker.commands.index(("container", "stop", "--time", "90",
+                        docker.commands.index(("container", "stop", "--time", "30",
                                                "atom-candidate")))
 
     def test_missing_old_identity_rejects_before_removing_candidate(self):
