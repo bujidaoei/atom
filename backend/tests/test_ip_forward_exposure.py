@@ -29,7 +29,8 @@ class ForwardExposureTest(TestCase):
         self.prepared.directory = Path("/private/candidate")
         self.held = Mock()
         self.started = starter.StartedCandidate(
-            {"api": "a" * 64}, Path("/state/baseline.json"), "e" * 64,
+            {"api": "a" * 64, "caddy": "c" * 64},
+            Path("/state/baseline.json"), "e" * 64,
             "f" * 64)
         self.controller = Mock()
         self.events = []
@@ -51,7 +52,10 @@ class ForwardExposureTest(TestCase):
                 patch.object(exposure.ip_cutover_rollback, "_await_console"),
                 patch.object(exposure.ip_cutover_apply,
                              "_maintenance_caddyfile", return_value=b"maintenance"),
-                patch.object(exposure.ip_cutover_apply, "_maintenance_probe"))
+                patch.object(exposure.ip_cutover_apply, "_maintenance_probe"),
+                patch.object(exposure.ip_forward_start, "_current",
+                             return_value={"Id": "c" * 64,
+                                           "State": {"Running": True}}))
 
     def test_intent_precedes_normal_route_and_acceptance_receipt(self):
         phase = {"value": "candidate_ready"}
@@ -77,7 +81,7 @@ class ForwardExposureTest(TestCase):
         self.controller.transition_base.side_effect = (
             lambda _payload, **_kwargs: self.events.append("maintenance"))
         with self._patches()[0], self._patches()[1], self._patches()[4], \
-             self._patches()[5], \
+             self._patches()[5], self._patches()[6], \
              patch.object(exposure.ip_forward_writers, "ensure_stopped",
                           side_effect=lambda *_args: self.events.append("stop")), \
              patch.object(exposure.candidate_write_fence, "compare_baseline",
@@ -100,6 +104,7 @@ class ForwardExposureTest(TestCase):
             lambda payload, **_kwargs: self.events.append(payload))
         with self._patches()[0], self._patches()[1], self._patches()[2], \
              self._patches()[3], self._patches()[4], self._patches()[5], \
+             self._patches()[6], \
              patch.object(exposure.ip_forward_writers, "ensure_stopped",
                           return_value=Mock()), \
              patch.object(exposure.candidate_write_fence, "compare_baseline",
@@ -120,6 +125,7 @@ class ForwardExposureTest(TestCase):
         self.stage.journal.read.return_value = {"phase": "exposure_intent"}
         with self._patches()[0], self._patches()[1], self._patches()[2], \
              self._patches()[3], self._patches()[4], self._patches()[5], \
+             self._patches()[6], \
              patch.object(exposure.ip_forward_writers, "ensure_stopped",
                           return_value=Mock()), \
              patch.object(exposure.candidate_write_fence, "compare_baseline",
@@ -138,6 +144,7 @@ class ForwardExposureTest(TestCase):
         self.stage.journal.read.return_value = {"phase": "candidate_ready"}
         with self._patches()[0], self._patches()[1], self._patches()[2], \
              self._patches()[3], self._patches()[4], self._patches()[5], \
+             self._patches()[6], \
              patch.object(exposure.ip_forward_writers, "ensure_stopped", return_value=Mock()), \
              patch.object(exposure.candidate_write_fence, "compare_baseline",
                           return_value=False), \
@@ -152,6 +159,60 @@ class ForwardExposureTest(TestCase):
         self.assertEqual(
             self.stage.journal.advance.call_args.kwargs["evidence"]["writeFence"],
             "changed")
+
+    def test_stopped_exact_caddy_restarts_only_after_writers_are_fenced(self):
+        self.stage.journal.read.return_value = {"phase": "awaiting_acceptance"}
+        caddy_running = {"value": False}
+
+        def current(_config, role):
+            self.assertEqual(role, "caddy")
+            return {"Id": self.started.ids["caddy"],
+                    "State": {"Running": caddy_running["value"]}}
+
+        def fence(*_args):
+            self.events.append("fence")
+            return Mock()
+
+        def start(_docker, *args, **_kwargs):
+            self.assertEqual(args, ("container", "start",
+                                    self.started.ids["caddy"]))
+            self.assertEqual(self.events, ["fence"])
+            caddy_running["value"] = True
+            self.events.append("start_caddy")
+
+        self.controller.transition_base.side_effect = (
+            lambda _payload, **_kwargs: self.events.append("maintenance"))
+        with self._patches()[0], self._patches()[1], self._patches()[4], \
+             self._patches()[5], \
+             patch.object(exposure.ip_forward_start, "_current",
+                          side_effect=current), \
+             patch.object(exposure.ip_forward_writers, "ensure_stopped",
+                          side_effect=fence) as stop, \
+             patch.object(exposure.ip_forward_writers, "_run",
+                          side_effect=start), \
+             patch.object(exposure.candidate_write_fence,
+                          "compare_baseline", return_value=True), \
+             patch.object(exposure.ip_forward_start, "_cleanup_candidate"), \
+             patch.object(exposure.ip_forward_hold, "restore"):
+            self.assertEqual(exposure.recover_after_exposure(**self._kwargs()),
+                             "source_restored")
+        stop.assert_called_once()
+        self.assertEqual(self.events[:3],
+                         ["fence", "start_caddy", "maintenance"])
+
+    def test_replaced_caddy_refuses_before_writer_or_ingress_changes(self):
+        self.stage.journal.read.return_value = {"phase": "awaiting_acceptance"}
+        with self._patches()[0], self._patches()[1], \
+             patch.object(exposure.ip_forward_start, "_current",
+                          return_value={"Id": "f" * 64,
+                                        "State": {"Running": False}}), \
+             patch.object(exposure.ip_forward_writers,
+                          "ensure_stopped") as stop:
+            with self.assertRaisesRegex(exposure.ExposureError,
+                                        "forward_exposure_service_changed"):
+                exposure.recover_after_exposure(**self._kwargs())
+        stop.assert_not_called()
+        self.controller.transition_base.assert_not_called()
 
 
 if __name__ == "__main__":

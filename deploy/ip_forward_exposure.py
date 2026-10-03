@@ -37,7 +37,8 @@ def _identity(*, config: protected_cutover.CutoverConfig,
               started: ip_forward_start.StartedCandidate,
               successor_revision: str, successor_image: str,
               verify_baseline: bool = True,
-              allow_stopped_writers: bool = False) -> dict:
+              allow_stopped_writers: bool = False,
+              allow_stopped_caddy: bool = False) -> dict:
     receipt = ip_forward_identity.read(
         stage.journal.identity_path, config=config,
         successor_revision=successor_revision)
@@ -68,6 +69,7 @@ def _identity(*, config: protected_cutover.CutoverConfig,
         item = ip_forward_start._current(config, role)
         _require(item is not None and item.get("Id") == started.ids[role]
                  and (allow_stopped_writers and role != "caddy"
+                      or allow_stopped_caddy and role == "caddy"
                       or item.get("State", {}).get("Running") is True),
                  "forward_exposure_service_changed")
         ip_forward_start._profile(
@@ -103,16 +105,35 @@ def recover_after_exposure(*, config: protected_cutover.CutoverConfig,
     receipt = _identity(config=config, stage=stage, prepared=prepared,
         held=held, started=started, successor_revision=successor_revision,
         successor_image=successor_image, verify_baseline=False,
-        allow_stopped_writers=True)
+        allow_stopped_writers=True, allow_stopped_caddy=True)
     controller = _candidate_controller(config=config, stage=stage,
                                        prepared=prepared)
+    caddy = ip_forward_start._current(config, "caddy")
+    _require(caddy is not None and caddy.get("Id") == started.ids["caddy"],
+             "forward_exposure_service_changed")
+    # A stopped ingress cannot validate or reload its configuration. Fence all
+    # candidate writers first, then restart only the profiled exact Caddy ID.
+    # Until maintenance is applied it may serve reads, but no write endpoint
+    # has a running backend. Never start an unknown replacement container.
+    stopped = None
+    if caddy.get("State", {}).get("Running") is not True:
+        stopped = ip_forward_writers.ensure_stopped(
+            config, started.ids, prepared.directory)
+        ip_forward_writers._run(config.docker, "container", "start",
+                                started.ids["caddy"], timeout=45)
+        restarted = ip_forward_start._current(config, "caddy")
+        _require(restarted is not None
+                 and restarted.get("Id") == started.ids["caddy"]
+                 and restarted.get("State", {}).get("Running") is True,
+                 "forward_exposure_caddy_restart_failed")
     maintenance = ip_cutover_apply._maintenance_caddyfile(
         stage.publication["ATOM_PUBLIC_IP"],
         stage.publication["ATOM_ACME_DIRECTORY"])
     controller.transition_base(maintenance, maintenance=True)
     ip_cutover_apply._maintenance_probe(stage.publication["ATOM_PUBLIC_IP"])
-    stopped = ip_forward_writers.ensure_stopped(
-        config, started.ids, prepared.directory)
+    if stopped is None:
+        stopped = ip_forward_writers.ensure_stopped(
+            config, started.ids, prepared.directory)
     try:
         unchanged = candidate_write_fence.compare_baseline(
             started.baseline_path, candidate_directory=prepared.directory,
