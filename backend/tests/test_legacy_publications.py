@@ -67,6 +67,28 @@ def test_import_rejects_changed_or_withdrawn_old_site(legacy_site):
 
 
 @pytest.mark.parametrize('prepared', [12], indirect=True)
+def test_import_rejects_unexpected_and_oversized_files_before_reading(legacy_site,
+                                                                       monkeypatch):
+    path, published, site, store = legacy_site
+    extra = site / 'unregistered.txt'
+    extra.write_bytes(b'unregistered')
+    with pytest.raises(LegacyPublicationError, match='files_mismatch'):
+        inspect_live_legacy(path, published, store, project_id='project', slug='old-site')
+    extra.unlink()
+    original_open = legacy_module.os.open
+
+    def forbid_large_open(file, *args, **kwargs):
+        if str(file).endswith('index.html'):
+            pytest.fail('oversized legacy file was opened')
+        return original_open(file, *args, **kwargs)
+
+    (site / 'index.html').write_bytes(b'content larger than saved snapshot')
+    monkeypatch.setattr(legacy_module.os, 'open', forbid_large_open)
+    with pytest.raises(LegacyPublicationError, match='files_mismatch'):
+        inspect_live_legacy(path, published, store, project_id='project', slug='old-site')
+
+
+@pytest.mark.parametrize('prepared', [12], indirect=True)
 def test_ingress_failure_does_not_create_legacy_release(legacy_site):
     path, published, _site, store = legacy_site
     def unavailable():

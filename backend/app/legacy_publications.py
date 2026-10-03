@@ -10,6 +10,7 @@ from dataclasses import dataclass
 import hashlib
 import io
 import json
+import os
 from pathlib import Path
 import sqlite3
 import ssl
@@ -22,7 +23,7 @@ from .cos_artifacts import CosArtifactStore
 from .ip_ingress import IngressError, probe_ip_routes
 from .project_origins import OriginRoute, ProjectOriginError, ProjectOriginRepository
 from .release_repository import ReleaseRepository, ReleaseReceipt
-from .snapshots import SnapshotError, verify_snapshot
+from .snapshots import Limits, SnapshotError, verify_snapshot
 from .storage_config import ObjectStorageSettings
 from .verification_repository import VerificationError
 
@@ -80,16 +81,47 @@ def inspect_live_legacy(database: Path, published_root: Path, store: SnapshotSto
     directory = Path(published_root) / slug
     if directory.is_symlink() or not directory.is_dir():
         raise LegacyPublicationError('legacy_import_files_mismatch')
+    expected = {entry.path: (entry.size, entry.sha256) for entry in manifest.files}
+    limits = Limits()
     actual = {}
+    visited = 0
     for path in directory.rglob('*'):
+        visited += 1
+        if visited > limits.max_entries:
+            raise LegacyPublicationError('legacy_import_files_mismatch')
         info = path.lstat()
         if stat.S_ISDIR(info.st_mode):
             continue
         if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
             raise LegacyPublicationError('legacy_import_files_mismatch')
-        actual[path.relative_to(directory).as_posix()] = (info.st_size,
-            hashlib.sha256(path.read_bytes()).hexdigest())
-    expected = {entry.path: (entry.size, entry.sha256) for entry in manifest.files}
+        relative = path.relative_to(directory).as_posix()
+        if (relative not in expected or len(actual) >= limits.max_files
+                or info.st_size != expected[relative][0]
+                or info.st_size > limits.max_file_bytes):
+            raise LegacyPublicationError('legacy_import_files_mismatch')
+        digest = hashlib.sha256()
+        descriptor = os.open(path, os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0)
+                             | getattr(os, 'O_NONBLOCK', 0))
+        try:
+            opened = os.fstat(descriptor)
+            if (not stat.S_ISREG(opened.st_mode) or opened.st_nlink != 1
+                    or (opened.st_dev, opened.st_ino) != (info.st_dev, info.st_ino)
+                    or opened.st_size != info.st_size):
+                raise LegacyPublicationError('legacy_import_files_mismatch')
+            size = 0
+            while chunk := os.read(descriptor, min(65536, expected[relative][0] - size + 1)):
+                size += len(chunk)
+                if size > expected[relative][0]:
+                    raise LegacyPublicationError('legacy_import_files_mismatch')
+                digest.update(chunk)
+            after = os.fstat(descriptor)
+            identity = lambda record: (record.st_dev, record.st_ino, record.st_size,
+                                       record.st_mtime_ns, record.st_ctime_ns, record.st_nlink)
+            if size != expected[relative][0] or identity(opened) != identity(after):
+                raise LegacyPublicationError('legacy_import_files_mismatch')
+        finally:
+            os.close(descriptor)
+        actual[relative] = (size, digest.hexdigest())
     if actual != expected:
         raise LegacyPublicationError('legacy_import_files_mismatch')
     return LegacyImport(result.project_id, result.slug, result.owner, result.revision_id,
