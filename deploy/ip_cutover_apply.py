@@ -190,7 +190,9 @@ def _compose_environment(original: dict[str, str], candidate: Path,
                 "ATOM_VERIFIER_WORKER_IMAGE", "ATOM_VERIFIER_ID",
                 "ATOM_VERIFIER_POLICY_PATH", "ATOM_DOCKER_CLI_PATH",
                 "ATOM_VERIFIER_ENV_FILE", "ATOM_PREVIEW_UPSTREAM",
-                "ATOM_PUBLIC_UPSTREAM", "ATOM_ACME_DIRECTORY"}
+                "ATOM_PUBLIC_UPSTREAM", "ATOM_ACME_DIRECTORY",
+                "ATOM_PREVIEW_SERVICE_IP", "ATOM_PUBLIC_SERVICE_IP",
+                "ATOM_CANDIDATE_API_IP"}
     _require(all(values.get(key) for key in required), "incomplete_compose_environment")
     path = candidate / "compose.env"
     ip_cutover_env._write_private(path, values)
@@ -264,7 +266,8 @@ def _legacy_candidates(image: str, data: Path,
 
 
 def _start_candidate_pair(config: protected_cutover.CutoverConfig,
-                          candidate: Path, image: str, verifier_network: str) -> None:
+                          candidate: Path, image: str, verifier_network: str,
+                          api_ip: str) -> None:
     api_env = candidate / "private-env" / "api.env"
     broker_env = candidate / "private-env" / "broker.env"
     _command(["docker", "container", "rename", config.api,
@@ -272,7 +275,7 @@ def _start_candidate_pair(config: protected_cutover.CutoverConfig,
     _command(["docker", "container", "rename", config.broker,
               ip_cutover_rollback._rollback_name(config.broker)], timeout=20)
     _command(["docker", "container", "create", "--name", config.api,
-              "--network", config.network, "--publish",
+              "--network", config.network, "--ip", api_ip, "--publish",
               f"127.0.0.1:{config.loopback_port}:80", "--volume",
               f"{candidate / 'data'}:/data", "--env-file", str(api_env),
               "--restart", "unless-stopped", "--log-driver", "local",
@@ -348,7 +351,9 @@ def _publication_inputs(inputs: Inputs,
                 "ATOM_LAST_PORT", "ATOM_VERIFIER_NETWORK",
                 "ATOM_VERIFIER_WORKER_IMAGE", "ATOM_VERIFIER_POLICY_PATH",
                 "ATOM_VERIFIER_ENV_FILE", "ATOM_PREVIEW_UPSTREAM",
-                "ATOM_PUBLIC_UPSTREAM", "ATOM_ACME_DIRECTORY"}
+                "ATOM_PUBLIC_UPSTREAM", "ATOM_ACME_DIRECTORY",
+                "ATOM_PREVIEW_SERVICE_IP", "ATOM_PUBLIC_SERVICE_IP",
+                "ATOM_CANDIDATE_API_IP"}
     _require(all(values.get(key) for key in required)
              and values["ATOM_DATA_BIND"] == str(config.data)
              and values["ATOM_PROXY_NETWORK"] == config.network
@@ -368,7 +373,20 @@ def _publication_inputs(inputs: Inputs,
              "verifier_policy_missing")
     _command(["docker", "network", "inspect", values["ATOM_VERIFIER_NETWORK"]],
              timeout=15)
-    _candidate_address_free(config.network, inputs.candidate_caddy_ip)
+    candidate_ips = (inputs.candidate_caddy_ip,
+                     values["ATOM_PREVIEW_SERVICE_IP"],
+                     values["ATOM_PUBLIC_SERVICE_IP"],
+                     values["ATOM_CANDIDATE_API_IP"])
+    try:
+        valid_ips = (len(set(candidate_ips)) == 4
+                     and all(ipaddress.ip_address(ip).version == 4
+                             and ipaddress.ip_address(ip).compressed == ip
+                             for ip in candidate_ips))
+    except ValueError as exc:
+        raise ApplyError("invalid_candidate_bridge_ips") from exc
+    _require(valid_ips, "invalid_candidate_bridge_ips")
+    for ip in candidate_ips:
+        _candidate_address_free(config.network, ip)
     _origin_ports_free(first, last)
     for name in ("atom-preview", "atom-public", "atom-verifier",
                  "atom-tls-rollback", config.api + "-rollback",
@@ -503,7 +521,8 @@ def apply(inputs: Inputs, *, rehearsal: bool = False) -> dict[str, object]:
                          details={"candidateDirectory": str(candidate)})
 
             _start_candidate_pair(config, candidate, inputs.image_id,
-                                  publication["ATOM_VERIFIER_NETWORK"])
+                                  publication["ATOM_VERIFIER_NETWORK"],
+                                  publication["ATOM_CANDIDATE_API_IP"])
             _record(ledger, outcome="candidate_pair_ready", image_id=inputs.image_id,
                          details={"candidateDirectory": str(candidate)})
 

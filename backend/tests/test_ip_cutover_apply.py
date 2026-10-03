@@ -41,6 +41,50 @@ class Ledger:
 
 
 class CutoverApplyTest(unittest.TestCase):
+    def _publication_case(self, preview_ip: str, public_ip: str,
+                          api_ip: str) -> list[str]:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            policy = root / "policy.json"
+            policy.write_text("{}", encoding="utf-8")
+            inputs = module.Inputs(root / "protected.json", root / "publication.env",
+                                   root / "source", REVISION, IMAGE, "172.19.0.4")
+            config = SimpleNamespace(data=root / "data", network="test-network",
+                                     api="old-api", broker="old-broker")
+            values = {
+                "ATOM_PUBLICATION_IMAGE": "atom-test:latest",
+                "ATOM_CADDY_IMAGE": "caddy:2", "ATOM_STORAGE_ENV_FILE": str(root / "storage.env"),
+                "ATOM_DATA_BIND": str(config.data), "ATOM_PROXY_NETWORK": config.network,
+                "ATOM_CADDY_PROXY_IP": "172.19.0.2", "ATOM_PUBLIC_IP": "159.75.231.98",
+                "ATOM_FIRST_PORT": "20000", "ATOM_LAST_PORT": "20127",
+                "ATOM_VERIFIER_NETWORK": "verifier-private",
+                "ATOM_VERIFIER_WORKER_IMAGE": "worker:latest",
+                "ATOM_VERIFIER_POLICY_PATH": str(policy),
+                "ATOM_VERIFIER_ENV_FILE": str(root / "verifier.env"),
+                "ATOM_PREVIEW_UPSTREAM": "atom-preview:8765",
+                "ATOM_PUBLIC_UPSTREAM": "atom-public:8765",
+                "ATOM_ACME_DIRECTORY": "https://acme.example/directory",
+                "ATOM_PREVIEW_SERVICE_IP": preview_ip,
+                "ATOM_PUBLIC_SERVICE_IP": public_ip,
+                "ATOM_CANDIDATE_API_IP": api_ip,
+            }
+            with patch.object(module, "_private_env", return_value=values), patch.object(
+                    module, "_command", side_effect=lambda args, **_kwargs:
+                    IMAGE if args[:3] == ["docker", "image", "inspect"] else ""), patch.object(
+                    module, "_candidate_address_free") as address_free, patch.object(
+                    module, "_origin_ports_free"), patch.object(
+                    module.ip_cutover_rollback, "_inspect", return_value=None):
+                module._publication_inputs(inputs, config)
+                return [call.args[1] for call in address_free.call_args_list]
+
+    def test_candidate_bridge_addresses_are_distinct_and_reserved(self):
+        self.assertEqual(self._publication_case("172.19.0.6", "172.19.0.7", "172.19.0.8"),
+                         ["172.19.0.4", "172.19.0.6", "172.19.0.7", "172.19.0.8"])
+        with self.assertRaisesRegex(module.ApplyError, "invalid_candidate_bridge_ips"):
+            self._publication_case("172.19.0.4", "172.19.0.7", "172.19.0.8")
+        with self.assertRaisesRegex(module.ApplyError, "invalid_candidate_bridge_ips"):
+            self._publication_case("not-an-ip", "172.19.0.7", "172.19.0.8")
+
     def test_port_preflight_rejects_an_occupied_listener(self):
         with socket.socket() as listener:
             listener.bind(("0.0.0.0", 0))

@@ -49,6 +49,9 @@ services:
   atom-preview:
     <<: *content-service
     container_name: atom-preview
+    networks:
+      ingress:
+        ipv4_address: ${ATOM_PREVIEW_SERVICE_IP:?set the reserved preview bridge IP}
     environment:
       PYTHONDONTWRITEBYTECODE: "1"
       ATOM_PREVIEW_DB_PATH: /data/atom.db
@@ -72,6 +75,9 @@ services:
   atom-public:
     <<: *content-service
     container_name: atom-public
+    networks:
+      ingress:
+        ipv4_address: ${ATOM_PUBLIC_SERVICE_IP:?set the reserved public bridge IP}
     environment:
       PYTHONDONTWRITEBYTECODE: "1"
       ATOM_PUBLIC_DB_PATH: /data/atom.db
