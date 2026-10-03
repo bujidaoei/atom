@@ -91,20 +91,47 @@ def transfer_registered(database: Path, local: SnapshotStore, remote: SnapshotSt
     return TransferReceipt(version, len(entries), total, digest)
 
 
+def verify_registered_remote(database: Path, remote: SnapshotStore,
+                             *, maximum: int = 10000) -> TransferReceipt:
+    """Read and validate every registered COS snapshot without a remote PUT."""
+    if (type(maximum) is not int or not 1 <= maximum <= 10000
+            or not isinstance(database, Path) or not database.is_absolute()
+            or not callable(getattr(remote, 'read', None))):
+        raise TransferError('invalid_transfer_configuration')
+    entries, version, digest = _inventory(database, maximum=maximum)
+    total = 0
+    for expected in entries:
+        try:
+            if _describe(remote.read(expected.key)) != expected:
+                raise TransferError('transfer_destination_mismatch')
+        except ArtifactError:
+            raise TransferError('transfer_artifact_unavailable') from None
+        total += expected.size
+    _, final_version, final_digest = _inventory(database, maximum=maximum)
+    if final_version != version or final_digest != digest:
+        raise TransferError('transfer_inventory_changed')
+    return TransferReceipt(version, len(entries), total, digest)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description='Verify registered local snapshots in private COS')
     parser.add_argument('--database', type=Path, required=True)
-    parser.add_argument('--local-artifacts', type=Path, required=True)
+    parser.add_argument('--local-artifacts', type=Path)
+    parser.add_argument('--verify-only', action='store_true')
     args = parser.parse_args()
     try:
-        if not args.database.is_absolute() or not args.local_artifacts.is_absolute():
+        if (not args.database.is_absolute()
+                or (not args.verify_only and
+                    (args.local_artifacts is None or not args.local_artifacts.is_absolute()))):
             raise TransferError('invalid_transfer_configuration')
         settings = ObjectStorageSettings(_env_file=None)
         if settings.storage_backend != 'cos':
             raise TransferError('cos_transfer_configuration_required')
         from .cos_artifacts import CosArtifactStore
-        receipt = transfer_registered(args.database, ArtifactStore(args.local_artifacts),
-                                      CosArtifactStore(settings))
+        remote = CosArtifactStore(settings)
+        receipt = (verify_registered_remote(args.database, remote) if args.verify_only
+                   else transfer_registered(args.database,
+                                            ArtifactStore(args.local_artifacts), remote))
     except (TransferError, ArtifactError, ValueError) as error:
         code = error.code if isinstance(error, (TransferError, ArtifactError)) else 'transfer_configuration_unavailable'
         parser.exit(1, json.dumps({'error': code}) + '\n')

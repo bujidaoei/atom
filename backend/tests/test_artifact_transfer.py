@@ -4,7 +4,8 @@ import sqlite3
 
 import pytest
 
-from app.artifact_transfer import TransferError, transfer_registered
+from app.artifact_transfer import (TransferError, transfer_registered,
+                                   verify_registered_remote)
 from app.artifacts import _describe
 from test_adoption_repository import prepared, snapshot
 from test_revision_migrations import legacy
@@ -82,3 +83,44 @@ def test_inventory_change_or_capacity_refuses_completion(prepared):
     with pytest.raises(TransferError, match='transfer_inventory_changed'):
         transfer_registered(path, local, Destination(add_record))
     assert extra_payload != main_payload
+
+
+def test_read_only_remote_verification_preserves_inventory(prepared):
+    path, _main, _heat, heat_payload, heat_artifact = prepared
+    main_payload, main_artifact = snapshot(b'<html>main</html>')
+    destination = Destination()
+    destination.payloads = {main_artifact.key: main_payload,
+                            heat_artifact.key: heat_payload}
+    before = dict(destination.payloads)
+    receipt = verify_registered_remote(path, destination)
+    assert receipt.artifact_count == 2
+    assert receipt.artifact_bytes == len(main_payload) + len(heat_payload)
+    assert destination.payloads == before
+    destination.payloads[heat_artifact.key] = b'corrupt'
+    with pytest.raises(TransferError, match='transfer_(artifact_unavailable|destination_mismatch)'):
+        verify_registered_remote(path, destination)
+
+
+def test_read_only_remote_verification_refuses_moving_ledger(prepared):
+    path, _main, _heat, heat_payload, heat_artifact = prepared
+    main_payload, main_artifact = snapshot(b'<html>main</html>')
+    extra_payload, extra = snapshot(b'<html>later</html>')
+    destination = Destination()
+    destination.payloads = {main_artifact.key: main_payload,
+                            heat_artifact.key: heat_payload,
+                            extra.key: extra_payload}
+    original_read = destination.read
+    changed = False
+
+    def read_and_append(key):
+        nonlocal changed
+        if not changed:
+            changed = True
+            with sqlite3.connect(path) as db:
+                db.execute('INSERT INTO revision_artifacts VALUES (?,?,?,1)',
+                           (extra.key, extra.revision, extra.size))
+        return original_read(key)
+
+    destination.read = read_and_append
+    with pytest.raises(TransferError, match='transfer_inventory_changed'):
+        verify_registered_remote(path, destination)
