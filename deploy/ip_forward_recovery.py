@@ -7,6 +7,8 @@ must never infer that a phase name alone authorizes source restoration.
 
 from __future__ import annotations
 
+import argparse
+import json
 from pathlib import Path
 import hashlib
 import stat
@@ -291,3 +293,84 @@ def finish_source_restore(*, config_file: Path,
         return finish_source_restore_locked(
             config=config, publication_file=publication_file,
             successor_revision=successor_revision)
+
+
+def recover_locked(*, config: protected_cutover.CutoverConfig,
+                   publication_file: Path,
+                   successor_revision: str) -> str:
+    """Dispatch by the fsynced phase while the caller holds the host lock."""
+    if not publication_file.is_absolute():
+        raise RecoveryError("invalid_forward_recovery_input")
+    journal = ip_forward_journal.ForwardJournal(config, successor_revision)
+    record = journal.read()
+    if record is None:
+        raise RecoveryError("forward_recovery_receipt_missing")
+    phase = record["phase"]
+    if phase in PRE_HANDOFF:
+        return recover_pre_handoff_locked(
+            config=config, publication_file=publication_file,
+            successor_revision=successor_revision)
+    if phase == "candidate_intent":
+        return recover_partial_handoff_locked(
+            config=config, publication_file=publication_file,
+            successor_revision=successor_revision)
+    if phase in {"candidate_ready", "exposure_intent",
+                 "awaiting_acceptance"}:
+        return recover_ready_or_exposed_locked(
+            config=config, publication_file=publication_file,
+            successor_revision=successor_revision)
+    if phase == "source_restore_intent":
+        return finish_source_restore_locked(
+            config=config, publication_file=publication_file,
+            successor_revision=successor_revision)
+    # A terminal receipt is not a reason to repeat a container transition.
+    # Verify its claimed serving generation against all six live IDs instead.
+    if phase in {"source_restored", "successor_retained", "accepted"}:
+        identity = ip_forward_identity.read(
+            journal.identity_path, config=config,
+            successor_revision=successor_revision)
+        revision = (identity["sourceRevision"] if phase == "source_restored"
+                    else successor_revision)
+        ip_forward_preflight._inspect_locked(
+            config=config, publication_file=publication_file,
+            revision=revision)
+        return phase
+    raise RecoveryError("forward_recovery_phase_refused")
+
+
+def recover(*, config_file: Path, publication_file: Path,
+            successor_revision: str) -> str:
+    """Keep phase selection, reconciliation and final checks under one lock."""
+    config = protected_cutover.load_config(config_file)
+    with protected_cutover.host_lock():
+        return recover_locked(
+            config=config, publication_file=publication_file,
+            successor_revision=successor_revision)
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--config", required=True, type=Path)
+    parser.add_argument("--publication-file", required=True, type=Path)
+    parser.add_argument("--successor-revision", required=True)
+    args = parser.parse_args(argv)
+    try:
+        outcome = recover(
+            config_file=args.config, publication_file=args.publication_file,
+            successor_revision=args.successor_revision)
+    except (RecoveryError, protected_cutover.CutoverError,
+            ip_forward_journal.JournalError,
+            ip_forward_preflight.ForwardPreflightError,
+            ip_forward_exposure.ExposureError,
+            ip_forward_hold.HoldError,
+            ip_forward_start.StartError,
+            ip_forward_stage.StageError,
+            ip_forward_writers.WriterError,
+            candidate_write_fence.FenceError) as exc:
+        parser.exit(2, str(exc) + "\n")
+    print(json.dumps({"status": outcome}, sort_keys=True))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

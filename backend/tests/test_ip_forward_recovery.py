@@ -131,6 +131,60 @@ class ForwardRecoveryTest(TestCase):
                 successor_revision=self.successor_revision), "source_restored")
         self.assertFalse(held["value"])
 
+    def test_dispatch_uses_durable_phase_under_one_lock(self):
+        cases = {
+            "captured": "recover_pre_handoff_locked",
+            "candidate_intent": "recover_partial_handoff_locked",
+            "candidate_ready": "recover_ready_or_exposed_locked",
+            "exposure_intent": "recover_ready_or_exposed_locked",
+            "awaiting_acceptance": "recover_ready_or_exposed_locked",
+            "source_restore_intent": "finish_source_restore_locked",
+        }
+        for phase, name in cases.items():
+            with self.subTest(phase=phase), \
+                 patch.object(recovery.ip_forward_journal, "ForwardJournal",
+                              return_value=self.journal), \
+                 patch.object(recovery, name,
+                              return_value="source_restored") as selected:
+                self.journal.read.return_value = {"phase": phase}
+                self.assertEqual(recovery.recover_locked(
+                    config=self.config,
+                    publication_file=self.publication_file,
+                    successor_revision=self.successor_revision),
+                    "source_restored")
+                selected.assert_called_once()
+
+    def test_terminal_receipt_checks_live_generation_without_replaying(self):
+        self.journal.read.return_value = {"phase": "successor_retained"}
+        with patch.object(recovery.ip_forward_journal, "ForwardJournal",
+                          return_value=self.journal), \
+             patch.object(recovery.ip_forward_identity, "read",
+                          return_value=self.identity), \
+             patch.object(recovery.ip_forward_preflight,
+                          "_inspect_locked") as inspect, \
+             patch.object(recovery, "recover_ready_or_exposed_locked") as replay:
+            self.assertEqual(recovery.recover_locked(
+                config=self.config,
+                publication_file=self.publication_file,
+                successor_revision=self.successor_revision),
+                "successor_retained")
+        self.assertEqual(inspect.call_args.kwargs["revision"],
+                         self.successor_revision)
+        replay.assert_not_called()
+
+    def test_missing_receipt_refuses_without_transition(self):
+        self.journal.read.return_value = None
+        with patch.object(recovery.ip_forward_journal, "ForwardJournal",
+                          return_value=self.journal), \
+             patch.object(recovery, "recover_pre_handoff_locked") as restore:
+            with self.assertRaisesRegex(recovery.RecoveryError,
+                                        "forward_recovery_receipt_missing"):
+                recovery.recover_locked(
+                    config=self.config,
+                    publication_file=self.publication_file,
+                    successor_revision=self.successor_revision)
+        restore.assert_not_called()
+
     def _partial_fixture(self):
         temporary = tempfile.TemporaryDirectory(prefix="atom-forward-recover-")
         self.addCleanup(temporary.cleanup)
