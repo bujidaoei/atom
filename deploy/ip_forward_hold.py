@@ -81,10 +81,11 @@ def restore(*, config: protected_cutover.CutoverConfig,
                 _run(config, "container", "rename", expected_id, canonical)
             _inspect(config, expected_id, canonical, running=None)
         caddy_id = identity["containerIds"]["caddy"]
-        caddy = _inspect(config, caddy_id, "atom-tls", running=None)
+        caddy_name = _canonical(config, "caddy")
+        caddy = _inspect(config, caddy_id, caddy_name, running=None)
         if caddy.get("State", {}).get("Running") is not True:
             _run(config, "container", "start", caddy_id, timeout=45)
-        _inspect(config, caddy_id, "atom-tls", running=True)
+        _inspect(config, caddy_id, caddy_name, running=True)
         ip_forward_stage._recover_pre_exposure(
             config=config, stopped=stage.stopped, controller=stage.controller,
             original_base=ip_forward_identity.caddy_bytes(identity, "base"),
@@ -119,12 +120,12 @@ def hold(*, config: protected_cutover.CutoverConfig,
     ids = identity["containerIds"]
     for role in ip_forward_writers.STOP_ORDER:
         _inspect(config, ids[role], _canonical(config, role), running=False)
-    _inspect(config, ids["caddy"], "atom-tls", running=True)
+    _inspect(config, ids["caddy"], _canonical(config, "caddy"), running=True)
     try:
         stage.journal.advance("candidate_intent")
         _run(config, "container", "stop", "--time", "15",
              ids["caddy"], timeout=35)
-        _inspect(config, ids["caddy"], "atom-tls", running=False)
+        _inspect(config, ids["caddy"], _canonical(config, "caddy"), running=False)
         for role in ip_forward_identity.ROLES:
             expected_id = ids[role]
             canonical = _canonical(config, role)
