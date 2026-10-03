@@ -49,7 +49,7 @@ Missing entry page, corrupt artifacts, active edits, double clicks, stale select
 - **FR-002**: Default publication must not require passing optional functional checks; retain mandatory ownership, content integrity and isolation.
 - **FR-003**: Publish exactly the selected saved version, never a stale working directory.
 - **FR-004**: Provide chronological published snapshots, historical previews, live restoration and unpublish with concurrent-change protection.
-- **FR-005**: Prioritize the public link, current online version, publish update and history; hide internal IDs and diagnostic details behind optional disclosure.
+- **FR-005**: Prioritize the public link, current online version, publish update and history; hide internal IDs and diagnostic details behind optional disclosure. An unfinished generation may block publishing that generation, but its user-facing explanation must name the incomplete generation rather than falsely claim that an optional functional check failed or is mandatory. A failed race heat must not imply that an unrelated ready main draft cannot be published.
 - **FR-006**: Preserve project data, editing drafts and SHA-locked Atom runtime.
 - **FR-007**: Keep research, design, tasks and real evidence synchronized in Spec Kit; never mark untested delivery accepted.
 - **FR-008**: Back up before deployment, test failure recovery and verify actual public delivery on desktop and mobile.

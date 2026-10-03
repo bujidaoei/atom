@@ -380,7 +380,7 @@ function HeatCard({
       ) : null}
 
       {heat.error && !["running", "queued", "done"].includes(heat.status) ? (
-        <p className="border-t border-neutral-8 px-m py-s text-xs text-neutral-60">{heat.error}。可在上方调整时间上限后{retryLabel}；未完成版本尚未通过验收，不能采用或发布。</p>
+        <p className="border-t border-neutral-8 px-m py-s text-xs text-neutral-60">{heat.error}。可在上方调整时间上限后{retryLabel}；这次竞速未完成，不能采用这个候选。你仍可在「发布与历史」查看当前草稿的发布状态。</p>
       ) : null}
 
       <footer className="mt-auto flex flex-wrap items-center gap-s border-t border-neutral-8 px-m py-s">
