@@ -1,7 +1,7 @@
 """Focused failures for the read-only active-generation deployment gate."""
 
 import importlib.util
-from contextlib import closing
+from contextlib import closing, contextmanager
 from pathlib import Path
 import sqlite3
 import sys
@@ -57,6 +57,32 @@ def bind(path: Path, destination: str, writable: bool = True) -> dict:
 
 
 class ForwardPreflightTest(unittest.TestCase):
+    def test_public_gate_holds_host_lock_through_internal_inspection(self):
+        state = {"held": False}
+        config = SimpleNamespace()
+
+        @contextmanager
+        def lock():
+            self.assertFalse(state["held"])
+            state["held"] = True
+            try:
+                yield
+            finally:
+                state["held"] = False
+
+        def inspect(**arguments):
+            self.assertTrue(state["held"])
+            self.assertIs(arguments["config"], config)
+            return {"status": "current_generation_verified"}
+
+        with patch.object(module.protected_cutover, "load_config", return_value=config), \
+                patch.object(module.protected_cutover, "host_lock", side_effect=lock), \
+                patch.object(module, "_inspect_locked", side_effect=inspect):
+            result = module.inspect_current(config_file=Path("/private/config"),
+                publication_file=Path("/private/publication"), revision="a" * 40)
+        self.assertEqual(result["status"], "current_generation_verified")
+        self.assertFalse(state["held"])
+
     def test_successor_requires_clean_exact_revision_and_image(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()

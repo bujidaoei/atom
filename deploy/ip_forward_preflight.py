@@ -223,11 +223,12 @@ def _target(config: protected_cutover.CutoverConfig, *, source: Path,
     return {"revision": revision, "imageId": image_id}
 
 
-def inspect_current(*, config_file: Path, publication_file: Path,
-                    revision: str, successor_source: Path | None = None,
+def _inspect_locked(*, config: protected_cutover.CutoverConfig,
+                    publication_file: Path, revision: str,
+                    successor_source: Path | None = None,
                     successor_revision: str | None = None,
                     successor_image: str | None = None) -> dict[str, object]:
-    """Inspect the live generation under the deployment lock, without writes."""
+    """Inspect under the caller's already-held host deployment lock."""
     _require(getattr(os, "geteuid", lambda: -1)() == 0, "root_required")
     _require(protected_cutover.REVISION.fullmatch(revision) is not None,
              "invalid_release_identity")
@@ -235,66 +236,77 @@ def inspect_current(*, config_file: Path, publication_file: Path,
               and successor_image is None)
              or (successor_source is not None and successor_revision is not None
                  and successor_image is not None), "incomplete_successor_identity")
+    record = protected_cutover.PhaseLedger(config.state_dir, revision).read()
+    _require(record is not None and record.get("schemaVersion") == 1
+             and record.get("outcome") in {"awaiting_acceptance", "completed"}
+             and type(record.get("imageId")) is str
+             and protected_cutover.IMAGE.fullmatch(record["imageId"]) is not None,
+             "active_ledger_mismatch")
+    image_id = record["imageId"]
+    candidate = _candidate(config, revision, record)
+    publication = _publication(publication_file, config, image_id)
+    image = protected_cutover._inspect(config.docker, "image", image_id)
+    _require(image.get("Id") == image_id and image.get("Config", {})
+             .get("Labels", {}).get("atom.revision") == revision,
+             "active_image_revision_mismatch")
+    protected_cutover._database(candidate / "broker" / "registry.db", 3, broker=True)
+    routes = _active_routes(candidate / "data" / "atom.db",
+                            int(publication["ATOM_FIRST_PORT"]),
+                            int(publication["ATOM_LAST_PORT"]))
+    ids = _services(config, candidate, image_id, publication)
+    identity = ip_cutover_rollback._identity(config.state_dir /
+                                             (revision + ".identity.json"))
+    _require(identity["revision"] == revision
+             and identity["candidateImageId"] == image_id
+             and ip_cutover_rollback._old_locations(identity) == {
+                 role: name + "-rollback" for role, name in
+                 ip_cutover_rollback.DEFAULT_CONTAINERS.items()},
+             "preserved_source_identity_mismatch")
+    directory = candidate / "caddy"
+    try:
+        base = (directory / "Caddyfile.base").read_bytes()
+        active = (directory / "Caddyfile").read_bytes()
+        _require(0 < len(base) <= 1024 * 1024
+                 and 0 < len(active) <= 1024 * 1024
+                 and not (directory / "Caddyfile.base").is_symlink()
+                 and not (directory / "Caddyfile").is_symlink(),
+                 "active_ingress_file_invalid")
+        expected = render_ip_routes(base.decode("utf-8"), routes,
+            IpIngressConfig(publication["ATOM_PUBLIC_IP"],
+                            publication["ATOM_PREVIEW_UPSTREAM"],
+                            publication["ATOM_PUBLIC_UPSTREAM"],
+                            publication["ATOM_ACME_DIRECTORY"])).encode("utf-8")
+    except (OSError, UnicodeError, IngressError) as exc:
+        raise ForwardPreflightError("active_ingress_file_invalid") from exc
+    # The cutover receipt records the *initial* Caddy digest. New projects
+    # legitimately add origins later, so the current committed ledger is
+    # the authority for the live config rather than that historical hash.
+    _require(active == expected,
+             "active_ingress_ledger_mismatch")
+    result = {"status": "current_generation_verified", "revision": revision,
+            "imageId": image_id, "candidateDirectory": str(candidate),
+            "containerIds": ids, "activeOriginCount": len(routes),
+            "caddySha256": hashlib.sha256(active).hexdigest()}
+    if successor_source is not None:
+        result["successor"] = _target(
+            config, source=successor_source, revision=successor_revision,
+            image_id=successor_image, current_revision=revision,
+            current_image=image_id, candidate=candidate)
+        result["status"] = "ready_for_forward_transaction"
+    return result
+
+
+def inspect_current(*, config_file: Path, publication_file: Path,
+                    revision: str, successor_source: Path | None = None,
+                    successor_revision: str | None = None,
+                    successor_image: str | None = None) -> dict[str, object]:
+    """Public read-only command: hold the host lock for the entire check."""
     config = protected_cutover.load_config(config_file)
     with protected_cutover.host_lock():
-        record = protected_cutover.PhaseLedger(config.state_dir, revision).read()
-        _require(record is not None and record.get("schemaVersion") == 1
-                 and record.get("outcome") in {"awaiting_acceptance", "completed"}
-                 and type(record.get("imageId")) is str
-                 and protected_cutover.IMAGE.fullmatch(record["imageId"]) is not None,
-                 "active_ledger_mismatch")
-        image_id = record["imageId"]
-        candidate = _candidate(config, revision, record)
-        publication = _publication(publication_file, config, image_id)
-        image = protected_cutover._inspect(config.docker, "image", image_id)
-        _require(image.get("Id") == image_id and image.get("Config", {})
-                 .get("Labels", {}).get("atom.revision") == revision,
-                 "active_image_revision_mismatch")
-        protected_cutover._database(candidate / "broker" / "registry.db", 3, broker=True)
-        routes = _active_routes(candidate / "data" / "atom.db",
-                                int(publication["ATOM_FIRST_PORT"]),
-                                int(publication["ATOM_LAST_PORT"]))
-        ids = _services(config, candidate, image_id, publication)
-        identity = ip_cutover_rollback._identity(config.state_dir /
-                                                 (revision + ".identity.json"))
-        _require(identity["revision"] == revision
-                 and identity["candidateImageId"] == image_id
-                 and ip_cutover_rollback._old_locations(identity) == {
-                     role: name + "-rollback" for role, name in
-                     ip_cutover_rollback.DEFAULT_CONTAINERS.items()},
-                 "preserved_source_identity_mismatch")
-        directory = candidate / "caddy"
-        try:
-            base = (directory / "Caddyfile.base").read_bytes()
-            active = (directory / "Caddyfile").read_bytes()
-            _require(0 < len(base) <= 1024 * 1024
-                     and 0 < len(active) <= 1024 * 1024
-                     and not (directory / "Caddyfile.base").is_symlink()
-                     and not (directory / "Caddyfile").is_symlink(),
-                     "active_ingress_file_invalid")
-            expected = render_ip_routes(base.decode("utf-8"), routes,
-                IpIngressConfig(publication["ATOM_PUBLIC_IP"],
-                                publication["ATOM_PREVIEW_UPSTREAM"],
-                                publication["ATOM_PUBLIC_UPSTREAM"],
-                                publication["ATOM_ACME_DIRECTORY"])).encode("utf-8")
-        except (OSError, UnicodeError, IngressError) as exc:
-            raise ForwardPreflightError("active_ingress_file_invalid") from exc
-        # The cutover receipt records the *initial* Caddy digest. New projects
-        # legitimately add origins later, so the current committed ledger is
-        # the authority for the live config rather than that historical hash.
-        _require(active == expected,
-                 "active_ingress_ledger_mismatch")
-        result = {"status": "current_generation_verified", "revision": revision,
-                "imageId": image_id, "candidateDirectory": str(candidate),
-                "containerIds": ids, "activeOriginCount": len(routes),
-                "caddySha256": hashlib.sha256(active).hexdigest()}
-        if successor_source is not None:
-            result["successor"] = _target(
-                config, source=successor_source, revision=successor_revision,
-                image_id=successor_image, current_revision=revision,
-                current_image=image_id, candidate=candidate)
-            result["status"] = "ready_for_forward_transaction"
-        return result
+        return _inspect_locked(config=config, publication_file=publication_file,
+                               revision=revision, successor_source=successor_source,
+                               successor_revision=successor_revision,
+                               successor_image=successor_image)
 
 
 def main(argv: list[str] | None = None) -> int:
