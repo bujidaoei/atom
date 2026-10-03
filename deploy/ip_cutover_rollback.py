@@ -60,15 +60,22 @@ class RollbackError(RuntimeError):
 
 
 def _record_phase(ledger: PhaseLedger, *, outcome: str,
-                  image_id: str, details: dict[str, object]) -> None:
+                  image_id: str, details: dict[str, object],
+                  history_phase: str | None = None) -> None:
     previous = ledger.read()
     history = [] if previous is None else previous.get("phaseHistory", [])
     if type(history) is not list or len(history) >= 32:
         raise RollbackError("invalid_phase_history")
-    event = {"phase": outcome, "at": datetime.now(timezone.utc).isoformat(),
+    event = {"phase": history_phase or outcome,
+             "at": datetime.now(timezone.utc).isoformat(),
              "details": details}
+    retained = {} if previous is None else {
+        key: value for key, value in previous.items()
+        if key not in {"schemaVersion", "revision", "imageId", "outcome",
+                       "updatedAt", "phaseHistory"}}
     ledger.write(outcome=outcome, image_id=image_id,
-                 details={**details, "phaseHistory": [*history, event]})
+                 details={**retained, **details,
+                          "phaseHistory": [*history, event]})
 
 
 def _run(*args: str, timeout: int = 120, allow_missing: bool = False) -> str | None:
@@ -428,6 +435,7 @@ def main(argv: list[str] | None = None) -> int:
                 raise RollbackError("missing_console_probe")
             identity = _identity(arguments.identity)
             ledger = PhaseLedger(Path(identity["stateDirectory"]), identity["revision"])
+            original = ledger.read()
             _record_phase(ledger, outcome="rollback_started",
                           image_id=identity["candidateImageId"],
                           details={"oldImageId": identity["oldImageId"]})
@@ -435,9 +443,16 @@ def main(argv: list[str] | None = None) -> int:
                 rollback(identity, console_url=arguments.console_url,
                          ca_file=arguments.ca_file)
             except RollbackError as exc:
-                _record_phase(ledger, outcome="rollback_failed",
-                              image_id=identity["candidateImageId"],
-                              details={"reason": str(exc)})
+                refusal = (str(exc) == "candidate_has_unmerged_writes"
+                           and original is not None
+                           and original.get("outcome") == "awaiting_acceptance")
+                _record_phase(
+                    ledger,
+                    outcome="awaiting_acceptance" if refusal else "rollback_failed",
+                    history_phase="rollback_refused" if refusal else None,
+                    image_id=identity["candidateImageId"],
+                    details=({"lastRollbackResult": str(exc)} if refusal
+                             else {"reason": str(exc)}))
                 raise
             _record_phase(ledger, outcome="rolled_back",
                           image_id=identity["candidateImageId"],

@@ -123,6 +123,39 @@ class RollbackTest(unittest.TestCase):
         self.assertEqual([event["phase"] for event in Ledger.latest["phaseHistory"]],
                          ["awaiting_acceptance", "rollback_started", "rollback_failed"])
 
+    def test_unmerged_write_refusal_preserves_active_generation_receipt(self):
+        class Ledger:
+            latest = {"outcome": "awaiting_acceptance", "imageId": NEW_IMAGE,
+                      "candidateDirectory": "/private/candidate",
+                      "backupDirectory": "/private/backup",
+                      "phaseHistory": [{"phase": "awaiting_acceptance"}]}
+
+            def __init__(self, _directory, _revision):
+                pass
+
+            def read(self):
+                return Ledger.latest
+
+            def write(self, *, outcome, image_id, details):
+                Ledger.latest = {"outcome": outcome, "imageId": image_id,
+                                 **details}
+
+        with patch.object(module, "host_lock", return_value=nullcontext()), \
+             patch.object(module, "_identity", return_value=IDENTITY), \
+             patch.object(module, "PhaseLedger", Ledger), \
+             patch.object(module, "rollback", side_effect=module.RollbackError(
+                 "candidate_has_unmerged_writes")), \
+             redirect_stdout(io.StringIO()), patch("sys.stderr", io.StringIO()):
+            result = module.main(["rollback", "--identity", "/private/identity.json",
+                                  "--console-url", "https://159.75.231.98/atom/"])
+        self.assertEqual(result, 2)
+        self.assertEqual(Ledger.latest["outcome"], "awaiting_acceptance")
+        self.assertEqual(Ledger.latest["candidateDirectory"], "/private/candidate")
+        self.assertEqual(Ledger.latest["backupDirectory"], "/private/backup")
+        self.assertEqual([event["phase"] for event in Ledger.latest["phaseHistory"]],
+                         ["awaiting_acceptance", "rollback_started",
+                          "rollback_refused"])
+
     def test_namespaced_identity_uses_only_its_own_containers(self):
         prefix = "atom-rollback-drill"
         names = {role: prefix + "-" + role for role in module.DEFAULT_NAMES}
