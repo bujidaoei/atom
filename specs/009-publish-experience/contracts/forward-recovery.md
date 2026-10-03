@@ -27,4 +27,6 @@ The gate's `_inspect_locked` operation is now separated from the public `inspect
 
 ## Verification boundary
 
+`deploy/ip_forward_journal.py` now defines the root-private durable phase record. It binds the exact six-ID/Caddy identity receipt digest, appends only ordered phases and fsyncs each replacement and parent directory. Intent phases precede maintenance, writer stop, candidate handoff and exposure; capture records exact backup/candidate paths and backup/Caddy/COS digests and counts. Source restore after exposure intent requires an unchanged-write-fence receipt. The journal does not inspect Docker or implement recovery; the host-locked caller must reconcile live state and prove the write-fence claim. It has not been used in a production transaction.
+
 An isolated drill must create a real Atom release/history write, observe old-schema rollback refusal, then run the new forward transaction from the retained state. It must prove the release and draft survive, another owner operation succeeds, the public page serves the selected immutable bytes, project origin assignments are unchanged, and a fault at each ingress/writer phase leaves a usable generation. Production acceptance additionally requires authenticated owner/browser and certificate-renewal evidence. Until those pass, T013f and T014 remain open.
