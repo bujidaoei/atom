@@ -425,32 +425,3 @@ async def retry_heat(
 def read_race(project: OwnedProject, session: DbSession, request: Request) -> dict[str, object]:
     session.expire_all()
     return {"race": race_json(session, project.id, catalog=project_catalog(request, project) if get_settings().sandbox_mode == "broker" else None)}
-
-
-@router.post("/{project_id}/race/{heat_id}/adopt")
-def adopt_heat(
-    project: OwnedProject, heat_id: str, session: DbSession
-) -> dict[str, bool]:
-    if get_settings().sandbox_mode == "broker":
-        raise HTTPException(
-            status.HTTP_409_CONFLICT,
-            "隔离赛道尚无按修订确认的采用入口，不能通过旧目录复制采用",
-        )
-    if orchestrator.active(project.id):
-        raise HTTPException(status.HTTP_409_CONFLICT, "请等待所有赛道结束后再采用")
-    heat = session.get(RaceHeat, heat_id)
-    race = session.get(Race, heat.race_id) if heat else None
-    if heat is None or race is None or race.project_id != project.id:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "该赛道不存在")
-    if heat.status != "done":
-        raise HTTPException(status.HTTP_409_CONFLICT, "该赛道还没有完成")
-
-    source = storage.workspace_dir(project.id, heat_id)
-    if not source.is_dir():
-        raise HTTPException(status.HTTP_409_CONFLICT, "该赛道没有产出文件")
-
-    storage.copy_tree(source, storage.workspace_dir(project.id))
-    race.winner_heat_id = heat_id
-    project.status = "ready"
-    session.commit()
-    return {"ok": True}

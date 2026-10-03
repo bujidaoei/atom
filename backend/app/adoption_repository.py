@@ -1,8 +1,4 @@
-"""Fenced adoption of a verified heat revision in offline schema v12-v14.
-
-This repository has no HTTP wiring. Production remains at v10 until every
-application reader and writer has passed the separate serving cutover gates.
-"""
+"""Fenced adoption of an immutable, verified race-heat revision."""
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -101,7 +97,7 @@ class AdoptionRepository:
 
     @staticmethod
     def _candidate(db, owner: str, project_id: str, heat_id: str, source_revision_id: str,
-                   expected_main_revision_id: str) -> _Candidate:
+                   expected_main_revision_id: str | None) -> _Candidate:
         row = db.execute('''SELECT race.id AS race_id,race.status AS race_status,
                    heat.status AS heat_status,project.active_run_id,
                    source.id AS source_workspace_id,source.current_revision_id AS source_head,
@@ -136,9 +132,13 @@ class AdoptionRepository:
                           Artifact(row['artifact_key'], row['snapshot_revision'], row['size']))
 
     def adopt(self, *, owner: str, project_id: str, heat_id: str, source_revision_id: str,
-              expected_main_revision_id: str, command_id: str, store: ArtifactStore) -> AdoptionReceipt:
+              expected_main_revision_id: str | None, command_id: str, store: ArtifactStore) -> AdoptionReceipt:
         values = (owner, project_id, heat_id, source_revision_id, expected_main_revision_id, command_id)
-        if any(not isinstance(value, str) or not _ID.fullmatch(value) for value in values):
+        if (any(not isinstance(value, str) or not _ID.fullmatch(value)
+                for value in (owner, project_id, heat_id, source_revision_id, command_id))
+                or (expected_main_revision_id is not None and
+                    (not isinstance(expected_main_revision_id, str) or
+                     not _ID.fullmatch(expected_main_revision_id)))):
             raise AdoptionError('invalid_adoption_request')
         if not callable(getattr(store, 'read', None)):
             raise AdoptionError('invalid_adoption_request')
@@ -169,22 +169,46 @@ class AdoptionRepository:
                 if current != candidate:
                     raise AdoptionError('adoption_conflict')
                 now, revision_id = int(time.time()), uuid.uuid4().hex
+                parent_id = expected_main_revision_id
+                target_generation = candidate.target_generation
+                if parent_id is None:
+                    # Schema v12+ requires a parent for adoption provenance. Seed the
+                    # empty main workspace from the same verified artifact inside this
+                    # transaction, then adopt the heat over that root. No intermediate
+                    # revision is observable if any later fence fails.
+                    parent_id = uuid.uuid4().hex
+                    db.execute('''INSERT INTO revision_records
+                               (id,workspace_id,project_id,parent_revision_id,artifact_key,snapshot_revision,
+                                producing_attempt_id,created_at,adoption_id)
+                               VALUES (?,?,?,NULL,?,?,NULL,?,NULL)''',
+                               (parent_id, candidate.target_workspace_id, project_id,
+                                candidate.artifact.key, candidate.artifact.revision, now))
+                    db.execute("INSERT INTO revision_outbox VALUES (?,?,?,'revision.registered',?,NULL)",
+                               (uuid.uuid4().hex, candidate.target_workspace_id, parent_id, now))
+                    seeded = db.execute('''UPDATE revision_workspaces
+                               SET current_revision_id=?,generation=generation+1
+                               WHERE id=? AND current_revision_id IS NULL AND generation=?
+                                 AND active_attempt_id IS NULL''',
+                               (parent_id, candidate.target_workspace_id, target_generation))
+                    if seeded.rowcount != 1:
+                        raise AdoptionError('adoption_conflict')
+                    target_generation += 1
                 db.execute('''INSERT INTO revision_adoptions VALUES (?,?,?,?,?,?,?,?,?,?)''',
                            (command_id, project_id, heat_id, candidate.source_workspace_id,
-                            source_revision_id, candidate.target_workspace_id, expected_main_revision_id,
+                            source_revision_id, candidate.target_workspace_id, parent_id,
                             owner, digest, now))
                 db.execute('''INSERT INTO revision_records
                            (id,workspace_id,project_id,parent_revision_id,artifact_key,snapshot_revision,
                             producing_attempt_id,created_at,adoption_id)
                            VALUES (?,?,?,?,?,?,NULL,?,?)''',
-                           (revision_id, candidate.target_workspace_id, project_id, expected_main_revision_id,
+                           (revision_id, candidate.target_workspace_id, project_id, parent_id,
                             candidate.artifact.key, candidate.artifact.revision, now, command_id))
                 db.execute("INSERT INTO revision_outbox VALUES (?,?,?,'revision.registered',?,NULL)",
                            (uuid.uuid4().hex, candidate.target_workspace_id, revision_id, now))
                 updated = db.execute('''UPDATE revision_workspaces SET current_revision_id=?,generation=generation+1
                            WHERE id=? AND current_revision_id=? AND generation=? AND active_attempt_id IS NULL''',
-                           (revision_id, candidate.target_workspace_id, expected_main_revision_id,
-                            candidate.target_generation))
+                           (revision_id, candidate.target_workspace_id, parent_id,
+                            target_generation))
                 if updated.rowcount != 1:
                     raise AdoptionError('adoption_conflict')
                 updated = db.execute("UPDATE races SET winner_heat_id=? WHERE id=? AND status='done'",

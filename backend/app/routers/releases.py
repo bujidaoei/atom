@@ -44,7 +44,7 @@ def _unique(pairs):
     return result
 
 
-async def _json_command(request: Request):
+async def _json_command(request: Request, action='发布'):
     headers = request.scope['headers']
     lengths = [value for key, value in headers if key.lower() == b'content-length']
     if (request.scope.get('query_string')
@@ -54,25 +54,25 @@ async def _json_command(request: Request):
             or not 1 <= int(lengths[0]) <= 512
             or any(key.lower() in (b'content-encoding', b'transfer-encoding')
                    for key, _ in headers)):
-        _deny(400, '发布请求格式不正确')
+        _deny(400, action + '请求格式不正确')
     body = bytearray()
     try:
         async with asyncio.timeout(5):
             async for chunk in request.stream():
                 if len(body) + len(chunk) > 512:
-                    _deny(413, '发布请求过大')
+                    _deny(413, action + '请求过大')
                 body.extend(chunk)
     except (TimeoutError, ClientDisconnect):
-        _deny(400, '发布请求未完整送达')
+        _deny(400, action + '请求未完整送达')
     if len(body) != int(lengths[0]):
-        _deny(400, '发布请求未完整送达')
+        _deny(400, action + '请求未完整送达')
     try:
         command = json.loads(body.decode('utf-8'), object_pairs_hook=_unique,
             parse_constant=lambda _value: (_ for _ in ()).throw(ValueError()))
     except (ValueError, UnicodeError, RecursionError):
-        _deny(400, '发布请求格式不正确')
+        _deny(400, action + '请求格式不正确')
     if type(command) is not dict:
-        _deny(400, '发布请求格式不正确')
+        _deny(400, action + '请求格式不正确')
     return command
 
 

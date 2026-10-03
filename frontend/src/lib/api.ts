@@ -115,7 +115,7 @@ type RequestOptions = {
   silent401?: boolean;
   accept?: string;
   commandKey?: string;
-  intent?: "inspect-private-content" | "open-private-content" | "open-revision-preview" | "revoke-account-sessions" | "inspect-verified-release" | "publish-verified-release" | "unpublish-verified-release" | "rollback-verified-release";
+  intent?: "inspect-private-content" | "open-private-content" | "open-revision-preview" | "revoke-account-sessions" | "inspect-verified-release" | "publish-verified-release" | "unpublish-verified-release" | "rollback-verified-release" | "adopt-heat-revision";
   signal?: AbortSignal;
 };
 
@@ -299,8 +299,14 @@ export const api = {
       method: "POST", body: { budgetSeconds }, commandKey: commandKey(),
     }),
   getRace: (id: string) => request<{ race: RaceSummary | null }>(`/api/projects/${id}/race`),
-  adoptHeat: (id: string, heatId: string) =>
-    request<{ ok: true }>(`/api/projects/${id}/race/${heatId}/adopt`, { method: "POST" }),
+  adoptHeat: (id: string, heatId: string, sourceRevisionId: string, expectedMainRevisionId: string | null) => {
+    const commandId = commandKey();
+    return request<{ commandId: string; sourceRevisionId: string; revisionId: string }>(
+      `/api/projects/${encodeURIComponent(id)}/race/${encodeURIComponent(heatId)}/adopt`, {
+        method: "POST", body: { commandId, sourceRevisionId, expectedMainRevisionId },
+        commandKey: commandId, intent: "adopt-heat-revision",
+      });
+  },
 
   // ---- usage
   getUsage: () => request<Usage>("/api/usage"),

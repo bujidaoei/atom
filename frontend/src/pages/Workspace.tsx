@@ -517,7 +517,8 @@ function ProjectWorkspace({ id }: { id: string | undefined }) {
               <RaceTab
                 projectId={project.id}
                 isolatedPreview={project.isolatedPreviewEnabled}
-                legacyAdoptionAvailable={project.legacyAdoptionAvailable}
+                revisionAdoptionAvailable={project.revisionAdoptionAvailable}
+                mainRevisionId={project.revisionId}
                 initialRace={project.race}
                 onChanged={() => { void load(true); }}
                 heatActivity={stream.heatActivity}

@@ -13,7 +13,8 @@ import type { HeatActivity } from "./useProjectStream";
 type RaceTabProps = {
   projectId: string;
   isolatedPreview: boolean;
-  legacyAdoptionAvailable: boolean;
+  revisionAdoptionAvailable: boolean;
+  mainRevisionId: string | null;
   initialRace: RaceSummary | null;
   heatActivity: Record<string, HeatActivity>;
   /** Called after a heat is adopted so the project and preview refresh. */
@@ -36,7 +37,8 @@ const HEAT_STATUS: Record<RaceHeat["status"], { label: string; tone: string }> =
 export function RaceTab({
   projectId,
   isolatedPreview,
-  legacyAdoptionAvailable,
+  revisionAdoptionAvailable,
+  mainRevisionId,
   initialRace,
   heatActivity,
   onAdopted,
@@ -248,7 +250,8 @@ export function RaceTab({
                   key={heat.id}
                   projectId={projectId}
                   isolatedPreview={isolatedPreview}
-                  legacyAdoptionAvailable={legacyAdoptionAvailable}
+                  revisionAdoptionAvailable={revisionAdoptionAvailable}
+                  mainRevisionId={mainRevisionId}
                   heat={heat}
                   activity={heatActivity[heat.id]}
                   isWinner={race.winnerHeatId === heat.id}
@@ -274,7 +277,8 @@ export function RaceTab({
 function HeatCard({
   projectId,
   isolatedPreview,
-  legacyAdoptionAvailable,
+  revisionAdoptionAvailable,
+  mainRevisionId,
   heat,
   activity,
   isWinner,
@@ -286,7 +290,8 @@ function HeatCard({
 }: {
   projectId: string;
   isolatedPreview: boolean;
-  legacyAdoptionAvailable: boolean;
+  revisionAdoptionAvailable: boolean;
+  mainRevisionId: string | null;
   heat: RaceHeat;
   activity: HeatActivity | undefined;
   isWinner: boolean;
@@ -404,13 +409,14 @@ function HeatCard({
           size="sm"
           variant={isWinner ? "secondary" : "primary"}
           loading={adopting}
-          disabled={heat.status !== "done" || raceRunning || !legacyAdoptionAvailable}
-          title={!legacyAdoptionAvailable ? "隔离赛道尚无按修订确认的采用入口" : undefined}
+          disabled={heat.status !== "done" || raceRunning || !revisionAdoptionAvailable || !heat.revisionId}
+          title={heat.status === "done" ? "把此已保存版本设为主工作区草稿，不会自动发布" : undefined}
           onClick={() => {
+            if (!heat.revisionId) return;
             setAdopting(true);
             setAdoptError(null);
             api
-              .adoptHeat(projectId, heat.id)
+              .adoptHeat(projectId, heat.id, heat.revisionId, mainRevisionId)
               .then(() => onAdopted())
               .catch((err: unknown) => setAdoptError(errorMessage(err)))
               .finally(() => setAdopting(false));
@@ -418,8 +424,8 @@ function HeatCard({
         >
           采用
         </Button>
-        {heat.status === "done" && !legacyAdoptionAvailable ? (
-          <span className="text-xs text-neutral-60">按修订采用尚未开放</span>
+        {heat.status === "done" && revisionAdoptionAvailable ? (
+          <span className="text-xs text-neutral-60">采用后成为工作区草稿，发布版本保持不变</span>
         ) : null}
         {!isolatedPreview && heat.previewUrl ? (
           <a
