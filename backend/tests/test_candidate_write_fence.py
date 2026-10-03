@@ -2,6 +2,8 @@
 
 from contextlib import closing
 import importlib.util
+import json
+import os
 from pathlib import Path
 import sqlite3
 import sys
@@ -89,6 +91,44 @@ class CandidateWriteFenceTest(unittest.TestCase):
             with closing(sqlite3.connect(broker / "registry.db")) as db, db:
                 db.execute("INSERT INTO operations VALUES (2, 'queued')")
             self.assertNotEqual(fence.candidate_fingerprint(candidate), baseline)
+
+    @unittest.skipUnless(hasattr(os, "geteuid") and os.geteuid() == 0,
+                         "root-private baseline requires root")
+    def test_sealed_baseline_detects_real_business_write_and_rejects_tampering(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            root.chmod(0o700)
+            candidate = root / "candidate"
+            (candidate / "data").mkdir(parents=True)
+            (candidate / "broker").mkdir()
+            with closing(sqlite3.connect(candidate / "data" / "atom.db")) as db, db:
+                db.execute("CREATE TABLE releases(id INTEGER PRIMARY KEY, revision TEXT)")
+                db.execute("INSERT INTO releases VALUES (1, 'initial')")
+            with closing(sqlite3.connect(candidate / "broker" / "registry.db")) as db, db:
+                db.execute("CREATE TABLE operations(id INTEGER PRIMARY KEY)")
+            revision = "a" * 40
+            image = "sha256:" + "b" * 64
+            baseline_path = root / "baseline.json"
+            digest = fence.capture_baseline(
+                baseline_path, candidate_directory=candidate,
+                revision=revision, candidate_image=image)
+            identity = dict(path=baseline_path, candidate_directory=candidate,
+                            revision=revision, candidate_image=image,
+                            expected_digest=digest)
+            self.assertTrue(fence.compare_baseline(**identity))
+            with closing(sqlite3.connect(candidate / "data" / "atom.db")) as db, db:
+                db.execute("UPDATE releases SET revision='published' WHERE id=1")
+            self.assertFalse(fence.compare_baseline(**identity))
+            with self.assertRaisesRegex(fence.FenceError,
+                                        "baseline_identity_mismatch"):
+                fence.read_baseline(**{**identity, "expected_digest": "0" * 64})
+            record = json.loads(baseline_path.read_text("utf-8"))
+            record["stateSha256"] = "0" * 64
+            baseline_path.write_text(json.dumps(record), encoding="utf-8")
+            baseline_path.chmod(0o600)
+            with self.assertRaisesRegex(fence.FenceError,
+                                        "baseline_identity_mismatch"):
+                fence.compare_baseline(**identity)
 
 
 if __name__ == "__main__":

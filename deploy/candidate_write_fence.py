@@ -13,6 +13,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import sqlite3
 import stat
 
@@ -21,6 +22,12 @@ import paired_backup
 
 class FenceError(RuntimeError):
     """Stable operator error without paths or user content."""
+
+
+SHA256 = re.compile(r"[0-9a-f]{64}\Z")
+REVISION = re.compile(r"[0-9a-f]{40}\Z")
+IMAGE = re.compile(r"sha256:[0-9a-f]{64}\Z")
+MAX_BASELINE_BYTES = 4096
 
 
 def _feed(digest: object, value: object) -> None:
@@ -130,7 +137,9 @@ def capture_baseline(path: Path, *, candidate_directory: Path, revision: str,
                      candidate_image: str) -> str:
     """Seal the pre-ingress candidate state in the root-private cutover ledger."""
     if (not path.is_absolute() or not candidate_directory.is_absolute()
-            or path.exists() or path.is_symlink()):
+            or path.exists() or path.is_symlink()
+            or REVISION.fullmatch(revision) is None
+            or IMAGE.fullmatch(candidate_image) is None):
         raise FenceError("invalid_baseline_path")
     parent = path.parent.stat()
     if (not stat.S_ISDIR(parent.st_mode) or parent.st_uid != 0
@@ -152,6 +161,54 @@ def capture_baseline(path: Path, *, candidate_directory: Path, revision: str,
         path.unlink(missing_ok=True)
         raise
     return digest
+
+
+def read_baseline(path: Path, *, candidate_directory: Path, revision: str,
+                  candidate_image: str, expected_digest: str) -> dict[str, object]:
+    """Read only the sealed root-private baseline for this exact generation."""
+    if (not path.is_absolute() or ".." in path.parts
+            or not candidate_directory.is_absolute()
+            or candidate_directory.is_symlink()
+            or REVISION.fullmatch(revision) is None
+            or IMAGE.fullmatch(candidate_image) is None
+            or SHA256.fullmatch(expected_digest) is None):
+        raise FenceError("invalid_baseline_identity")
+    try:
+        parent = path.parent.lstat()
+        info = path.lstat()
+        if (not stat.S_ISDIR(parent.st_mode) or parent.st_uid != 0
+                or stat.S_IMODE(parent.st_mode) != 0o700
+                or not stat.S_ISREG(info.st_mode) or info.st_uid != 0
+                or stat.S_IMODE(info.st_mode) != 0o600
+                or not 0 < info.st_size <= MAX_BASELINE_BYTES):
+            raise FenceError("insecure_baseline_receipt")
+        with path.open("rb") as stream:
+            payload = stream.read(MAX_BASELINE_BYTES + 1)
+        if len(payload) > MAX_BASELINE_BYTES:
+            raise FenceError("insecure_baseline_receipt")
+        record = json.loads(payload.decode("utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise FenceError("baseline_unavailable") from exc
+    if (type(record) is not dict or set(record) != {
+            "schemaVersion", "revision", "candidateImageId",
+            "candidateDirectory", "stateSha256"}
+            or type(record["schemaVersion"]) is not int
+            or record["schemaVersion"] != 1
+            or record["revision"] != revision
+            or record["candidateImageId"] != candidate_image
+            or record["candidateDirectory"] != str(candidate_directory)
+            or record["stateSha256"] != expected_digest):
+        raise FenceError("baseline_identity_mismatch")
+    return record
+
+
+def compare_baseline(path: Path, *, candidate_directory: Path, revision: str,
+                     candidate_image: str, expected_digest: str) -> bool:
+    """Caller must keep all candidate writers stopped during this comparison."""
+    read_baseline(path, candidate_directory=candidate_directory,
+                  revision=revision, candidate_image=candidate_image,
+                  expected_digest=expected_digest)
+    return candidate_fingerprint(candidate_directory) == expected_digest
 
 
 def main(argv: list[str] | None = None) -> int:
