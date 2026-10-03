@@ -9,6 +9,7 @@ from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "deploy"))
 import ip_forward_transaction as transaction  # noqa: E402
+import ip_forward_exposure as exposure  # noqa: E402
 
 
 class ForwardTransactionTest(TestCase):
@@ -88,7 +89,7 @@ class ForwardTransactionTest(TestCase):
                          {"api": "a" * 64})
         restore.assert_called_once()
 
-    def test_exposure_precondition_failure_recovers_unexposed_candidate(self):
+    def test_exposure_failure_fences_ready_candidate_before_source_restore(self):
         self.stage.journal.read.return_value = {"phase": "candidate_ready"}
         with patch.object(transaction.ip_forward_stage, "stage_locked",
                           return_value=self.stage), \
@@ -100,16 +101,15 @@ class ForwardTransactionTest(TestCase):
                           return_value=Mock()), \
              patch.object(transaction.ip_forward_exposure, "expose",
                           side_effect=RuntimeError("injected")), \
-             patch.object(transaction.ip_forward_identity, "read",
-                          return_value={"containerIds": {"api": "a" * 64}}), \
+             patch.object(transaction.ip_forward_exposure,
+                          "recover_after_exposure") as recover, \
              patch.object(transaction.ip_forward_start,
-                          "_cleanup_candidate") as cleanup, \
-             patch.object(transaction.ip_forward_hold, "restore") as restore:
+                          "_cleanup_candidate") as cleanup:
             with self.assertRaisesRegex(transaction.TransactionError,
                                         "forward_exposure_failed"):
                 transaction.run_locked(**self.values)
-        cleanup.assert_called_once()
-        restore.assert_called_once()
+        recover.assert_called_once()
+        cleanup.assert_not_called()
 
     def test_public_wrapper_keeps_lock_for_entire_phase(self):
         lock = {"held": False}
@@ -136,6 +136,24 @@ class ForwardTransactionTest(TestCase):
                    if key != "config"})
         self.assertFalse(lock["held"])
         self.assertEqual(result["status"], "awaiting_acceptance")
+
+    def test_failed_exposure_recovery_is_not_replayed_implicitly(self):
+        self.stage.journal.read.return_value = {"phase": "candidate_ready"}
+        with patch.object(transaction.ip_forward_stage, "stage_locked",
+                          return_value=self.stage), \
+             patch.object(transaction.ip_forward_candidate, "prepare",
+                          return_value=self.prepared), \
+             patch.object(transaction.ip_forward_hold, "hold", return_value=Mock()), \
+             patch.object(transaction.ip_forward_start, "start", return_value=Mock()), \
+             patch.object(transaction.ip_forward_exposure, "expose",
+                          side_effect=exposure.ExposureError(
+                              "forward_exposure_recovery_failed")), \
+             patch.object(transaction.ip_forward_exposure,
+                          "recover_after_exposure") as recover:
+            with self.assertRaisesRegex(transaction.TransactionError,
+                                        "forward_exposure_recovery_failed"):
+                transaction.run_locked(**self.values)
+        recover.assert_not_called()
 
 
 if __name__ == "__main__":

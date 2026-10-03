@@ -131,6 +131,25 @@ class ForwardExposureTest(TestCase):
             self.stage.journal.advance.call_args.kwargs["evidence"]["writeFence"],
             "unverified")
 
+    def test_ready_candidate_write_is_retained_before_exposure_intent(self):
+        self.stage.journal.read.return_value = {"phase": "candidate_ready"}
+        with self._patches()[0], self._patches()[1], self._patches()[2], \
+             self._patches()[3], self._patches()[4], self._patches()[5], \
+             patch.object(exposure.ip_forward_writers, "stop", return_value=Mock()), \
+             patch.object(exposure.candidate_write_fence, "compare_baseline",
+                          return_value=False), \
+             patch.object(exposure.ip_forward_writers, "resume"), \
+             patch.object(exposure.ip_forward_start,
+                          "_cleanup_candidate") as cleanup, \
+             patch.object(exposure.ip_forward_hold, "restore") as restore:
+            self.assertEqual(exposure.recover_after_exposure(**self._kwargs()),
+                             "successor_retained")
+        cleanup.assert_not_called()
+        restore.assert_not_called()
+        self.assertEqual(
+            self.stage.journal.advance.call_args.kwargs["evidence"]["writeFence"],
+            "changed")
+
 
 if __name__ == "__main__":
     main()

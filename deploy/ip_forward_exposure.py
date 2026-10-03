@@ -96,7 +96,7 @@ def recover_after_exposure(*, config: protected_cutover.CutoverConfig,
                            publication_file: Path) -> str:
     """Fence a possibly exposed successor and select the only safe generation."""
     _require(stage.journal.read()["phase"] in (
-        "exposure_intent", "awaiting_acceptance"),
+        "candidate_ready", "exposure_intent", "awaiting_acceptance"),
         "forward_exposure_phase_mismatch")
     receipt = _identity(config=config, stage=stage, prepared=prepared,
         held=held, started=started, successor_revision=successor_revision,
@@ -164,20 +164,11 @@ def expose(*, config: protected_cutover.CutoverConfig,
             "caddySha256": digest, "normalIngressProbed": True})
     except BaseException as failure:
         try:
-            if stage.journal.read()["phase"] == "candidate_ready":
-                ip_forward_start._cleanup_candidate(
-                    config=config, prepared=prepared, image=successor_image,
-                    project=ip_forward_start._project(successor_revision),
-                    publication=stage.publication)
-                ip_forward_hold.restore(
-                    config=config, stage=stage, identity=receipt,
-                    publication_file=publication_file)
-            else:
-                recover_after_exposure(
-                    config=config, stage=stage, prepared=prepared, held=held,
-                    started=started, successor_revision=successor_revision,
-                    successor_image=successor_image,
-                    publication_file=publication_file)
+            recover_after_exposure(
+                config=config, stage=stage, prepared=prepared, held=held,
+                started=started, successor_revision=successor_revision,
+                successor_image=successor_image,
+                publication_file=publication_file)
         except BaseException as recovery_failure:
             raise ExposureError("forward_exposure_recovery_failed") from recovery_failure
         raise ExposureError("forward_exposure_failed") from failure

@@ -128,13 +128,16 @@ def run_locked(*, config: protected_cutover.CutoverConfig,
             successor_image=successor_image,
             publication_file=publication_file)
     except BaseException as failure:
+        if (isinstance(failure, ip_forward_exposure.ExposureError)
+                and str(failure) == "forward_exposure_recovery_failed"):
+            raise TransactionError("forward_exposure_recovery_failed") from failure
         try:
             if stage.journal.read()["phase"] == "candidate_ready":
-                _restore_unexposed(
-                    config=config, stage=stage, prepared=prepared,
-                    publication_file=publication_file,
-                    successor_revision=successor_revision,
-                    successor_image=successor_image)
+                ip_forward_exposure.recover_after_exposure(
+                    config=config, stage=stage, prepared=prepared, held=held,
+                    started=started, successor_revision=successor_revision,
+                    successor_image=successor_image,
+                    publication_file=publication_file)
         except BaseException as recovery_failure:
             raise TransactionError("forward_exposure_recovery_failed") \
                 from recovery_failure
