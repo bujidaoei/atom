@@ -88,10 +88,13 @@ def _caddy_ip(config: protected_cutover.CutoverConfig,
         parsed = ipaddress.ip_address(address)
     except ValueError as exc:
         raise CandidateError("forward_caddy_ip_invalid") from exc
+    reserved = {publication.get(key) for key in
+                ("ATOM_PREVIEW_SERVICE_IP", "ATOM_PUBLIC_SERVICE_IP",
+                 "ATOM_CANDIDATE_API_IP")}
     _require(item.get("Id") == expected_id
              and item.get("State", {}).get("Running") is True
              and parsed.version == 4 and parsed.compressed == address
-             and publication.get("ATOM_CADDY_PROXY_IP") == address,
+             and all(reserved) and address not in reserved,
              "forward_caddy_ip_mismatch")
     return address
 

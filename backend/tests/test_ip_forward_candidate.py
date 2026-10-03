@@ -24,7 +24,10 @@ def _setup(tmp_path, monkeypatch):
         stopped=stopped, routes=routes, successor_revision=next_revision)
     successor_image = "sha256:" + "b" * 64
     publication.update({
-        "ATOM_CADDY_PROXY_IP": "172.30.0.10",
+        "ATOM_CADDY_PROXY_IP": "172.30.0.2",  # Old staging value is not live authority.
+        "ATOM_PREVIEW_SERVICE_IP": "172.30.0.6",
+        "ATOM_PUBLIC_SERVICE_IP": "172.30.0.7",
+        "ATOM_CANDIDATE_API_IP": "172.30.0.8",
         "ATOM_VERIFIER_ENV_FILE": str(tmp_path / "verifier.env"),
         "ATOM_VERIFIER_WORKER_IMAGE": "sha256:" + "d" * 64,
         "ATOM_VERIFIER_POLICY_PATH": str(tmp_path / "worker-policy.json"),
@@ -101,7 +104,7 @@ def test_changed_candidate_origin_refuses_before_creating_inputs(
     assert not (forward.captured.candidate / "private-env").exists()
 
 
-@pytest.mark.parametrize("observed", ["172.30.0.11", "198.51.100.12"])
+@pytest.mark.parametrize("observed", ["172.30.0.6", "172.30.0.8"])
 def test_caddy_trusted_proxy_address_must_match_live_id_and_config(
         tmp_path, monkeypatch, observed):
     config, forward, _image = _setup(tmp_path, monkeypatch)
@@ -114,3 +117,16 @@ def test_caddy_trusted_proxy_address_must_match_live_id_and_config(
                        match="forward_caddy_ip_mismatch"):
         REAL_CADDY_IP(config,
             forward.active["containerIds"]["caddy"], forward.publication)
+
+
+def test_caddy_live_address_overrides_old_staging_template(tmp_path, monkeypatch):
+    config, forward, _image = _setup(tmp_path, monkeypatch)
+    monkeypatch.setattr(candidate.protected_cutover, "_inspect",
+        lambda *_args: {"Id": forward.active["containerIds"]["caddy"],
+                       "State": {"Running": True},
+                       "NetworkSettings": {"Networks": {
+                           config.network: {"IPAddress": "172.30.0.10"}}}})
+    assert REAL_CADDY_IP(config,
+        forward.active["containerIds"]["caddy"], forward.publication) \
+        == "172.30.0.10"
+    assert forward.publication["ATOM_CADDY_PROXY_IP"] == "172.30.0.2"
