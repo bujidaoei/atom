@@ -1,10 +1,14 @@
 """Atomic ingress file application and failure recovery against a real ledger."""
 import hashlib
+from email.message import Message
+from urllib.error import HTTPError
 
 import pytest
 
 from app import ip_ingress_controller as controller_module
-from app.ip_ingress import IngressError, IpIngressConfig, render_ip_caddyfile
+from app import ip_ingress as ingress_module
+from app.ip_ingress import (IngressError, IpIngressConfig, probe_ip_maintenance_routes,
+                            render_ip_caddyfile, render_ip_maintenance_routes)
 from app.ip_ingress_controller import DockerCaddy, IpIngressController
 from app.migrations import migrate
 from app.project_origins import ProjectOriginRepository
@@ -73,6 +77,46 @@ def test_reconcile_uses_ledger_and_reloads_again_after_restart(ingress):
     # A restart must reapply even if the config bytes have not changed.
     assert controller.reconcile() == digest
     assert caddy.reloads == 2 and len(observed) == 2
+
+
+def test_forward_maintenance_retains_exact_tls_origins_but_denies_content(ingress):
+    origins, config, _base, _active = ingress
+    maintenance_base = 'https://192.0.2.10 {\n  header Cache-Control "no-store"\n  respond "maintenance" 503\n}\n'
+    routes = origins.active_routes()
+    rendered = render_ip_maintenance_routes(maintenance_base, routes, config)
+    assert rendered.count('respond "正在更新，请稍后刷新" 503') == len(routes)
+    assert rendered.count('profile shortlived') == len(routes)
+    assert 'https://192.0.2.10:20000 {' in rendered
+    assert 'https://192.0.2.10:20001 {' in rendered
+    assert 'reverse_proxy' not in rendered
+    assert rendered.startswith(maintenance_base.strip())
+    with pytest.raises(IngressError, match='invalid_origin_route'):
+        render_ip_maintenance_routes(maintenance_base, routes + routes[:1], config)
+    with pytest.raises(IngressError, match='ingress_port_already_configured'):
+        render_ip_maintenance_routes(maintenance_base + '\nhttps://192.0.2.10:20000 { }\n',
+                                     routes, config)
+
+
+def test_forward_maintenance_probe_requires_tls_503_no_store_without_cookies(ingress,
+                                                                              monkeypatch):
+    origins, config, _base, _active = ingress
+    observed = []
+    headers = Message()
+    headers['Cache-Control'] = 'no-store'
+
+    class Opener:
+        def open(self, request, timeout):
+            observed.append((request.full_url, request.get_method(), timeout))
+            raise HTTPError(request.full_url, 503, 'maintenance', headers, None)
+
+    monkeypatch.setattr(ingress_module, 'build_opener', lambda *_args: Opener())
+    probe_ip_maintenance_routes(origins.active_routes(), config.address)
+    assert len(observed) == 2
+    assert all(method == 'POST' and url.endswith('/_atom/health')
+               for url, method, _timeout in observed)
+    headers['Set-Cookie'] = 'bad=1'
+    with pytest.raises(IngressError, match='maintenance_probe_mismatch'):
+        probe_ip_maintenance_routes(origins.active_routes(), config.address)
 
 
 @pytest.mark.parametrize('failure', ['mount', 'validation', 'reload', 'probe'])
