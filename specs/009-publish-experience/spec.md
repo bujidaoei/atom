@@ -2,7 +2,7 @@
 
 **Feature Branch**: `codex/009-publish-experience`
 **Created**: 2026-10-02
-**Status**: IP-only isolation, owner snapshot publication and proof-authenticated progress streaming deployed; remaining forward fault branches, authenticated cross-port denial and certificate renewal remain open
+**Status**: IP-only isolation, owner snapshot publication, proof-authenticated progress streaming and authenticated cross-port denial deployed; automatic interruption recovery, remaining fault branches and certificate renewal remain open
 **Input**: Repair check HTTP500, restore simple publication, make publishing a comprehensible history of restorable published snapshots; retain Atom runtime.
 
 ## User Scenarios & Testing
@@ -66,6 +66,7 @@ Saved version: immutable content. Functional check: version-bound observations a
 - **SC-009**: After an old-schema rollback is refused because a real owner release changed the candidate ledger, a protected forward deployment starts from that retained ledger, keeps the release/history and draft intact, preserves each project's HTTPS origin, and proves a further owner write and public read through the new image. A failed forward phase preserves the last serving data generation.
 - **SC-010**: After a real owner creates a new project, its two committed HTTPS origins become reachable without an operator command; direct publication succeeds once the host has reconciled ingress. An interrupted deployment or mismatched serving generation causes the reconciler to refuse changes, and a failed TLS probe leaves the previous public version in place for a later retry.
 - **SC-011**: In a production-configured, real-browser session with durable console proof enabled, the project event stream connects with HTTP 200, displays a real emitted update, reconnects after a stopped stream and reloads without repeated 401 responses. Cookie-only cross-port requests remain denied.
+- **SC-012**: After a real interrupted forward transaction and host service restart, the root-owned periodic operator detects one identity-validated incomplete journal, runs the existing write-fenced recovery before ingress reconciliation, and restores the correct data generation without losing a published byte or changing an unrelated service ID. A healthy `awaiting_acceptance` generation remains serving, while orphan or multiple incomplete receipts cause no recovery mutation.
 
 ## Assumptions
 - Scope is the current generated website product, not arbitrary backend hosting.
@@ -85,3 +86,4 @@ Saved version: immutable content. Functional check: version-bound observations a
 - **FR-017**: Present Atom as its own product. User-facing copy should explain Atom's independently built workflow and publication snapshots without describing the site as an Atoms replica or an official atoms.dev implementation.
 - **FR-018**: A newly created project with committed preview/public IP origins must become publishable without manual ingress commands. A separate least-privilege host reconciler must apply only committed routes under the deployment lock, never expose Docker control to the application, refuse an interrupted cutover or mismatched service generation, and verify real HTTPS before a publication is accepted. A failed reconcile must preserve the previous ingress and release pointer and remain retryable.
 - **FR-019**: Keep authenticated project progress streaming functional when console proof is mandatory. The browser must send the same session-bound proof as other console API requests, parse bounded server events incrementally and reconnect from the last applied sequence without relaxing the server's cookie-plus-proof boundary or leaking proof into a URL.
+- **FR-020**: The root-owned host operator must detect and reconcile an interrupted forward transaction after a process or host restart using its durable exact-identity journal and existing write fence. It must run before normal origin ingress reconciliation under the same deployment lock, never recover a healthy serving `awaiting_acceptance` receipt as a fault, and fail closed on orphan or ambiguous receipts. No Docker or recovery authority moves into the application.

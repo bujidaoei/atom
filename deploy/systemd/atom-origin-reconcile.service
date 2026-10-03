@@ -7,10 +7,11 @@ Requires=docker.service
 Type=oneshot
 User=root
 EnvironmentFile=/etc/atom/origin-reconcile.env
+ExecStartPre=/usr/bin/python3 ${ATOM_OPERATOR_ROOT}/deploy/ip_forward_auto_recover.py --config ${ATOM_CUTOVER_CONFIG} --publication-file ${ATOM_PUBLICATION_FILE}
 ExecStart=/usr/bin/python3 ${ATOM_OPERATOR_ROOT}/deploy/ip_origin_reconcile.py --config ${ATOM_CUTOVER_CONFIG} --publication-file ${ATOM_PUBLICATION_FILE}
 TimeoutStartSec=180
 NoNewPrivileges=yes
 PrivateTmp=yes
 ProtectSystem=strict
-ReadWritePaths=/run /var/backups/atom-cutovers
+ReadWritePaths=/run /var/backups/atom-cutovers /var/lib/atom-cutovers
 
