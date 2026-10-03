@@ -113,7 +113,8 @@ class ForwardPartialStartDockerTest(unittest.TestCase):
                         source_ids=source_ids)
                 for role in first:
                     self.assertIsNone(start.ip_cutover_rollback._inspect(names[role]))
-                foreign = create("preview", "foreign-project")
+                intact = create("preview", project)
+                foreign = create("public", "foreign-project")
                 with patch.dict(identity.SUPPORT_NAMES,
                                 {role: names[role] for role in
                                  ("preview", "public", "verifier", "caddy")}):
@@ -122,6 +123,8 @@ class ForwardPartialStartDockerTest(unittest.TestCase):
                         start._cleanup_candidate(config=config, prepared=prepared,
                             image=image_id, project=project, publication={},
                             source_ids=source_ids)
+                self.assertEqual(run("container", "inspect", intact,
+                                     "--format", "{{.Id}}"), intact)
                 self.assertEqual(run("container", "inspect", foreign,
                                      "--format", "{{.Id}}"), foreign)
             finally:

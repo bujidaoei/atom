@@ -214,6 +214,31 @@ class ForwardStartTest(TestCase):
                     publication=self.publication)
             remove.assert_not_called()
 
+    def test_cleanup_validates_late_role_before_deleting_earlier_candidate(self):
+        remaining = {"preview": self.new_ids["preview"],
+                     "public": self.new_ids["public"]}
+
+        def profile(*, role, **_kwargs):
+            if role == "public":
+                raise starter.StartError("forward_candidate_project_mismatch")
+            return self.new_ids[role]
+
+        with patch.object(starter, "_current",
+                          side_effect=lambda _config, role: (
+                              {"Id": remaining[role]} if role in remaining
+                              else None)), \
+             patch.object(starter, "_profile", side_effect=profile), \
+             patch.object(starter.ip_forward_hold, "_run") as remove:
+            with self.assertRaisesRegex(starter.StartError,
+                                        "forward_candidate_project_mismatch"):
+                starter._cleanup_candidate(config=self.config,
+                    prepared=self.prepared, image=self.image,
+                    project=starter._project(self.successor),
+                    publication=self.publication)
+        remove.assert_not_called()
+        self.assertEqual(remaining, {"preview": self.new_ids["preview"],
+                                     "public": self.new_ids["public"]})
+
     def test_partial_handoff_cleanup_never_removes_canonical_source_ids(self):
         remaining = {"api": self.old_ids["api"],
                      "broker": self.old_ids["broker"],

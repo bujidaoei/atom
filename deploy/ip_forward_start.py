@@ -222,6 +222,7 @@ def _cleanup_candidate(*, config: protected_cutover.CutoverConfig,
                       and ip_forward_identity.HEX64.fullmatch(value) is not None
                       for value in source_ids.values())),
              "invalid_forward_source_ids")
+    candidates: list[tuple[str, str]] = []
     for role in ("caddy", "verifier", "preview", "public", "broker", "api"):
         item = _current(config, role)
         if item is None:
@@ -233,6 +234,14 @@ def _cleanup_candidate(*, config: protected_cutover.CutoverConfig,
         identifier = _profile(config=config, role=role, item=item,
             image=image, prepared=prepared, project=project,
             publication=publication)
+        candidates.append((role, identifier))
+    # A late foreign container must not leave an earlier, valid candidate
+    # half-deleted. Admission is all-or-nothing; each removal still uses the
+    # sealed ID and immediately rechecks the canonical name.
+    for role, identifier in candidates:
+        current = _current(config, role)
+        _require(current is not None and current.get("Id") == identifier,
+                 "forward_candidate_identity_changed")
         ip_forward_hold._run(config, "container", "rm", "--force",
                              identifier, timeout=105)
         _require(_current(config, role) is None,
