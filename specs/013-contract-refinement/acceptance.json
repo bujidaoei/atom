@@ -1,0 +1,23 @@
+{
+  "projectId": "56ae848a8d1f4305993bcbdb59a87dac",
+  "revisionId": "0dcaa2c8edd94306a71eba621e4bd31c",
+  "contractId": "5b5fb82d10694eb09e24bd6bed055ef8",
+  "contractVersion": 7,
+  "verification": {
+    "state": "passed",
+    "passed": 22,
+    "total": 22
+  },
+  "audio": [
+    {
+      "step": "real-browser-audio",
+      "moveStarts": 1,
+      "captureStarts": 2,
+      "mutedStarts": 0,
+      "pageErrors": 0
+    }
+  ],
+  "deployedCommit": "51465b561a8cf88317390d5f89bd276d30f7a93d",
+  "deployedImage": "sha256:410aa9ce54cd9c78ba69a3be7ab424b71a538abdba817b431cbbd26969520bc0",
+  "sourceOfEvidence": "real production provider; ordinary browser/API workflow; resumed same dedicated acceptance account after ingress correction"
+}

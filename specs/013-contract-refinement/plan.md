@@ -22,3 +22,6 @@ Validate migration backup/replay/rollback; repository CAS/immutable/cross-projec
 
 ## Observed acceptance correction
 The live generated application passed real audio/mute/reset behavior, but its contract scored20/29: the existing Emma instruction incorrectly assumed checks share state, while verification_observer creates a fresh context per check. Align the planning prompt with the actual observer: static initial-state exists/text checks and self-contained flow setup plus result selectors. Preserve the observer isolation boundary. Validate by real contract refinement and full generated checks. Host operator configuration must point to the schema-capable deployed source; check origin-reconcile and certificate-watch after migration.
+
+## Delivery status
+Implemented and accepted2026-10-04. Full backend regression plus final affected tests, frontend/runtime gates, live iterative contract/restore/build/audio workflow and22/22 isolated checks passed. Deployed implementation51465b5 and accepted journal; see evidence.md and acceptance.json for identities and retained failure/recovery history.

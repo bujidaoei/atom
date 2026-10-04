@@ -2,7 +2,7 @@
 
 **Feature Branch**: `codex/013-contract-refinement`
 **Created**: 2026-10-04
-**Status**: Implemented; final live verification correction in progress
+**Status**: Accepted and deployed; real model/browser and22/22 isolated checks passed
 **Input**: 用户要求微调真实进入契约、满意后单独构建，并可预览与恢复任意历史契约，复用发布历史交互，验证后同步 main 和部署。
 
 ## User Scenarios & Testing
