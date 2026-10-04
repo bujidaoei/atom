@@ -70,7 +70,7 @@ class PreviewAccessRepository:
         if not self.path.is_absolute():
             raise PreviewAccessError('invalid_preview_configuration')
         try:
-            if verify(self.path) != 18:
+            if verify(self.path) not in (18, 19):
                 raise PreviewAccessError('preview_schema_required')
         except MigrationError:
             raise PreviewAccessError('preview_schema_required') from None

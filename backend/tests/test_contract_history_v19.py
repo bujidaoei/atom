@@ -24,6 +24,12 @@ def test_v19_backup_additive_replay_integrity(v18, tmp_path):
         assert db.execute('PRAGMA integrity_check').fetchone() == ('ok',)
         assert not db.execute('PRAGMA foreign_key_check').fetchall()
         assert db.execute('SELECT count(*) FROM contract_snapshots').fetchone() == (0,)
+    from app.preview_access import PreviewAccessRepository
+    # Exercise both factory-time verification and per-operation verification.
+    # A compatible transaction alone does not prove the process can start.
+    repository = PreviewAccessRepository(v18)
+    with repository._database(write=False) as db:
+        assert db.execute('PRAGMA user_version').fetchone()[0] == 19
 
 
 def test_v19_failure_restores_exact_predecessor(v18, tmp_path, monkeypatch):
