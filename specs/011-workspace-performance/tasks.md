@@ -11,11 +11,12 @@
 - [x] T007 [US2] Run real browser route acceptance for replay, switching, failed reads and reconnection; record specs/011-workspace-performance/evidence.md.
 ## Phase 4 — US3 delivery
 - [x] T012 [US2] Implement FR-007 dynamic fit measurement in frontend/src/workspace/PreviewToolbar.tsx and browser-test continuous sizing, fonts and actions in backend/tests/test_workspace_loading_browser.py.
-- [ ] T013 [US2] Implement CR-002 configuration, run/model/race budget propagation, Pi overrides and deployment .env; validate delayed HTTP, cancellation and invalid settings.
-- [ ] T008 [US3] Run complete backend regression, frontend tests/build, locked runtime validation and target Linux integration; record specs/011-workspace-performance/evidence.md.
-- [ ] T009 [US3] Push exact reviewed source, build and deploy via protected paired-backup forward transaction; record specs/011-workspace-performance/deployment.md.
-- [ ] T010 [US3] Measure same 12 live clicks and verify preview/public health and visual acceptance; record specs/011-workspace-performance/after.jsonl and evidence.md.
+- [x] T013 [US2] Implement CR-002 configuration, run/model/race budget propagation, Pi overrides and deployment .env; validate delayed HTTP, cancellation and invalid settings.
+- [x] T008 [US3] Run complete backend regression, frontend tests/build, locked runtime validation and target Linux integration; record specs/011-workspace-performance/evidence.md.
+- [x] T009 [US3] Push exact reviewed source, build and deploy via protected forward transaction; accept generation and remove the transaction's temporary pre-backup after the user's no-backup instruction; record specs/011-workspace-performance/deployment.md.
+- [x] T010 [US3] Measure same 12 live clicks and verify preview/public health and visual acceptance; record specs/011-workspace-performance/after.jsonl and evidence.md. Measurement completed; the 2-second aspirational SC-001 target is not met.
 - [ ] T011 [US3] Synchronize GitHub main and feature branch with verified changes and final evidence in specs/011-workspace-performance/tasks.md.
+- [ ] T014 [US1] Remove eager per-heat catalog reads from the initial four-candidate workspace response without weakening ownership or artifact verification, then remeasure p95 against the 2-second SC-001 target. This is a measured remaining optimization, not accepted work.
 
 Dependencies: T001-T002 -> T003/T004/T005 -> T006 -> T007/T012/T013 -> T008 -> T009 -> T010 -> T011. Independent test commands may run concurrently; implementation is sequential to avoid shared-contract drift. MVP is US1; full delivery includes all stories. Pending tests never count as accepted.
 

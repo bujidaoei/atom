@@ -1,0 +1,14 @@
+{"sample": 1, "project": "21125e3fca4548fc9619dfc1676f99f8", "visible_ms": 938, "result": "visible", "detail_requests": 1, "detail_statuses": [200]}
+{"sample": 2, "project": "88b8208c0d394ce48ac1a2e863e31003", "visible_ms": 1910, "result": "visible", "detail_requests": 1, "detail_statuses": [200]}
+{"sample": 3, "project": "1f5e47bd9b234cde9980f387c0530c33", "visible_ms": 925, "result": "visible", "detail_requests": 1, "detail_statuses": [200]}
+{"sample": 4, "project": "21125e3fca4548fc9619dfc1676f99f8", "visible_ms": 906, "result": "visible", "detail_requests": 1, "detail_statuses": [200]}
+{"sample": 5, "project": "88b8208c0d394ce48ac1a2e863e31003", "visible_ms": 1905, "result": "visible", "detail_requests": 1, "detail_statuses": [200]}
+{"sample": 6, "project": "1f5e47bd9b234cde9980f387c0530c33", "visible_ms": 931, "result": "visible", "detail_requests": 1, "detail_statuses": [200]}
+{"sample": 7, "project": "21125e3fca4548fc9619dfc1676f99f8", "visible_ms": 896, "result": "visible", "detail_requests": 1, "detail_statuses": [200]}
+{"sample": 8, "project": "88b8208c0d394ce48ac1a2e863e31003", "visible_ms": 1919, "result": "visible", "detail_requests": 1, "detail_statuses": [200]}
+{"sample": 9, "project": "1f5e47bd9b234cde9980f387c0530c33", "visible_ms": 912, "result": "visible", "detail_requests": 1, "detail_statuses": [200]}
+{"sample": 10, "project": "21125e3fca4548fc9619dfc1676f99f8", "visible_ms": 895, "result": "visible", "detail_requests": 1, "detail_statuses": [200]}
+{"sample": 11, "project": "88b8208c0d394ce48ac1a2e863e31003", "visible_ms": 2954, "result": "visible", "detail_requests": 1, "detail_statuses": [200]}
+{"sample": 12, "project": "1f5e47bd9b234cde9980f387c0530c33", "visible_ms": 905, "result": "visible", "detail_requests": 1, "detail_statuses": [200]}
+{"isolated_preview": 200, "opener_isolated": true}
+{"page_errors": 0, "samples": 12}

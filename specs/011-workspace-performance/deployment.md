@@ -1,17 +1,21 @@
 # Deployment — workspace performance
-## Prepared 2026-10-04
-Executable source: fbfbb89aa7e13e98b0d015889c34bc46d5753f5a, clean root-owned /home/ubuntu/atom-workspace-release.
-Image: sha256:f7af12541d584742949745fe2369b48c2dce609e3d32013ba8d1d75e737ebe4f, exact atom.revision label and /atom/ frontend base. Build unit atom-build-workspace-v2 exited0. Initial build command failed before build because the target fetch used FETCH_HEAD rather than a remote-tracking ref; corrected by checking out the full fetched commit. No production change occurred on that failed attempt.
-Exact image: Pi1905 checksum boundary, compileall and nginx -t pass. Actual Linux revision route integration passed1/1, including owner isolation, corruption and legacy preview protection. Linux artifact/COS suites passed28/28. A newly added test initially attempted to mutate immutable ledger records and was correctly rejected by the existing DB trigger before reaching its intended assertion; corrected test validates full-identity cache misses without modifying the immutable ledger, then passes. Production code unchanged by that test correction.
-Protected current/successor preflight returned ready_for_forward_transaction: original fd191e5 image143491f..., six exact service IDs,80 project origins, Caddy SHA256 b4347fd658c690a533fb42c4bea634608f7bc8bb7fd74d25b811aa8219320011.
-Before deployment, existing public port20073 returns certificate-verified HTTP200 with HTML SHA256 4a3b8558d8863990a5fc323f1bbf30895d9f36430c49a738451a9afca582a980.
 
-## Cutover gate
-Pending full regression review. Run existing deploy/ip_forward_transaction.py under a bounded target-local systemd service with protected configuration, source fd191e5, exact successor and image. It performs host locking, writer fencing, paired verified backup, separate candidate data and retains previous service containers. Do not manually replace live DBs.
+## Production release, 2026-10-04
 
-## Recovery
-Before exposure, the transaction uses existing phase-based source restoration. After exposure, invoke deploy/ip_forward_recovery.py with protected config/publication file and exact successor revision; it evaluates durable writes and refuses unsafe rollback. Preserve candidate data when writes have occurred; never overwrite it with an old backup. Independent paired_backup.py verify and ip_forward_preflight.py must corroborate final state.
+Live source: `a621b9b968c326e87db5faef1ed962ff35627ec0`, clean root-owned `/home/ubuntu/atom-workspace-final`. Exact image: `sha256:58f9eeed2cf60664e69a3366d667656e064c1172363f0d0659a80bf9e17ed9b0`, matching the source revision label and `/atom/` frontend base. The earlier prepared `fbfbb89` image was superseded and never deployed. The original production release was `fd191e5c6ae5dc08865539f9b897473010b74943`.
 
-## CR-002 configuration
-The successor checkout may contain a root-owned mode0600 `.env` with numeric ATOM_BUILD_BUDGET_SECONDS and ATOM_RUN_TIMEOUT_SECONDS (default3600, maximum7140); optional ATOM_LLM_TIMEOUT_SECONDS must be at least both budgets. Protected preflight captures only these keys, rejects invalid policy before writer fencing, and passes the captured values into candidate/private-env/api.env. Other credentials continue to come from existing protected sources. Do not commit this private file. Configuration changes require a new protected deployment/restart; they do not extend already-running leases.
-Earlier fbfbb89 image is superseded by CR-001/CR-002 work and has not been deployed.
+The existing schema-18 protected forward transaction ran under `atom-deploy-workspace-a621b9b` and exited successfully. Its journal `/var/lib/atom-cutovers/a621b9b968c326e87db5faef1ed962ff35627ec0.forward-phase.json` was advanced from `awaiting_acceptance` to `accepted` after live tests. A post-acceptance `ip_forward_preflight.py` returned `current_generation_verified`, image and revision above, six exact container IDs, 80 active origins and Caddy SHA-256 `b4347fd658c690a533fb42c4bea634608f7bc8bb7fd74d25b811aa8219320011`.
+
+The active data directory is `/var/backups/atom-cutovers/forward-candidate-a621b9b968c3` (the directory name reflects the transaction's candidate generation; it is **live data**, not a disposable backup). It remains intact. Public port 20073 returned certificate-verified HTTP 200 with the pre-release HTML SHA-256 `4a3b8558d8863990a5fc323f1bbf30895d9f36430c49a738451a9afca582a980`; isolated preview returned HTTP 200. The six services, origin/certificate timers and ingress were healthy.
+
+## User-requested no-backup handling
+
+The protected transaction had already produced `/var/backups/atom-cutovers/forward-pre-a621b9b968c3` before the user instructed us not to keep a backup in this test environment. After acceptance, an exact-path, root-ownership and no-symlink check removed only that temporary pre-cutover directory. The filesystem reported 192,036,864 bytes freed. The active candidate directory was checked intact, and the current-generation preflight passed again after deletion. No further backup was created. A future cutover must honor this instruction explicitly; the current protected forward operator creates a backup by default and must not be rerun unchanged under a no-backup instruction.
+
+## Recovery boundary
+
+The release journal is accepted and may be audited. The previous-generation temporary backup has been removed by user request, so rollback to the former data generation is unavailable through it. Preserve the active candidate data. Existing `deploy/ip_forward_recovery.py` guards against restoring older data over durable writes; do not invoke source restoration for this accepted release. The code/image can be rebuilt from the exact Git revision, but that is distinct from restoring old project data.
+
+## Generation configuration
+
+The root-owned mode-0600 `/home/ubuntu/atom-workspace-final/.env` sets `ATOM_BUILD_BUDGET_SECONDS=3600` and `ATOM_RUN_TIMEOUT_SECONDS=3600`; effective model timeout inherits this budget. The supported maximum is 7140 seconds plus broker cleanup allowance, validated before a future cutover. Credentials remain in protected configuration and are not committed. Configuration changes require a new safe deployment/restart and do not extend already-running leases.
