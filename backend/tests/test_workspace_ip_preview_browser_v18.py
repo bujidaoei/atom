@@ -35,6 +35,8 @@ def test_workspace_opens_isolated_saved_preview(
     for version in range(14, 19):
         migrate(path, tmp_path / f'before-workspace-v{version}.db', target_version=version)
     app, token, engine = _configured_api(path, store, intent, tmp_path, monkeypatch)
+    from sqlalchemy.orm import sessionmaker
+    monkeypatch.setattr("app.db.SessionLocal", sessionmaker(bind=engine))
     listeners = _adjacent_listeners()
     preview_port = listeners[0].getsockname()[1]
     public_port = listeners[1].getsockname()[1]
@@ -86,7 +88,7 @@ def test_workspace_opens_isolated_saved_preview(
             assert page.evaluate("localStorage.getItem('atom.console.proof.v1')") == proof
             page.goto('https://127.0.0.1/atom/app/p/project', wait_until='domcontentloaded')
             try:
-                page.get_by_role('button', name='打开当前版本').wait_for(timeout=5000)
+                page.locator('[data-preview-state=displayed]').wait_for(timeout=20000)
             except Exception as error:
                 has_proof = page.evaluate('Boolean(localStorage.getItem("atom.console.proof.v1"))')
                 has_cookie = any(item['name'] == '__Host-atom_console' for item in context.cookies())
@@ -94,7 +96,26 @@ def test_workspace_opens_isolated_saved_preview(
                     f'proof={has_proof} cookie={has_cookie} '
                     f'origin={page.evaluate("location.origin")} '
                     f'body={page.locator("body").inner_text()[:800]}') from error
-            assert page.locator('iframe').count() == 0
+            assert page.locator('iframe').count() == 1
+            frame = page.frame_locator('iframe[title="项目预览"]')
+            assert frame.locator('body').inner_text() == 'heat'
+            iframe = page.locator('iframe[title="项目预览"]')
+            inner = iframe.element_handle().content_frame()
+            inner.evaluate('window.previewCounter = 7')
+            for label, width in [('平板', 768), ('手机', 390), ('桌面', None)] * 4:
+                page.get_by_role('button', name=label, exact=True).click()
+                if width:
+                    assert inner.evaluate('innerWidth') == width
+                assert inner.evaluate('window.previewCounter') == 7
+            for outer_width in (1440, 768, 390):
+                page.set_viewport_size({'width': outer_width, 'height': 900})
+                page.get_by_role('button', name='平板', exact=True).click()
+                assert inner.evaluate('innerWidth') == 768
+                assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
+                page.screenshot(path=str(tmp_path / f'embedded-{browser_name}-{outer_width}.png'), full_page=True, animations="disabled")
+            page.get_by_role('button', name='刷新预览', exact=True).click()
+            page.locator('[data-preview-state=displayed]').wait_for(timeout=15000)
+            assert frame.locator('body').inner_text() == 'heat'
             exchange_responses = []
             exchange_requests = []
             context.on('request', lambda request: exchange_requests.append({
@@ -104,10 +125,10 @@ def test_workspace_opens_isolated_saved_preview(
             context.on('response', lambda response: exchange_responses.append(response.status)
                        if response.url.endswith('/_atom/exchange') else None)
             with context.expect_page() as opened:
-                page.get_by_role('button', name='打开当前版本').click()
+                page.get_by_role('button', name='打开新窗口', exact=True).click()
             child = opened.value
             try:
-                child.wait_for_url(hosts.origin(preview_port) + '/', timeout=10000)
+                child.wait_for_url(hosts.origin(preview_port) + '/_atom/view/*/', timeout=10000)
             except Exception as error:
                 raise AssertionError(f'browser={browser_name} url={child.url} '
                     f'opening={child.locator("body").inner_text()[:200]} '
@@ -136,6 +157,32 @@ def test_workspace_opens_isolated_saved_preview(
             assert result == 'blocked'
             assert child_console_requests == []
             child.close()
+            # Revocation denies content; a user retry replaces only this view and recovers.
+            import sqlite3
+            with sqlite3.connect(path) as db:
+                db.execute("UPDATE preview_sessions SET revoked_at=unixepoch() WHERE revoked_at IS NULL")
+            page.get_by_role('button', name='刷新预览', exact=True).click()
+            page.locator('[data-preview-state=failed]').wait_for(timeout=15000)
+            assert page.get_by_role('alert').count() >= 1
+            page.get_by_role('button', name='重新加载', exact=True).click()
+            page.locator('[data-preview-state=displayed]').wait_for(timeout=15000)
+            assert frame.locator('body').inner_text() == 'heat'
+            # An actual HTTP failure cannot leave a permanent spinner; retry is usable.
+            page.route('**/preview-access', lambda route: route.fulfill(status=503, body='unavailable'))
+            page.reload(wait_until='domcontentloaded')
+            page.locator('[data-preview-state=failed]').wait_for(timeout=15000)
+            page.unroute('**/preview-access')
+            page.get_by_role('button', name='重新加载', exact=True).click()
+            page.locator('[data-preview-state=displayed]').wait_for(timeout=15000)
+            if browser_name == 'chromium':
+                delayed = []
+                page.route('**/preview-access', lambda route: delayed.append(route))
+                page.reload(wait_until='domcontentloaded')
+                page.locator('[data-preview-state=failed]').wait_for(timeout=15000)
+                assert delayed and page.locator('iframe').count() == 0
+                page.unroute('**/preview-access')
+                page.get_by_role('button', name='重新加载', exact=True).click()
+                page.locator('[data-preview-state=displayed]').wait_for(timeout=15000)
             context.close()
             browser.close()
     finally:

@@ -367,7 +367,7 @@ function ProjectWorkspace({ id }: { id: string | undefined }) {
         <div role="status" className="flex shrink-0 items-center gap-m border-b border-neutral-12 px-l py-s text-sm">
           <div className="flex-1">{project.latestRun?.error || "本轮未完成。"} {project.incompleteSavedRevisionId
             ? "已保存未完成版本，可预览文件；完成生成后才能发布这个版本。功能检查可按需运行。"
-            : hasFiles ? "可预览之前已登记的文件；本轮未完成的文件未保存。" : "可以重新尝试。"}</div>
+            : hasFiles ? "可预览当前已登记的版本，并继续修改。" : "可以重新尝试。"}</div>
           <Button size="sm" variant="secondary" loading={starting} onClick={() => void resume()}>{project.incompleteSavedRevisionId
             ? "从已保存版本继续生成" : hasFiles ? "基于已有版本重新生成" : "重新生成"}</Button>
         </div>

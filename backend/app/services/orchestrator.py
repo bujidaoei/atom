@@ -31,7 +31,7 @@ from ..models import (
     new_id,
 )
 from . import credits, parsing
-from .artifacts import validate_artifacts
+from .artifacts import ArtifactValidationError, validate_artifacts
 from .runtime_client import GatewayConfig, RuntimeClient, runtime_client
 from .provider_connection import resolve_provider
 
@@ -62,6 +62,7 @@ class TurnOutcome:
     failed: bool
     error: str | None = None
     status: str = "done"
+    validation_error: str | None = None
 
 
 class Orchestrator:
@@ -363,10 +364,9 @@ class Orchestrator:
         if phase == "revise" and note:
             _add_message(project_id, "user", note)
 
-        outcome = await self._turn(
+        outcome = await self._generate(
             project_id,
             user_id,
-            role="alex",
             phase=phase,
             gateway=gateway,
             prompt=_build_prompt(project_id, prompt, note, phase=phase),
@@ -483,10 +483,9 @@ class Orchestrator:
         )
 
         try:
-            outcome = await self._turn(
+            outcome = await self._generate(
                 project_id,
                 user_id,
-                role="alex",
                 phase="race",
                 gateway=GatewayConfig(gateway.base_url, gateway.api_key, model),
                 prompt=prompt,
@@ -499,10 +498,10 @@ class Orchestrator:
             count, size = await self._workspace_stats(project_id, user_id, heat_id)
             with session_scope() as session:
                 heat = session.get(RaceHeat, heat_id)
-                run = session.get(Run, heat.run_id) if heat.run_id else None
+                runs = list(session.scalars(select(Run).where(Run.heat_id == heat_id)))
                 heat.elapsed_ms = previous[0] + int((time.monotonic() - started) * 1000)
-                heat.input_tokens = previous[1] + (run.input_tokens if run else 0)
-                heat.output_tokens = previous[2] + (run.output_tokens if run else 0)
+                heat.input_tokens = sum(run.input_tokens for run in runs)
+                heat.output_tokens = sum(run.output_tokens for run in runs)
                 heat.file_count, heat.bytes = count, size
             raise
 
@@ -531,6 +530,47 @@ class Orchestrator:
         )
 
     # ------------------------------------------------------------- one turn
+
+    async def _generate(self, project_id: str, user_id: str, *, phase: str,
+                        gateway: GatewayConfig, prompt: str, context: str | None = None,
+                        heat_id: str | None = None, record_message: bool = True,
+                        budget_seconds: int | None = None) -> TurnOutcome:
+        """One total budget, with fresh auditable runs for repairable file defects."""
+        settings = get_settings()
+        budget = budget_seconds if budget_seconds is not None else settings.build_budget_seconds
+        deadline = time.monotonic() + budget
+        total_in = total_out = 0
+        current_prompt = prompt
+        for attempt in range(settings.generation_repair_attempts + 1):
+            remaining = deadline - time.monotonic()
+            if settings.sandbox_mode == 'broker':
+                remaining = int(remaining)
+            if remaining <= 0:
+                return TurnOutcome('', total_in, total_out, True,
+                    '生成与自动修复已达到总时间上限；可从已保存版本继续。', 'timed_out')
+            outcome = await self._turn(project_id, user_id, role='alex', phase=phase,
+                gateway=gateway, prompt=current_prompt, context=context, heat_id=heat_id,
+                record_message=record_message, budget_seconds=remaining)
+            total_in += outcome.input_tokens
+            total_out += outcome.output_tokens
+            if (not outcome.validation_error or not outcome.failed
+                    or attempt == settings.generation_repair_attempts):
+                outcome.input_tokens, outcome.output_tokens = total_in, total_out
+                return outcome
+            await asyncio.sleep(0)  # Deliver cancellation before admitting another model run.
+            if project_id in self._stopping:
+                raise asyncio.CancelledError
+            detail = f'平台检查发现文件问题，正在自动修复（{attempt + 1}/{settings.generation_repair_attempts}）：{outcome.validation_error}'
+            if record_message:
+                _add_message(project_id, 'system', detail)
+            await bus.publish(project_id, 'generation.repair_started', {
+                'attempt': attempt + 1, 'maximum': settings.generation_repair_attempts,
+                'message': detail, **({'heatId': heat_id} if heat_id else {})}, role='alex')
+            current_prompt = (prompt + '\n\n平台对刚保存的真实文件校验失败：\n' + outcome.validation_error
+                + '\n请先 read_file 检查相关文件，再修复。write 会覆盖整个文件，绝不追加；'
+                  '追加或局部修改请使用 edit，重新 write 必须提供完整文件。'
+                  '保留原需求及已有功能，仅修复真实缺陷。完成后平台会重新校验；不要声称已经通过浏览器验收。')
+        raise RuntimeError('invalid_generation_repair_policy')
 
     async def _turn(
         self,
@@ -608,6 +648,7 @@ class Orchestrator:
         cancelled = False
         lease = None
         completed_revision = None
+        validation_error = None
         execution_args = {}
         broker_mode = get_settings().sandbox_mode == 'broker'
         unfinished_files = _unfinished_files_note()
@@ -705,6 +746,11 @@ class Orchestrator:
             )
         except asyncio.CancelledError:
             status, error, cancelled = "cancelled", f"任务已取消，{unfinished_files}", True
+        except ArtifactValidationError as exc:
+            validation_error = str(exc)
+            status, error = 'failed', validation_error
+            if completed_revision:
+                error += '；文件已保存，但尚未通过生成检查'
         except Exception as exc:
             status, error = "failed", str(exc) or type(exc).__name__
         if status != "done":
@@ -727,12 +773,19 @@ class Orchestrator:
                             completed_revision = stopped.receipt.revision_id
                             error = '生成中断；已保存未完成版本，可从已保存版本继续生成'
                     else:
-                        await self.execution.coordinator.interrupt(user_id, lease.execution_id, status)
+                        stopped = await self.execution.coordinator.interrupt(user_id, lease.execution_id, status)
+                        if validation_error and (stopped.state != 'closed'
+                                or stopped.termination_state != 'confirmed'):
+                            validation_error = None
+                            error = (error or '执行失败') + '；沙箱终止尚未确认，占用已保留'
                 except Exception:
+                    validation_error = None
                     error = (error or '执行失败') + '；沙箱终止尚未确认，占用已保留'
         failed = status != "done"
         text = "".join(text_parts).strip()
         rendered = text
+        if validation_error:
+            rendered = f'生成文件未通过平台检查：{error}'
         if record_message and text and render and not failed:
             try:
                 rendered = render(text)
@@ -775,6 +828,7 @@ class Orchestrator:
             f"run.{status}" if failed else "run.completed",
             {
                 **({"message": error} if failed else {"resultText": text}),
+                **({'validationError': True} if validation_error else {}),
                 **({"heatId": heat_id} if heat_id else {}),
             },
             run_id=run_id,
@@ -782,7 +836,7 @@ class Orchestrator:
         )
         if cancelled:
             raise asyncio.CancelledError
-        return TurnOutcome(text, input_tokens, output_tokens, failed, error, status)
+        return TurnOutcome(text, input_tokens, output_tokens, failed, error, status, validation_error)
 
     async def _set_status(self, project_id: str, status: str) -> None:
         with session_scope() as session:

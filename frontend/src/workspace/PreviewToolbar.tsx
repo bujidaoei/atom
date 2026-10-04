@@ -12,12 +12,14 @@ export const PREVIEW_VIEWPORTS: {
   { id: "mobile", label: "手机", icon: "mobile", width: "390px" },
 ];
 
-export function PreviewToolbar({ viewport, onViewport, url, hasFiles, onRefresh }: {
+export function PreviewToolbar({ viewport, onViewport, url, hasFiles, onRefresh, onOpen, busy = false }: {
   viewport: PreviewViewport;
   onViewport: (viewport: PreviewViewport) => void;
   url: string;
   hasFiles: boolean;
   onRefresh: () => void;
+  onOpen?: () => void;
+  busy?: boolean;
 }) {
   const container = useRef<HTMLDivElement>(null);
   const fullRow = useRef<HTMLDivElement>(null);
@@ -50,10 +52,15 @@ export function PreviewToolbar({ viewport, onViewport, url, hasFiles, onRefresh 
       </div>
       <span className="ml-xs min-w-0 flex-1 truncate font-mono text-xs text-neutral-40" title={url}>{url}</span>
       <div className="ml-auto flex shrink-0 items-center gap-xxs">
-        <IconButton label="刷新预览" onClick={onRefresh} disabled={!hasFiles}>
+        <IconButton label="刷新预览" onClick={onRefresh} disabled={!hasFiles || busy}>
           <Icon name="refresh" size={14} />
         </IconButton>
-        <a href={url} target="_blank" rel="noreferrer" title="打开新窗口" aria-label="打开新窗口"
+        {onOpen ? <button type="button" onClick={onOpen} title="打开新窗口" aria-label="打开新窗口"
+          disabled={!hasFiles}
+          className="inline-flex h-7 shrink-0 items-center gap-xxs whitespace-nowrap rounded-m px-s text-xs text-neutral-60 hover:bg-neutral-8 hover:text-neutral-95 disabled:opacity-40">
+          <Icon name="external" size={13} />
+          {showLabels ? <span>打开新窗口</span> : null}
+        </button> : <a href={url} target="_blank" rel="noreferrer" title="打开新窗口" aria-label="打开新窗口"
           aria-disabled={!hasFiles} tabIndex={hasFiles ? undefined : -1}
           className={[
             "inline-flex h-7 shrink-0 items-center gap-xxs whitespace-nowrap rounded-m px-s text-xs transition-colors duration-ui ease-ui",
@@ -62,7 +69,7 @@ export function PreviewToolbar({ viewport, onViewport, url, hasFiles, onRefresh 
           ].join(" ")}>
           <Icon name="external" size={13} />
           {showLabels ? <span>打开新窗口</span> : null}
-        </a>
+        </a>}
       </div>
     </>;
   }

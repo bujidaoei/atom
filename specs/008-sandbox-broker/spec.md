@@ -495,3 +495,8 @@ Production cutover automation MUST reject a nonmatching source/image or active w
 The cutover command MUST record its phase and final outcome durably on the server, so an operator can distinguish preflight rejection, a healthy new pair, completed rollback, and a rollback requiring intervention after losing the client connection. It MUST never print or commit captured container environment values.
 
 Verification recovery read requirement (2026-10-02): after a reload or lost verification response, an authenticated owner MUST be able to read the most recently reserved request for that project, including its canonical terminal report and trusted attestation validation when present. The read MUST remain possible after a project becomes non-ready or advances revision so a historical result cannot be confused with current publish eligibility. Foreign owners and unsupported schemas MUST NOT receive evidence or a fabricated success. An empty ledger is distinct from a failed read.
+
+
+## Preview follow-up (2026-10-04)
+
+The isolated desktop/tablet/mobile workspace surface and bounded generation validation repair are specified and tracked in [012-responsive-preview](../012-responsive-preview/spec.md). Its evidence does not mark other enterprise-foundation work complete.

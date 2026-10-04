@@ -56,6 +56,7 @@ class Settings(ObjectStorageSettings):
     # Hard elapsed-time cap, including silent transport and recovery.
     # Timeout preserves files but is never successful completion.
     build_budget_seconds: int = Field(default=3600, ge=1, le=7140)
+    generation_repair_attempts: int = Field(default=2, ge=0, le=3)
 
     # Model selection is independent of the configured generation lifetime.
     llm_model: str = "deepseek-v4.1-flash"

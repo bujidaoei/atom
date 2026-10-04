@@ -1,5 +1,7 @@
 # IP-only owner preview contract
 
+2026-10-04 protocol update: [012 embedded-preview contract](../../012-responsive-preview/contracts/embedded-preview.md) supersedes the original single-cookie/root-path transport below. Views now have independent selector paths and path-scoped credentials; the exact console can embed them. Ownership, source revocation and server-owned verification remain required.
+
 Status: schema18, transactional capability repository, byte-verified materialization, standalone HTTP exchange/content process and gated console issuance implemented and locally tested. Local Chromium HTTPS cases prove real generated script execution, refresh-persistent preview/public and two-project storage separation, cross-port read denial and generated-page console-request blocking. A target-host isolated service rehearsal passed trusted-proxy routing, peer-spoof denial and restart; full browser matrix, public ingress and production acceptance remain open. The same-IP browser origin includes its TCP port. Every project keeps one immutable preview port, separate from its public port and the console on 443. A preview port may serve only a revision belonging to that exact project after a fresh owner authorization.
 
 ## Console-issued capability

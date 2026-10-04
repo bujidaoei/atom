@@ -52,14 +52,15 @@ def test_preview_port_serves_only_one_exchanged_owner_revision(historical, tmp_p
         exchange = client.post('/_atom/exchange', content=grant.secret,
                                headers={'Origin': 'https://192.0.2.10:20000',
                                         'Content-Type': 'application/octet-stream'})
-        assert exchange.status_code == 204
+        assert exchange.status_code == 200
         cookie = exchange.headers['set-cookie']
-        assert '__Host-atom_preview_20000=' in cookie
+        assert '__Secure-atom_preview_20000=' in cookie
         assert 'httponly' in cookie.lower() and 'secure' in cookie.lower()
         assert client.post('/_atom/exchange', content=grant.secret,
                            headers={'Origin': 'https://192.0.2.10:20000',
                                     'Content-Type': 'application/octet-stream'}).status_code == 404
-        page = client.get('/')
+        view_path = exchange.json()['path']
+        page = client.get(view_path)
         assert page.status_code == 200 and page.content == b'<html>heat</html>'
         assert page.headers['x-atom-revision'] == revision
         assert page.headers['cross-origin-opener-policy'] == 'same-origin'
@@ -69,7 +70,7 @@ def test_preview_port_serves_only_one_exchanged_owner_revision(historical, tmp_p
         assert client.get('https://192.0.2.11:20000/').status_code == 404
         assert client.get('/_atom/private.js').status_code == 404
         AccessRepository(path).revoke_console_session(user_id='user', session_id=source.id)
-        assert client.get('/').status_code == 404
+        assert client.get(view_path).status_code == 404
 
 
 def test_preview_process_refuses_old_schema_and_relative_paths(legacy, tmp_path):

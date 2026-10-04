@@ -10,6 +10,7 @@ from ..config import get_settings
 from ..console_auth import credentials, request_session_token, require_auth_origin
 from ..deps import OwnedProject
 from ..preview_access import PreviewAccessError, PreviewAccessRepository
+from ..preview_paths import view_root
 from ..project_origins import ProjectOriginError, ProjectOriginRepository
 from ..project_port_hosts import ProjectPortHosts
 from .releases import _json_command
@@ -25,7 +26,7 @@ def _deny(status):
     raise HTTPException(status, '无法打开该版本预览', headers=_HEADERS)
 
 
-def _issue(settings, owner_id, source_id, project_id, revision_id):
+def _issue(settings, owner_id, source_id, project_id, revision_id, replace_view_id=None):
     origins = ProjectOriginRepository(settings.db_path,
         first_port=settings.ip_preview_first_port, last_port=settings.ip_preview_last_port)
     pair = origins.for_project(project_id)
@@ -34,9 +35,10 @@ def _issue(settings, owner_id, source_id, project_id, revision_id):
     hosts = ProjectPortHosts(settings.ip_preview_address, origins)
     grant = PreviewAccessRepository(settings.db_path).issue(
         owner_id=owner_id, source_session_id=source_id,
-        project_id=project_id, revision_id=revision_id)
+        project_id=project_id, revision_id=revision_id, replace_view_id=replace_view_id)
     return {'url': hosts.origin(pair.preview_port) + '/_atom/open#' + grant.secret,
-            'expiresAt': grant.expires_at, 'revisionId': grant.revision_id}
+            'expiresAt': grant.expires_at, 'revisionId': grant.revision_id,
+            'viewId': grant.view_id, 'viewUrl': hosts.origin(pair.preview_port) + view_root(grant.view_id)}
 
 
 def _finished(worker, lifecycle, admission):
@@ -56,8 +58,12 @@ async def open_revision_preview(project: OwnedProject, request: Request):
     if request.headers.getlist('x-atom-intent') != ['open-revision-preview']:
         _deny(403)
     command = await _json_command(request)
-    if (set(command) != {'revisionId'} or type(command['revisionId']) is not str
+    if (set(command) not in ({'revisionId'}, {'revisionId', 'replaceViewId'})
+            or type(command.get('revisionId')) is not str
             or _REVISION.fullmatch(command['revisionId']) is None):
+        _deny(400)
+    if 'replaceViewId' in command and (type(command['replaceViewId']) is not str
+            or re.fullmatch(r'[0-9a-f]{64}', command['replaceViewId']) is None):
         _deny(400)
     token = request_session_token(request)
     source = credentials().authenticate(token) if token else None
@@ -70,7 +76,7 @@ async def open_revision_preview(project: OwnedProject, request: Request):
     release = True
     try:
         worker = asyncio.create_task(run_in_threadpool(_issue, settings, source.user_id,
-            source.id, project.id, command['revisionId']))
+            source.id, project.id, command['revisionId'], command.get('replaceViewId')))
         _WORKERS.add(worker)
         worker.add_done_callback(_WORKERS.discard)
         try:

@@ -7,7 +7,7 @@ from .preview_access import PreviewAccessError
 def preview_cookie_name(port: int) -> str:
     if type(port) is not int or not 1024 <= port <= 65535:
         raise PreviewAccessError('invalid_preview_port')
-    return f'__Host-atom_preview_{port}'
+    return f'__Secure-atom_preview_{port}'
 
 
 def preview_cookie(headers: list[tuple[bytes, bytes]], *, port: int) -> str | None:

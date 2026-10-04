@@ -248,10 +248,11 @@ export const api = {
   publicationHistory: (id: string, cursor?: string, signal?: AbortSignal) =>
     request<PublicationHistory>(`/api/projects/${id}/releases/history${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`,
       { intent: "inspect-verified-release", signal }),
-  issueRevisionPreview: (id: string, revisionId: string) =>
-    request<{ url: string; expiresAt: number; revisionId: string }>(
+  issueRevisionPreview: (id: string, revisionId: string, signal?: AbortSignal, replaceViewId?: string) =>
+    request<{ url: string; viewId: string; viewUrl: string; expiresAt: number; revisionId: string }>(
       `/api/projects/${id}/preview-access`,
-      { method: "POST", body: { revisionId }, intent: "open-revision-preview" }),
+      { method: "POST", body: { revisionId, ...(replaceViewId ? { replaceViewId } : {}) },
+        intent: "open-revision-preview", signal }),
   getVerification: (id: string, requestId: string, signal?: AbortSignal) =>
     request<VerificationStatus>(`/api/projects/${id}/verifications/${requestId}`, { signal }),
   latestVerification: (id: string, signal?: AbortSignal) =>

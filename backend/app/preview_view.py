@@ -23,11 +23,11 @@ class PreviewView:
 
 @contextmanager
 def materialized_preview(access: PreviewAccessRepository, store: SnapshotStore, *,
-                         project_id: str, session_secret: str):
+                         project_id: str, session_secret: str, view_id: str | None = None):
     if not _READS.acquire(timeout=3):
         raise PreviewAccessError('preview_capacity')
     try:
-        revision = access.authorize(project_id=project_id, session_secret=session_secret)
+        revision = access.authorize(project_id=project_id, session_secret=session_secret, view_id=view_id)
         payload = store.read(revision.artifact.key)
         try:
             manifest = verify_snapshot(io.BytesIO(payload))
@@ -37,11 +37,11 @@ def materialized_preview(access: PreviewAccessRepository, store: SnapshotStore, 
             validate_content_manifest(manifest)
         except SnapshotError:
             raise ArtifactError('preview_artifact_mismatch') from None
-        if access.authorize(project_id=project_id, session_secret=session_secret) != revision:
+        if access.authorize(project_id=project_id, session_secret=session_secret, view_id=view_id) != revision:
             raise PreviewAccessError('preview_access_denied')
         with TemporaryDirectory(prefix='atom-preview-') as temporary:
             received = receive_snapshot(io.BytesIO(payload), Path(temporary))
-            if access.authorize(project_id=project_id, session_secret=session_secret) != revision:
+            if access.authorize(project_id=project_id, session_secret=session_secret, view_id=view_id) != revision:
                 raise PreviewAccessError('preview_access_denied')
             yield PreviewView(revision, received.path)
     finally:

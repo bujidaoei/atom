@@ -138,6 +138,7 @@ export function reduceEvent(state: StreamState, event: RunEvent): StreamState {
   const base = { ...state, runIds };
 
   switch (event.type) {
+    case "generation.repair_started":
     case "run.recovering":
       return { ...base, items: [...base.items, { kind: "message", id: `recovery-${event.seq}`, seq: event.seq,
         role: role ?? "system", runId: event.runId, text: payload.message ?? "正在从已有进度恢复…",
@@ -347,8 +348,9 @@ export function reduceEvent(state: StreamState, event: RunEvent): StreamState {
     case "run.interrupted":
     case "run.failed": {
       const items = base.items.map((item) =>
-        item.kind === "message" && item.streaming && item.runId === event.runId
-          ? { ...item, streaming: false, thinkingActive: false }
+        item.kind === "message" && item.runId === event.runId
+          ? { ...item, streaming: false, thinkingActive: false,
+              ...(payload.validationError ? { text: "生成文件未通过平台检查。" } : {}) }
           : item,
       );
       return {
@@ -374,6 +376,8 @@ export function reduceEvent(state: StreamState, event: RunEvent): StreamState {
 
 function heatLabel(type: string, payload: RunEventPayload): string {
   switch (type) {
+    case "generation.repair_started":
+      return payload.message ?? "正在修复生成文件";
     case "tool.started":
       return `${payload.toolName ?? "tool"} ${summarizeArgs(payload.args)}`.trim();
     case "tool.completed":

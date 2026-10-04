@@ -34,3 +34,14 @@ def test_explicit_long_model_wait_and_lease_boundary():
     values = {'ATOM_BUILD_BUDGET_SECONDS': '7140', 'ATOM_RUN_TIMEOUT_SECONDS': '3600',
               'ATOM_LLM_TIMEOUT_SECONDS': '7140'}
     assert generation_settings.validate(values) == values
+
+
+@pytest.mark.parametrize('value', ['0', '1', '2', '3'])
+def test_repair_attempt_policy_is_captured(value):
+    assert generation_settings.validate({'ATOM_GENERATION_REPAIR_ATTEMPTS': value}) == {'ATOM_GENERATION_REPAIR_ATTEMPTS': value}
+
+
+@pytest.mark.parametrize('value', ['-1', '4', '1.5', 'secret'])
+def test_repair_attempt_policy_rejects_invalid_values(value):
+    with pytest.raises(generation_settings.EnvironmentError):
+        generation_settings.validate({'ATOM_GENERATION_REPAIR_ATTEMPTS': value})

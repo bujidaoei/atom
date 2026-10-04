@@ -1,0 +1,3 @@
+# Validation
+
+Run targeted preview repository/issuer/service pytest; build TypeScript/Vite; run actual HTTPS built-SPA tests in Chromium/Firefox/WebKit. Inspect desktop/tablet/mobile and narrow-panel screenshots, real768/390 layout width and state preservation. Exercise concurrent revisions, relative/root CSS/modules/images, invalid access, expiry/logout, hostile framing/DOM/network/navigation. Validate CR-001 against actual failing bytes and bounded recovery tests. Build exact revision-labelled Linux image with /atom/ base and verify Pi lock. Use current schema18 forward deployment and record live authenticated preview/generation/public checks. Only demonstrated outcomes complete tasks.

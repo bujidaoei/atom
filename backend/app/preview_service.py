@@ -6,7 +6,7 @@ import mimetypes
 from threading import BoundedSemaphore
 
 from starlette.concurrency import run_in_threadpool
-from starlette.responses import Response
+from starlette.responses import Response, JSONResponse, RedirectResponse
 
 from .artifacts import ArtifactError
 from .content_exchange import ExchangeRequestError, receive_handoff
@@ -15,7 +15,8 @@ from .content_policy import ContentPolicyError, is_control_path
 from .content_service import ContentLimits, HEADERS
 from .preview_access import PreviewAccessError, PreviewAccessRepository
 from .preview_cookie import preview_cookie, preview_cookie_name
-from .preview_exchange import EXCHANGE_HEADERS, EXCHANGE_PATH, OPEN_PATH, PAGE
+from .preview_exchange import EXCHANGE_PATH, OPEN_PATH, RESUME_PATH, navigation_page
+from .preview_paths import split_view, valid_path, view_root, root_redirect
 from .preview_view import materialized_preview
 from .project_origins import ProjectOriginError
 from .ip_ingress import HEALTH_PATH
@@ -31,6 +32,11 @@ class PreviewService:
         if access.path.resolve() != hosts.origins.path.resolve():
             raise ValueError('preview_database_mismatch')
         self.access, self.store, self.hosts, self.limits = access, store, hosts, limits
+        self.console_origin = f'https://{hosts.address}'
+        self._page, self._navigation_headers = navigation_page(self.console_origin)
+        self._content_headers = {**PREVIEW_HEADERS, 'Referrer-Policy': 'same-origin',
+            'Content-Security-Policy': PREVIEW_HEADERS['Content-Security-Policy'].replace(
+                "frame-ancestors 'none'", f'frame-ancestors {self.console_origin}')}
         self._responses = BoundedSemaphore(limits.active_responses)
         self._pending = set()
         self._reads = set()
@@ -69,6 +75,19 @@ class PreviewService:
 
     def _read(self, route, scope):
         path = scope.get('path', '/')
+        if not valid_path(scope):
+            return Response(status_code=404, headers=PREVIEW_HEADERS)
+        selected = split_view(path)
+        if selected is None:
+            if not is_control_path(path):
+                destination = root_redirect(scope, self.hosts.origin(route.port))
+                if destination:
+                    return RedirectResponse(destination, status_code=307, headers=PREVIEW_HEADERS)
+            return Response(status_code=404, headers=PREVIEW_HEADERS)
+        view_id, path = selected
+        if path == RESUME_PATH:
+            page, headers = navigation_page(self.console_origin, view_id=view_id)
+            return Response(page, media_type='text/html', headers=headers)
         parts = path.split('/')
         if (not path.startswith('/') or len(path) > 4096 or '\\' in path or '\0' in path
                 or any(part in ('.', '..') for part in parts) or is_control_path(path)):
@@ -77,7 +96,8 @@ class PreviewService:
         if secret is None:
             return Response(status_code=404, headers=PREVIEW_HEADERS)
         with materialized_preview(self.access, self.store,
-                                  project_id=route.project_id, session_secret=secret) as view:
+                                  project_id=route.project_id, session_secret=secret,
+                                  view_id=view_id) as view:
             target = view.path.joinpath(*parts[1:])
             if target.is_dir():
                 target = target / 'index.html'
@@ -89,7 +109,7 @@ class PreviewService:
                 return Response(status_code=404, headers=PREVIEW_HEADERS)
             media, _ = mimetypes.guess_type(target.name)
             return Response(target.read_bytes(), media_type=media or 'application/octet-stream',
-                            headers={**PREVIEW_HEADERS, 'X-Atom-Revision': view.revision.revision_id})
+                            headers={**self._content_headers, 'X-Atom-Revision': view.revision.revision_id})
 
     def _response(self, scope, handoff=None):
         method = scope.get('method')
@@ -110,12 +130,14 @@ class PreviewService:
             elif path in (OPEN_PATH, EXCHANGE_PATH):
                 self._validate_control(scope, route)
                 if path == OPEN_PATH:
-                    response = Response(PAGE, media_type='text/html', headers=EXCHANGE_HEADERS)
+                    response = Response(self._page, media_type='text/html', headers=self._navigation_headers)
                 else:
                     session = self.access.exchange(project_id=route.project_id, handoff=handoff)
-                    response = Response(status_code=204, headers=EXCHANGE_HEADERS)
+                    response = JSONResponse({'viewId': session.view_id,
+                        'path': view_root(session.view_id), 'revisionId': session.revision_id,
+                        'expiresAt': session.expires_at}, headers=self._navigation_headers)
                     response.set_cookie(preview_cookie_name(route.port), session.secret,
-                                        path='/', secure=True, httponly=True, samesite='lax',
+                                        path=view_root(session.view_id), secure=True, httponly=True, samesite='lax',
                                         expires=datetime.fromtimestamp(session.expires_at, timezone.utc))
             elif method not in ('GET', 'HEAD'):
                 response = Response(status_code=405, headers={**PREVIEW_HEADERS, 'Allow': 'GET, HEAD'})
@@ -123,7 +145,7 @@ class PreviewService:
                 response = self._read(route, scope)
         except ExchangeRequestError as error:
             response = Response(status_code=error.status,
-                                headers={**EXCHANGE_HEADERS,
+                                headers={**self._navigation_headers,
                                          **({'Allow': error.allow} if error.allow else {})})
         except ContentHostError:
             response = Response(status_code=404, headers=PREVIEW_HEADERS)
@@ -200,7 +222,7 @@ class PreviewService:
                     status = (error.status if isinstance(error, ExchangeRequestError) else
                               408 if isinstance(error, TimeoutError) else
                               503 if isinstance(error, ProjectOriginError) else 404)
-                    await Response(status_code=status, headers=EXCHANGE_HEADERS)(scope, receive, send)
+                    await Response(status_code=status, headers=self._navigation_headers)(scope, receive, send)
                     return
             read = asyncio.create_task(run_in_threadpool(self._response, scope, handoff))
             self._reads.add(read)

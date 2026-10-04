@@ -231,6 +231,7 @@ export type RunEventPayload = {
   outputTokens?: number;
   resultText?: string;
   message?: string;
+  validationError?: boolean;
   role?: MessageRole;
   status?: ProjectStatus;
   requirements?: Requirement[];

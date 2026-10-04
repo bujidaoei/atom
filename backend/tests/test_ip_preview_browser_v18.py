@@ -160,15 +160,17 @@ def test_browser_preview_exchange_storage_and_public_port_separation(historical,
             try:
                 page = context.new_page()
                 page.goto(hosts.origin(preview_port) + '/_atom/open#' + grant.secret)
-                page.wait_for_url(hosts.origin(preview_port) + '/', timeout=10000)
+                page.wait_for_url(hosts.origin(preview_port) + '/_atom/view/' + grant.view_id + '/', timeout=10000)
                 assert page.locator('#state').inner_text() == 'new'
                 page.evaluate("localStorage.setItem('draft-state','kept')")
                 page.reload()
                 assert page.locator('#state').inner_text() == 'kept'
                 assert grant.secret not in page.url
-                assert '__Host-atom_preview_' not in page.evaluate('document.cookie')
-                assert any(item['name'] == f'__Host-atom_preview_{preview_port}'
-                           for item in context.cookies([hosts.origin(public_port)]))
+                assert '__Secure-atom_preview_' not in page.evaluate('document.cookie')
+                assert not any(item['name'] == f'__Secure-atom_preview_{preview_port}'
+                               for item in context.cookies([hosts.origin(public_port)]))
+                assert any(item['name'] == f'__Secure-atom_preview_{preview_port}'
+                           for item in context.cookies([hosts.origin(public_port) + '/_atom/view/' + grant.view_id + '/']))
                 visitor = context.new_page()
                 visitor.goto(hosts.origin(public_port) + '/')
                 assert visitor.locator('#state').inner_text() == 'new'
@@ -256,7 +258,7 @@ def test_two_projects_have_independent_browser_storage_and_preview_authority(
             try:
                 owner = context.new_page()
                 owner.goto(f'https://127.0.0.1:{a.preview_port}/_atom/open#{grant.secret}')
-                owner.wait_for_url(f'https://127.0.0.1:{a.preview_port}/', timeout=10000)
+                owner.wait_for_url(f'https://127.0.0.1:{a.preview_port}/_atom/view/{grant.view_id}/', timeout=10000)
                 assert owner.locator('#project').inner_text() == 'empty'
                 owner.evaluate("localStorage.setItem('project-marker','owner-a')")
                 public_a, public_b = context.new_page(), context.new_page()
@@ -276,7 +278,7 @@ def test_two_projects_have_independent_browser_storage_and_preview_authority(
                                                   foreign_url, browser_name)
                 # The browser sends IP-scoped cookies to every port. A forged
                 # cookie from project B must not grant access to project B's preview.
-                forged_name = '__Host-atom_preview_' + str(b.preview_port)
+                forged_name = '__Secure-atom_preview_' + str(b.preview_port)
                 public_b.evaluate("(name) => { document.cookie=name + '=forged; Secure; Path=/'; }",
                                   forged_name)
                 assert any(cookie['name'] == forged_name and cookie['value'] == 'forged'

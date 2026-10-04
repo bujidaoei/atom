@@ -28,6 +28,10 @@ class PreviewGrant:
     project_id: str
     revision_id: str
 
+    @property
+    def view_id(self) -> str:
+        return _hash(b'handoff', self.secret)
+
 
 @dataclass(frozen=True)
 class PreviewSession:
@@ -35,6 +39,7 @@ class PreviewSession:
     expires_at: int
     project_id: str
     revision_id: str
+    view_id: str
 
 
 @dataclass(frozen=True)
@@ -128,8 +133,11 @@ class PreviewAccessRepository:
                                Artifact(row['artifact_key'], row['snapshot_revision'], row['size']))
 
     def issue(self, *, owner_id: str, source_session_id: str,
-              project_id: str, revision_id: str) -> PreviewGrant:
+              project_id: str, revision_id: str, replace_view_id: str | None = None) -> PreviewGrant:
         _identity(owner_id, source_session_id, project_id, revision_id)
+        if replace_view_id is not None and (
+                type(replace_view_id) is not str or _SECRET.fullmatch(replace_view_id) is None):
+            raise PreviewAccessError('invalid_preview_request')
         with self._database(write=True) as db:
             now = int(time.time())
             source = self._source(db, owner_id=owner_id, session_id=source_session_id, now=now)
@@ -138,6 +146,16 @@ class PreviewAccessRepository:
                 raise PreviewAccessError('preview_origin_required')
             self._revision(db, owner_id=owner_id, project_id=project_id,
                            revision_id=revision_id, require_selected=True)
+            if replace_view_id is not None:
+                prior = db.execute('SELECT * FROM preview_handoffs WHERE token_hash=? '
+                    'AND project_id=? AND owner_id=? AND source_session_id=?',
+                    (replace_view_id, project_id, owner_id, source_session_id)).fetchone()
+                if prior is not None:
+                    if prior['consumed_at'] is None and prior['created_at'] <= now < prior['expires_at']:
+                        db.execute('UPDATE preview_handoffs SET consumed_at=? WHERE token_hash=?',
+                                   (now, replace_view_id))
+                    db.execute('UPDATE preview_sessions SET revoked_at=? WHERE handoff_hash=? '
+                               'AND revoked_at IS NULL', (now, replace_view_id))
             db.execute('DELETE FROM preview_sessions WHERE expires_at<=?', (now,))
             db.execute('DELETE FROM preview_handoffs WHERE expires_at<=?', (now,))
             active = db.execute('''SELECT count(*) FROM preview_handoffs
@@ -191,9 +209,10 @@ class PreviewAccessRepository:
                        'VALUES (?,?,?,?,?,?,?)',
                        (uuid4().hex, 'preview.session.created', project_id,
                         row['revision_id'], row['owner_id'], row['source_session_id'], now))
-            return PreviewSession(secret, expires, project_id, row['revision_id'])
+            return PreviewSession(secret, expires, project_id, row['revision_id'], digest)
 
-    def authorize(self, *, project_id: str, session_secret: str) -> PreviewRevision:
+    def authorize(self, *, project_id: str, session_secret: str,
+                  view_id: str | None = None) -> PreviewRevision:
         _identity(project_id)
         digest = _hash(b'session', session_secret)
         with self._database(write=False) as db:
@@ -201,7 +220,8 @@ class PreviewAccessRepository:
             row = db.execute('SELECT * FROM preview_sessions WHERE token_hash=? AND project_id=?',
                              (digest, project_id)).fetchone()
             if (row is None or row['revoked_at'] is not None
-                    or not row['created_at'] <= now < row['expires_at']):
+                    or not row['created_at'] <= now < row['expires_at']
+                    or (view_id is not None and row['handoff_hash'] != view_id)):
                 raise PreviewAccessError('preview_access_denied')
             self._source(db, owner_id=row['owner_id'],
                          session_id=row['source_session_id'], now=now)
