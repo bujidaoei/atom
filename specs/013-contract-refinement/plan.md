@@ -19,4 +19,3 @@ Refinement runs Emma and Bob with current snapshot as authoritative context and 
 Owner-scoped history has bounded cursor pagination. Preview is read-only. Recovery refreshes canonical project state; version-aware commands use durable replay keys. UI blocks build with unsubmitted note and blocks mutation while planning/building.
 ## Verification and Delivery
 Validate migration backup/replay/rollback; repository CAS/immutable/cross-project/pagination; orchestrator exact context, repeated refinement and failures; real routes/receipts; build and frontend regressions. Inspect desktop/mobile real browser. Run real model refine twice, restore, build, verify actual behavior. Rehearse v18→19 on isolated candidate with unchanged backup, use protected existing deployment workflow; verify health and active revision. Record all failures honestly.
-

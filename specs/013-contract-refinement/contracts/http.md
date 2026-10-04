@@ -6,4 +6,3 @@ POST /api/projects/{id}/contracts/refine: message (trimmed1..4000), expectedVers
 POST /api/projects/{id}/contracts/{snapshotId}/restore: expectedVersion; Idempotency-Key. Returns snapshot; appends and changes project to awaiting_approval atomically.
 POST /api/projects/{id}/approve: expectedVersion; nonempty note rejected with actionable error. Returns runId bound to snapshot.
 Project detail adds contractVersion and current full contract. Planning/refinement SSE completion triggers canonical reload. Legacy project baseline is created transactionally before first versioned mutation; read does not fabricate earlier history.
-

@@ -18,4 +18,4 @@
 - [ ] T012 Rehearse protected v19 candidate migration and deployment rollback in deploy/ and specs/013-contract-refinement/evidence.md.
 - [ ] T013 Commit, synchronize GitHub main, deploy exact revision and verify public/owner flows; update specs/013-contract-refinement/evidence.md.
 ## Dependencies and strategy
-T001→T002→T003→T004→T005→T006→T007; T004→T008→T009; T007+T009→T010→T011→T012→T013. US1 first, then history, then acceptance. Independent migration and frontend build checks may run concurrently after their inputs stabilize. No implementation/acceptance task is complete merely because code exists.
+T001→T002→T003→T004→T005→T006→T007; T004→T008→T009; T007+T009→T010→T012→T013 candidate cutover→T011 live checks→T013 acceptance. Real public provider/browser acceptance requires the deployed candidate; T013 stays open until T011 passes. US1 first, then history, then acceptance. Independent migration and frontend build checks may run concurrently after their inputs stabilize. No implementation/acceptance task is complete merely because code exists.

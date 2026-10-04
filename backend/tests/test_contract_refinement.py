@@ -124,3 +124,14 @@ def test_approval_persists_exact_snapshot_and_context(signed_in, monkeypatch):
             assert session.execute(text('SELECT snapshot_id FROM contract_approvals WHERE job_id=:j'), {'j': job}).scalar() == first['id']
     asyncio.run(scenario())
     assert seen == [first['document']]
+
+
+def test_other_owner_cannot_read_refine_or_restore(signed_in):
+    pid, _, head = seed(signed_in)
+    assert signed_in.post('/api/auth/logout').status_code == 200
+    assert signed_in.post('/api/auth/register', json={'email': 'other-owner@example.com', 'password': 's3cretpass'}).status_code == 200
+    root = f'/api/projects/{pid}/contracts'
+    assert signed_in.get(root).status_code == 404
+    assert signed_in.get(root + '/' + head['id']).status_code == 404
+    assert signed_in.post(root + '/refine', json={'message': '增加音效', 'expectedVersion': head['id']}).status_code == 404
+    assert signed_in.post(root + '/' + head['id'] + '/restore', json={'expectedVersion': head['id']}).status_code == 404

@@ -10,4 +10,3 @@ Baseline: origin/main d2c889b; isolated worktree because original codex/008-sand
 7. Deployment uses protected paired backup/candidate workflow. Source v18 backup stays immutable; only candidate migrates to19. No credentials in artifacts.
 ## Alternatives
 Appending prose to existing requirement is insufficient: exclusions/checks/architecture remain inconsistent. Re-running whole Mike/Iris pipeline is unnecessary for scoped refinement; Emma and Bob update the full contract from current state.
-

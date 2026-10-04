@@ -5,4 +5,3 @@
 - [x] No unresolved clarification or implementation details in functional specification.
 - [x] Failure, ownership, stale operations and legacy migration addressed.
 Spec ready for implementation planning; these checks do not claim implementation acceptance.
-

@@ -62,3 +62,21 @@ def test_history_pagination(signed_in):
         older = history(session, project_id, before=page['nextCursor'])
         assert [item['version'] for item in older['items']] == [3, 2, 1]
         assert older['nextCursor'] is None
+
+
+def test_concurrent_mutations_only_one_expected_head_wins(signed_in):
+    from concurrent.futures import ThreadPoolExecutor
+    pid = signed_in.post('/api/projects', json={'prompt': '并发契约'}).json()['project']['id']
+    with session_scope() as session:
+        first = commit_snapshot(session, pid, document(), expected=None, note='初始')
+    def writer(index):
+        try:
+            with session_scope() as session:
+                return commit_snapshot(session, pid, document(str(index)), expected=first['id'], note=str(index))['id']
+        except ContractConflict:
+            return None
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        outcomes = list(pool.map(writer, (1, 2)))
+    assert sum(result is not None for result in outcomes) == 1
+    with session_scope() as session:
+        assert len(history(session, pid)['items']) == 2
