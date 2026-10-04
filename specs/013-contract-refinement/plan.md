@@ -25,3 +25,6 @@ The live generated application passed real audio/mute/reset behavior, but its co
 
 ## Delivery status
 Implemented and accepted2026-10-04. Full backend regression plus final affected tests, frontend/runtime gates, live iterative contract/restore/build/audio workflow and22/22 isolated checks passed. Deployed implementation51465b5 and accepted journal; see evidence.md and acceptance.json for identities and retained failure/recovery history.
+
+## Entry correction
+User reported empty /atom after delivery: HTTP200 with zero response bytes, while /atom/ serves SPA. Add an exact308 canonical redirect in the console base. Apply with the existing host lock, identity preflight, private backup, Caddy validation, atomic reload, all-origin probes and automatic rollback; probe both redirect and nonempty SPA document. Verify anonymous desktop/mobile browser navigation. Application image/data are not changed by this ingress-only correction.
