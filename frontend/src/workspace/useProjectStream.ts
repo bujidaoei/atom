@@ -9,11 +9,12 @@ type UseProjectStreamOptions = {
   projectId: string | undefined;
   enabled: boolean;
   snapshotStatus?: ProjectStatus;
+  snapshotEventSeq?: number;
   /** Fired on `project.updated` so the caller can refetch the project. */
   onProjectUpdated: (payload: RunEventPayload) => void;
 };
 
-export function useProjectStream({ projectId, enabled, snapshotStatus, onProjectUpdated }: UseProjectStreamOptions) {
+export function useProjectStream({ projectId, enabled, snapshotStatus, snapshotEventSeq, onProjectUpdated }: UseProjectStreamOptions) {
   const [state, setState] = useState<StreamState>(EMPTY);
   const [connection, setConnection] = useState<ConnectionState>("idle");
   const lastSeq = useRef(0);
@@ -21,6 +22,16 @@ export function useProjectStream({ projectId, enabled, snapshotStatus, onProject
   const [reconnectKey, setReconnectKey] = useState(0);
   const updatedRef = useRef(onProjectUpdated);
   updatedRef.current = onProjectUpdated;
+  const snapshotSeq = useRef(snapshotEventSeq);
+  snapshotSeq.current = snapshotEventSeq;
+  const pendingUpdate = useRef<RunEvent | null>(null);
+  const connectedOnce = useRef(false);
+  useEffect(() => {
+    const pending = pendingUpdate.current;
+    if (snapshotEventSeq === undefined || !pending) return;
+    pendingUpdate.current = null;
+    if (pending.seq > snapshotEventSeq) updatedRef.current(pending.payload ?? {});
+  }, [snapshotEventSeq]);
   useEffect(() => {
     if (!snapshotStatus || ["planning", "building"].includes(snapshotStatus)) return;
     setState(current => reduceEvent(current, { seq: 0, runId: null, role: null,
@@ -31,6 +42,8 @@ export function useProjectStream({ projectId, enabled, snapshotStatus, onProject
   useEffect(() => {
     lastSeq.current = 0;
     attempt.current = 0;
+    pendingUpdate.current = null;
+    connectedOnce.current = false;
     setState(EMPTY);
   }, [projectId]);
 
@@ -62,7 +75,8 @@ export function useProjectStream({ projectId, enabled, snapshotStatus, onProject
       attempt.current = 0;
 
       if (event.type === "project.updated") {
-        updatedRef.current(event.payload ?? {});
+        if (snapshotSeq.current === undefined) pendingUpdate.current = event;
+        else if (event.seq > snapshotSeq.current) updatedRef.current(event.payload ?? {});
       }
       setState((current) => reduceEvent(current, event));
     }
@@ -75,7 +89,8 @@ export function useProjectStream({ projectId, enabled, snapshotStatus, onProject
         if (closed) return;
         reader = body.getReader();
         setConnection("open");
-        updatedRef.current({});
+        if (connectedOnce.current) updatedRef.current({});
+        connectedOnce.current = true;
         const decoder = new TextDecoder();
         let pending = "";
         while (!closed) {

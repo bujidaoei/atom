@@ -211,7 +211,7 @@ export const api = {
   listProjects: () => request<{ projects: ProjectSummary[] }>("/api/projects"),
   createProject: (prompt: string) =>
     request<{ project: ProjectDetail }>("/api/projects", { method: "POST", body: { prompt } }),
-  getProject: (id: string) => request<{ project: ProjectDetail }>(`/api/projects/${id}`),
+  getProject: (id: string, signal?: AbortSignal) => request<{ project: ProjectDetail }>(`/api/projects/${id}`, { signal }),
   deleteProject: (id: string) =>
     request<{ ok: true }>(`/api/projects/${id}`, { method: "DELETE" }),
   readFile: (id: string, path: string) =>

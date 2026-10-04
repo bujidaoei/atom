@@ -40,20 +40,20 @@ def verified_revision_payload(store: ArtifactStore, revision: WorkspaceRevision)
     return payload, verified
 
 
-def committed_catalog(repository, store, *, owner, project_id, heat_id=None):
-    try:
-        workspace = repository.find_workspace(owner, project_id, heat_id)
-    except RevisionError as error:
-        if error.code != 'revision_not_found':
-            raise
-        return {'revisionId':None, 'incompleteSavedRevisionId':None, 'files':[]}
-    revision = repository.current_revision(owner, workspace)
+def committed_catalog(repository, store, *, owner, project_id, heat_id=None, manifests=None):
+    revision, incomplete = repository.catalog_state(owner, project_id, heat_id)
     if revision is None:
         return {'revisionId':None, 'incompleteSavedRevisionId':None, 'files':[]}
-    _, verified = verified_revision_payload(store, revision)
+    # This map belongs to one response, never to a process or owner session.
+    # Head/ownership are read above even when another heat shares identical bytes.
+    identity = revision.artifact
+    verified = manifests.get(identity) if manifests is not None else None
+    if verified is None:
+        _, verified = verified_revision_payload(store, revision)
+        if manifests is not None:
+            manifests[identity] = verified
     timestamp = datetime.fromtimestamp(revision.created_at, timezone.utc).isoformat()
     files = [{'path':entry.path,'bytes':entry.size,'sha256':entry.sha256,
               'updatedAt':timestamp,'timestampSource':'revision'} for entry in verified.files]
     files.sort(key=lambda item: (item['path'] != 'index.html', item['path']))
-    incomplete = repository.incomplete_revision(owner, workspace, revision.revision_id)
     return {'revisionId':revision.revision_id, 'incompleteSavedRevisionId':incomplete, 'files':files}

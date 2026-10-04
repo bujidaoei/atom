@@ -122,6 +122,7 @@ export type RaceSummary = {
 };
 
 export type ProjectDetail = ProjectSummary & {
+  eventSeq: number;
   prompt: string;
   messages: Message[];
   requirements: Requirement[];

@@ -42,8 +42,9 @@ def project_revision_view(request, project, heat_id=None):
 
 def project_catalog(request, project):
     """OwnedProject routes supply the authenticated project; no rows are created."""
+    manifests = {}
     def read(heat_id=None):
         with _resources(request) as resources:
             return committed_catalog(resources.repository, resources.store, owner=project.user_id,
-                                     project_id=project.id, heat_id=heat_id)
+                                     project_id=project.id, heat_id=heat_id, manifests=manifests)
     return read

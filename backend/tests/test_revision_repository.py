@@ -80,6 +80,26 @@ def test_committed_revision_read_is_owner_scoped_and_preserves_captured_identity
     assert repo.recovery('owner', 'attempt').state=='active'
 
 
+def test_catalog_snapshot_is_scoped_and_does_not_wait_for_writer(repository):
+    repo, path, main, heat = repository
+    assert repo.catalog_state('owner', 'p') == (None, None)
+    root = repo.bootstrap('owner', main, BASE)
+    repo.bootstrap('owner', heat, OUTPUT)
+    assert repo.catalog_state('foreign', 'p') == (None, None)
+    writer = sqlite3.connect(path, isolation_level=None)
+    try:
+        writer.execute('BEGIN IMMEDIATE')
+        writer.execute("UPDATE projects SET title='uncommitted' WHERE id='p'")
+        captured, incomplete = repo.catalog_state('owner', 'p')
+        assert captured.revision_id == root and captured.artifact == BASE
+        assert incomplete is None
+        assert repo.catalog_state('owner', 'p', 'heat')[0].artifact == OUTPUT
+        assert repo.catalog_state('owner', 'p', 'unknown') == (None, None)
+    finally:
+        writer.rollback()
+        writer.close()
+
+
 def test_startup_inventory_is_bounded_and_keeps_unknown_attempts(repository):
     repo, path, main, heat = repository
     assert repo.pending_executions() == ()
@@ -820,6 +840,9 @@ def test_incomplete_catalogue_provenance_requires_confirmed_current_receipt(repo
     assert repo.incomplete_revision('owner',main,receipt.revision_id) is None
     repo.observe_termination('owner','attempt',confirmed=True,outcome=outcome)
     assert repo.incomplete_revision('owner',main,receipt.revision_id) == (receipt.revision_id if visible else None)
+    captured, incomplete = repo.catalog_state('owner', 'p')
+    assert captured.revision_id == receipt.revision_id
+    assert incomplete == (receipt.revision_id if visible else None)
     with pytest.raises(RevisionError,match='revision_not_found'):
         repo.incomplete_revision('stranger',main,receipt.revision_id)
     with pytest.raises(RevisionError,match='revision_conflict'):
@@ -835,6 +858,7 @@ def test_schema_drift_is_rejected_on_open_and_each_transaction(repository,damage
         else:db.execute("UPDATE atom_schema_migrations SET migration_hash=? WHERE version=1",('f'*64,))
     with pytest.raises(RevisionError,match='revision_schema_required'):RevisionRepository(path)
     with pytest.raises(RevisionError,match='revision_unavailable'):repo.current_revision('owner',main)
+    with pytest.raises(RevisionError,match='revision_unavailable'):repo.catalog_state('owner','p')
 
 
 @pytest.mark.parametrize('version',[2,3])

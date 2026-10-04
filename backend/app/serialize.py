@@ -52,6 +52,7 @@ def project_detail(session: Session, project: Project, *, catalog=None) -> dict[
     detail.update(
         {
             "prompt": project.prompt,
+            "eventSeq": project.event_seq,
             "activeRunId": project.active_run_id,
             "latestRun": (
                 {

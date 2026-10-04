@@ -106,15 +106,15 @@ class RevisionRepository:
             raise RevisionError('revision_schema_required') from None
 
     @contextmanager
-    def _transaction(self):
+    def _transaction(self, *, readonly=False):
         db = None
         try:
-            db = sqlite3.connect(self.path.as_uri() + '?mode=rw', uri=True,
+            db = sqlite3.connect(self.path.as_uri() + ('?mode=ro' if readonly else '?mode=rw'), uri=True,
                                  timeout=self.timeout, isolation_level=None)
             db.row_factory = sqlite3.Row
             db.execute('PRAGMA foreign_keys=ON')
             db.execute('PRAGMA synchronous=FULL')
-            db.execute('BEGIN IMMEDIATE')
+            db.execute('BEGIN' if readonly else 'BEGIN IMMEDIATE')
             # Schema verifier compares tuple rows, so keep its connection view exact.
             db.row_factory = None
             version = _schema(db)
@@ -190,6 +190,39 @@ class RevisionRepository:
             if row is None:
                 raise RevisionError('revision_not_found')
             return row['id']
+
+    def catalog_state(self, owner: str, project_id: str,
+                      heat_id: str | None = None) -> tuple[WorkspaceRevision | None, str | None]:
+        """Capture owner/head/provenance together, without reserving a writer lock.
+
+        No connection survives the return into remote artifact IO. Every read
+        still validates the complete schema and migration journal.
+        """
+        _identifiers(owner, project_id)
+        if heat_id is not None:
+            _identifiers(heat_id)
+        with self._transaction(readonly=True) as db:
+            workspace = db.execute('''SELECT w.id,w.current_revision_id
+                FROM revision_workspaces w JOIN projects p ON p.id=w.project_id
+                WHERE p.user_id=? AND w.project_id=? AND w.heat_id IS ?''',
+                (owner, project_id, heat_id)).fetchone()
+            if workspace is None or workspace['current_revision_id'] is None:
+                return None, None
+            row = db.execute('''SELECT r.id,r.artifact_key,r.snapshot_revision,r.created_at,a.size
+                FROM revision_records r JOIN revision_artifacts a ON a.key=r.artifact_key
+                WHERE r.id=? AND r.workspace_id=?''',
+                (workspace['current_revision_id'], workspace['id'])).fetchone()
+            if row is None:
+                raise RevisionError('revision_conflict')
+            incomplete = db.execute('''SELECT r.id FROM revision_records r
+                JOIN revision_attempts a ON a.id=r.producing_attempt_id AND a.workspace_id=r.workspace_id
+                JOIN revision_receipts c ON c.attempt_id=a.id AND c.revision_id=r.id
+                WHERE r.id=? AND r.workspace_id=? AND a.state='closed'
+                  AND a.termination_state='confirmed' AND a.outcome IN ('cancelled','timed_out')''',
+                (row['id'], workspace['id'])).fetchone()
+            revision = WorkspaceRevision(workspace['id'], row['id'], Artifact(
+                row['artifact_key'], row['snapshot_revision'], row['size']), row['created_at'])
+            return revision, incomplete['id'] if incomplete else None
 
     def current_revision(self, owner: str, workspace_id: str) -> WorkspaceRevision | None:
         _identifiers(owner, workspace_id)

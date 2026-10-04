@@ -1,0 +1,13 @@
+{"sample": 1, "project": "21125e3fca4548fc9619dfc1676f99f8", "visible_ms": 3959, "result": "visible", "detail_requests": 8, "detail_statuses": [200, 200, 200, 200, 200, 200, 200, 200]}
+{"sample": 2, "project": "88b8208c0d394ce48ac1a2e863e31003", "visible_ms": 14072, "result": "visible", "detail_requests": 7, "detail_statuses": [200, 200, 200, 200, 200, 200, 200]}
+{"sample": 3, "project": "1f5e47bd9b234cde9980f387c0530c33", "visible_ms": 3976, "result": "visible", "detail_requests": 7, "detail_statuses": [200, 200, 200, 200, 200, 200, 200]}
+{"sample": 4, "project": "21125e3fca4548fc9619dfc1676f99f8", "visible_ms": 4047, "result": "visible", "detail_requests": 8, "detail_statuses": [200, 200, 200, 200, 200, 200, 200, 200]}
+{"sample": 5, "project": "88b8208c0d394ce48ac1a2e863e31003", "visible_ms": 14072, "result": "visible", "detail_requests": 7, "detail_statuses": [200, 200, 200, 200, 200, 200, 200]}
+{"sample": 6, "project": "1f5e47bd9b234cde9980f387c0530c33", "visible_ms": 3951, "result": "visible", "detail_requests": 7, "detail_statuses": [200, 200, 200, 200, 200, 200, 200]}
+{"sample": 7, "project": "21125e3fca4548fc9619dfc1676f99f8", "visible_ms": 3937, "result": "visible", "detail_requests": 8, "detail_statuses": [200, 200, 200, 200, 200, 200, 200, 200]}
+{"sample": 8, "project": "88b8208c0d394ce48ac1a2e863e31003", "visible_ms": 14031, "result": "visible", "detail_requests": 7, "detail_statuses": [200, 200, 200, 200, 200, 200, 200]}
+{"sample": 9, "project": "1f5e47bd9b234cde9980f387c0530c33", "visible_ms": 3972, "result": "visible", "detail_requests": 7, "detail_statuses": [200, 200, 200, 200, 200, 200, 200]}
+{"sample": 10, "project": "21125e3fca4548fc9619dfc1676f99f8", "visible_ms": 3942, "result": "visible", "detail_requests": 8, "detail_statuses": [200, 200, 200, 200, 200, 200, 200, 200]}
+{"sample": 11, "project": "88b8208c0d394ce48ac1a2e863e31003", "visible_ms": 14054, "result": "visible", "detail_requests": 7, "detail_statuses": [200, 200, 200, 200, 200, 200, 200]}
+{"sample": 12, "project": "1f5e47bd9b234cde9980f387c0530c33", "visible_ms": 2938, "result": "visible", "detail_requests": 7, "detail_statuses": [200, 200, 200, 200, 200, 200, 200]}
+{"page_errors": 0, "samples": 12}

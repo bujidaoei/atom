@@ -20,6 +20,7 @@ import { RaceTab } from "../workspace/RaceTab";
 import { ReleaseTab } from "../workspace/ReleaseTab";
 import { runAcceptance } from "../workspace/acceptance";
 import { useProjectStream } from "../workspace/useProjectStream";
+import { ProjectLoader } from "../workspace/project-loader";
 
 type TabId = "preview" | "code" | "contract" | "race" | "release";
 
@@ -58,35 +59,39 @@ function ProjectWorkspace({ id }: { id: string | undefined }) {
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const planKicked = useRef<string | null>(null);
   const alive = useRef(true);
-  const requestSequence = useRef(0);
+  const loader = useRef<ProjectLoader<ProjectDetail> | null>(null);
+  const hasSnapshot = useRef(false);
   useEffect(() => {
     alive.current = true;
-    return () => { alive.current = false; requestSequence.current += 1; };
-  }, []);
-
-  const load = useCallback(
-    async (silent = false) => {
-      if (!id) return;
-      const sequence = ++requestSequence.current;
-      if (!silent) setLoading(true);
-      try {
-        const data = await api.getProject(id);
-        if (!alive.current || sequence !== requestSequence.current || data.project.id !== id) return;
-        setProject(data.project);
-        upsert(data.project);
+    if (!id) return;
+    const current = new ProjectLoader<ProjectDetail>({
+      read: async signal => (await api.getProject(id, signal)).project,
+      apply: snapshot => {
+        if (snapshot.id !== id) throw new Error("工作区响应不匹配，请重试。");
+        hasSnapshot.current = true;
+        setProject(snapshot);
+        upsert(snapshot);
         setLoadError(null);
-      } catch (err) {
-        if (alive.current && sequence === requestSequence.current && !silent) setLoadError(errorMessage(err));
-      } finally {
-        if (alive.current && sequence === requestSequence.current) setLoading(false);
-      }
-    },
-    [id, upsert],
-  );
+        setLoading(false);
+      },
+      fail: error => {
+        if (!hasSnapshot.current) setLoadError(errorMessage(error));
+        setLoading(false);
+      },
+    });
+    loader.current = current;
+    void current.refresh();
+    return () => {
+      alive.current = false;
+      current.dispose();
+      loader.current = null;
+    };
+  }, [id, upsert]);
 
-  useEffect(() => {
-    void load();
-  }, [load]);
+  const load = useCallback(async (silent = false) => {
+    if (!silent && !hasSnapshot.current) { setLoading(true); setLoadError(null); }
+    await loader.current?.refresh();
+  }, []);
 
   const handleProjectUpdated = useCallback(
     (payload: RunEventPayload) => {
@@ -100,6 +105,7 @@ function ProjectWorkspace({ id }: { id: string | undefined }) {
     projectId: id,
     enabled: Boolean(id),
     snapshotStatus: project?.status,
+    snapshotEventSeq: project?.eventSeq,
     onProjectUpdated: handleProjectUpdated,
   });
 
