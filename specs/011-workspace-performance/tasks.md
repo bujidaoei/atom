@@ -15,8 +15,8 @@
 - [x] T008 [US3] Run complete backend regression, frontend tests/build, locked runtime validation and target Linux integration; record specs/011-workspace-performance/evidence.md.
 - [x] T009 [US3] Push exact reviewed source, build and deploy via protected forward transaction; accept generation and remove the transaction's temporary pre-backup after the user's no-backup instruction; record specs/011-workspace-performance/deployment.md.
 - [x] T010 [US3] Measure same 12 live clicks and verify preview/public health and visual acceptance; record specs/011-workspace-performance/after.jsonl and evidence.md. Measurement completed; the 2-second aspirational SC-001 target is not met.
-- [ ] T011 [US3] Synchronize GitHub main and feature branch with verified changes and final evidence in specs/011-workspace-performance/tasks.md.
+- [x] T011 [US3] Synchronize GitHub main and feature branch with verified changes and final evidence in specs/011-workspace-performance/tasks.md; both refs reached `45b4edb` before this status-only update.
 - [ ] T014 [US1] Remove eager per-heat catalog reads from the initial four-candidate workspace response without weakening ownership or artifact verification, then remeasure p95 against the 2-second SC-001 target. This is a measured remaining optimization, not accepted work.
 
-Dependencies: T001-T002 -> T003/T004/T005 -> T006 -> T007/T012/T013 -> T008 -> T009 -> T010 -> T011. Independent test commands may run concurrently; implementation is sequential to avoid shared-contract drift. MVP is US1; full delivery includes all stories. Pending tests never count as accepted.
+Dependencies: T001-T002 -> T003/T004/T005 -> T006 -> T007/T012/T013 -> T008 -> T009 -> T010 -> T011. T014 follows T010 and requires its own tested release and live measurement. Independent test commands may run concurrently; implementation is sequential to avoid shared-contract drift. MVP is US1. T014 and the SC-001 2-second target remain open and are not accepted.
 
