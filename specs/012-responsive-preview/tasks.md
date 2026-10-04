@@ -27,10 +27,10 @@ Independent test: real invalid JavaScript triggers bounded diagnostic repair and
 - [x] T015 [US4] Pass repair success/exhaustion/cancel/deadline/infrastructure and accounting tests; record evidence.md.
 
 ## Phase 5 — Integrated release
-- [ ] T016 Verify spec/plan/tasks/code consistency, Pi lock, frontend build and targeted Linux exact-image tests; record evidence.md.
-- [ ] T017 Commit/push feature and synchronize GitHub main; record exact revisions in deployment.md.
-- [ ] T018 Complete current-generation preflight, protected deployment and post-cutover health/data/public checks; record deployment.md.
-- [ ] T019 Perform live authenticated three-mode/popup and real generation repair acceptance, synchronize all completion states and final GitHub main.
+- [x] T016 Verify spec/plan/tasks/code consistency, Pi lock, frontend build and targeted Linux exact-image tests; record evidence.md.
+- [x] T017 Commit/push feature and synchronize GitHub main; record exact revisions in deployment.md.
+- [x] T018 Complete current-generation preflight, protected deployment and post-cutover health/data/public checks; record deployment.md.
+- [x] T019 Perform live authenticated three-mode/popup and real generation repair acceptance, synchronize all completion states and final GitHub main.
 
 ## Dependencies and execution
 T001–T002 precede foundation. T004 precedes T005–T007; T008–T009 depend on protocol and precede T010–T011. CR-001 research T003 is independent of preview implementation; T012 precedes T013–T015. All functional/security gates precede T016–T019. Research can run alongside independent local work; shared-file edits remain sequential. No unchecked implementation, simulated business result or unexecuted test is accepted.

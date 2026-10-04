@@ -2,7 +2,7 @@
 
 **Feature Branch**: `codex/012-responsive-preview`
 **Created**: 2026-10-04
-**Status**: Implemented; release acceptance in progress
+**Status**: Implemented and accepted on deployed source d003710535cb660ef61a2edc2085f2de2ef7de39
 **Input**: Restore the preferred desktop/tablet/mobile preview inside the Atom workspace, research and implement a production-quality design, maintain Spec Kit evidence, synchronize GitHub main and deploy the result.
 
 ## User Scenarios & Testing
