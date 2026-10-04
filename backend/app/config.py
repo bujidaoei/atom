@@ -49,19 +49,15 @@ class Settings(ObjectStorageSettings):
     llm_api_key: str = Field(default="", repr=False)
 
     # Budget for one model call inside the agent loop.
-    llm_timeout_seconds: int = Field(default=300, ge=1, le=1800)
+    llm_timeout_seconds: int | None = Field(default=None, ge=1, le=7140)
     # Budget for a whole agent turn. A build turn writes several files and
     # runs shell verification, so it legitimately outlives many model calls.
-    run_timeout_seconds: int = Field(default=1800, ge=1, le=7200)
+    run_timeout_seconds: int = Field(default=3600, ge=1, le=7140)
     # Hard elapsed-time cap, including silent transport and recovery.
     # Timeout preserves files but is never successful completion.
-    build_budget_seconds: int = Field(default=180, ge=1, le=1800)
+    build_budget_seconds: int = Field(default=3600, ge=1, le=7140)
 
-    # The gateway closes a response that stays open for roughly 60 seconds,
-    # so throughput matters more than raw capability: a slow model gets cut
-    # off mid-file no matter how good its code would have been. Both tiers
-    # default to the fastest model that still writes decent code, and the
-    # engineer prompt tells Alex to write in several small calls.
+    # Model selection is independent of the configured generation lifetime.
     llm_model: str = "deepseek-v4.1-flash"
     llm_planning_model: str = "deepseek-v4.1-flash"
 
@@ -102,6 +98,9 @@ class Settings(ObjectStorageSettings):
 
     @model_validator(mode="after")
     def validate_transport(self) -> Settings:
+        if (self.llm_timeout_seconds is not None and self.llm_timeout_seconds <
+                max(self.build_budget_seconds, self.run_timeout_seconds)):
+            raise ValueError('model timeout must not be shorter than a configured run budget')
         destinations = self.audit_destinations
         if destinations and self.session_mode != 'durable':
             raise ValueError('audit_export_requires_durable_sessions')

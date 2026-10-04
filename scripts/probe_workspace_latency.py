@@ -67,6 +67,18 @@ def main():
             evidence = os.environ.get('ATOM_LIVE_SCREENSHOT')
             if evidence:
                 page.screenshot(path=evidence)
+            if os.environ.get('ATOM_LIVE_VERIFY_PREVIEW') == '1':
+                with page.expect_popup() as opened:
+                    page.get_by_role('button', name='打开当前版本', exact=True).click()
+                preview = opened.value
+                preview.wait_for_function("location.protocol === 'https:' && location.port !== '' && "
+                    "location.pathname === '/' && !location.hash", timeout=30000)
+                preview.wait_for_load_state('domcontentloaded')
+                assert preview.locator('body').inner_text().strip()
+                assert preview.request.get(preview.url).status == 200
+                assert preview.evaluate('window.opener === null')
+                print(json.dumps({'isolated_preview': 200, 'opener_isolated': True}), flush=True)
+                preview.close()
             print(json.dumps({'page_errors': len(errors), 'samples': len(results)}), flush=True)
             context.close()
             browser.close()

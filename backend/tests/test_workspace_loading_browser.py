@@ -107,6 +107,39 @@ def test_replay_switch_failure_and_reconnect(signed_in, monkeypatch, built_dist)
             output = Path(__file__).resolve().parents[2] / '.logs/workspace-browser.png'
             output.parent.mkdir(exist_ok=True)
             page.screenshot(path=str(output))
+            # The viewport stays fixed: only actual toolbar space changes.
+            page.set_viewport_size({'width': 2400, 'height': 900})
+            toolbar = page.locator('[data-preview-toolbar]')
+            for width in range(240, 901, 13):
+                toolbar.evaluate('(el, width) => el.style.width = width + "px"', width)
+                page.wait_for_function('''() => {
+                    const host = document.querySelector('[data-preview-toolbar]');
+                    const full = host.lastElementChild.firstElementChild;
+                    return (host.dataset.labels === 'visible') ===
+                        (full.getBoundingClientRect().width <= host.clientWidth);
+                }''')
+                assert toolbar.evaluate('(el) => el.scrollWidth <= el.clientWidth')
+                for name in ('桌面', '平板', '手机'):
+                    button = toolbar.get_by_role('button', name=name, exact=True)
+                    assert button.get_attribute('aria-label') == name
+                    assert button.evaluate('(el) => el.scrollHeight <= el.clientHeight')
+            expect(toolbar).to_have_attribute('data-labels', 'visible')
+            page.screenshot(path=str(output.with_name('toolbar-wide.png')))
+            # Font metrics change without changing container or browser width.
+            toolbar.evaluate('el => el.style.width = "700px"')
+            font_style = page.add_style_tag(content='[data-preview-toolbar] span { font-size: 28px !important; }')
+            expect(toolbar).to_have_attribute('data-labels', 'hidden')
+            page.screenshot(path=str(output.with_name('toolbar-compact.png')))
+            toolbar.get_by_role('button', name='手机', exact=True).click()
+            expect(toolbar.get_by_role('button', name='手机', exact=True)).to_have_attribute('aria-pressed', 'true')
+            expect(toolbar.get_by_role('button', name='刷新预览', exact=True)).to_be_disabled()
+            font_style.evaluate('el => el.remove()')
+            toolbar.evaluate('el => el.style.width = ""')
+            page.set_viewport_size({'width': 1440, 'height': 900})
+            page.get_by_role('button', name='收起侧边栏', exact=True).click()
+            page.get_by_role('button', name='展开侧边栏', exact=True).click()
+            assert toolbar.evaluate('(el) => el.scrollWidth <= el.clientWidth')
+            assert errors == []
             context.close()
             browser.close()
     finally:

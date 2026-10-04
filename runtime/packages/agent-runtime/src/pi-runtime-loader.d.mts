@@ -20,7 +20,7 @@ export interface PiModelRuntimeInstance {
 }
 
 export interface PiAgentSessionServices {
-  settingsManager: { setHttpIdleTimeoutMs(timeoutMs: number): void };
+  settingsManager: { applyOverrides(overrides: { httpIdleTimeoutMs: number; retry: { provider: { timeoutMs: number } } }): void };
   getSkills(): ReadonlyArray<{ readonly name: string; readonly filePath: string }>;
   diagnostics: unknown;
   [key: string]: unknown;

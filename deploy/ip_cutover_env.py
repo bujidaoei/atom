@@ -91,7 +91,8 @@ def _write_private(path: Path, values: dict[str, str]) -> None:
 def build(*, old_api: str, old_broker: str, storage_file: Path,
           verifier_file: Path, output_dir: Path, candidate_image: str,
           worker_image: str, seccomp_file: Path, public_ip: str,
-          first_port: int, last_port: int) -> tuple[Path, Path]:
+          first_port: int, last_port: int,
+          generation_settings: dict[str, str] | None = None) -> tuple[Path, Path]:
     if (os.geteuid() != 0 or IMAGE.fullmatch(candidate_image) is None
             or IMAGE.fullmatch(worker_image) is None):
         raise EnvironmentError("root_and_exact_images_required")
@@ -128,6 +129,9 @@ def build(*, old_api: str, old_broker: str, storage_file: Path,
         raise EnvironmentError("incomplete_old_api_environment")
     policy_digest = hashlib.sha256(worker_image.encode("ascii") + b"\0"
                                    + seccomp_file.read_bytes()).hexdigest()
+    if generation_settings is not None:
+        from generation_settings import validate
+        api.update(validate(generation_settings))
     api.update(storage)
     api.update(verifier)
     api.update({

@@ -18,6 +18,8 @@ import sqlite3
 import stat
 import sys
 
+import generation_settings
+import ip_cutover_env
 import ip_cutover_apply
 import ip_cutover_rollback
 import ip_forward_identity
@@ -356,6 +358,11 @@ def _inspect_locked(*, config: protected_cutover.CutoverConfig,
             config, source=successor_source, revision=successor_revision,
             image_id=successor_image, current_revision=revision,
             current_image=image_id, candidate=candidate)
+        try:
+            existing, _ = ip_cutover_env._container_env(config.api)
+            result['generationSettings'] = generation_settings.capture(successor_source, existing)
+        except (ip_cutover_env.EnvironmentError, OSError) as exc:
+            raise ForwardPreflightError('invalid_generation_settings') from exc
         result["status"] = "ready_for_forward_transaction"
     return result
 

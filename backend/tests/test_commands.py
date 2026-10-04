@@ -88,7 +88,7 @@ def test_invalid_command_key_and_budget(signed_in):
     assert (
         signed_in.post(
             f"/api/projects/{pid}/race",
-            json={"models": ["a", "b"], "budgetSeconds": 601},
+            json={"models": ["a", "b"], "budgetSeconds": 7141},
         ).status_code
         == 422
     )

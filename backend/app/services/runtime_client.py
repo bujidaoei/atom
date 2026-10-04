@@ -47,13 +47,6 @@ class RuntimeClient:
         self._base_url = settings.runtime_url.rstrip("/")
         self._requires_lease = settings.sandbox_mode == 'broker'
         self._headers = {"Authorization": f"Bearer {settings.runtime_token}"}
-        # `read` bounds the gap between NDJSON lines, not the whole turn, but
-        # a tool call can run silently for a while, so it tracks the run
-        # budget rather than the single-model-call budget.
-        self._timeout = httpx.Timeout(
-            connect=10.0, read=settings.run_timeout_seconds, write=30.0, pool=10.0
-        )
-
     async def healthy(self) -> bool:
         try:
             async with httpx.AsyncClient(timeout=5.0) as client:
@@ -82,6 +75,12 @@ class RuntimeClient:
         """Stream one agent turn. Yields every line until a terminal one."""
         if self._requires_lease and execution_lease is None:
             raise RuntimeUnavailable('代理执行需要已准备的执行租约')
+        settings = get_settings()
+        budget = budget_seconds if budget_seconds is not None else (
+            settings.build_budget_seconds if role == 'alex' else settings.run_timeout_seconds)
+        if isinstance(budget, bool) or not isinstance(budget, (int, float)) or not 0 < budget <= 7140:
+            raise RuntimeUnavailable('invalid generation budget')
+        timeout = httpx.Timeout(connect=10.0, read=budget + 60, write=30.0, pool=10.0)
         body: dict[str, Any] = {
             "runId": run_id,
             "role": role,
@@ -89,21 +88,12 @@ class RuntimeClient:
             "workspacePath": str(workspace_path),
             "sessionPath": str(session_path),
             "agentDir": str(agent_dir),
-            "budgetMs": (
-                (
-                    budget_seconds
-                    if budget_seconds is not None
-                    else get_settings().build_budget_seconds
-                )
-                if role == "alex"
-                else get_settings().run_timeout_seconds
-            )
-            * 1000,
+            "budgetMs": budget * 1000,
             "gateway": {
                 "baseUrl": gateway.base_url,
                 "apiKey": gateway.api_key,
                 "model": gateway.model,
-                "requestTimeoutMs": get_settings().llm_timeout_seconds * 1000,
+                "requestTimeoutMs": max(budget, settings.llm_timeout_seconds or budget) * 1000,
             },
         }
         if context:
@@ -129,7 +119,7 @@ class RuntimeClient:
             raise RuntimeUnavailable('缺少执行租约')
 
         try:
-            async with httpx.AsyncClient(timeout=self._timeout,trust_env=False,follow_redirects=False) as client:
+            async with httpx.AsyncClient(timeout=timeout,trust_env=False,follow_redirects=False) as client:
                 async with client.stream(
                     "POST",
                     f"{self._base_url}/v1/runs",

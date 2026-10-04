@@ -141,3 +141,24 @@ def test_runtime_health_uses_authentication_and_detects_rejection(monkeypatch, c
         server.shutdown()
         server.server_close()
         worker.join(timeout=5)
+
+
+def test_generation_defaults_and_dotenv(tmp_path):
+    default = Settings(_env_file=None, **BASE)
+    assert (default.build_budget_seconds, default.run_timeout_seconds, default.llm_timeout_seconds) == (3600, 3600, None)
+    dotenv = tmp_path / '.env'
+    dotenv.write_text('ATOM_BUILD_BUDGET_SECONDS=5400\nATOM_RUN_TIMEOUT_SECONDS=5400\n')
+    configured = Settings(_env_file=dotenv, **BASE)
+    assert configured.build_budget_seconds == configured.run_timeout_seconds == 5400
+    for patch in ({'build_budget_seconds': 7141}, {'run_timeout_seconds': 0},
+                  {'llm_timeout_seconds': 300}):
+        with pytest.raises(ValidationError):
+            Settings(_env_file=None, **(BASE | patch))
+
+
+def test_race_defaults_inherit_configuration(monkeypatch):
+    from app.config import get_settings
+    from app.routers.projects import RaceBody, RetryHeatBody
+    monkeypatch.setattr(get_settings(), 'build_budget_seconds', 5400)
+    assert RaceBody(models=['a', 'b']).budgetSeconds == 5400
+    assert RetryHeatBody().budgetSeconds == 5400

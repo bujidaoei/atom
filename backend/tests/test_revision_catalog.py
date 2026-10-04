@@ -1,5 +1,6 @@
 """Real Linux artifact bytes and SQLite catalogs, including request reuse scope."""
 import sys
+from dataclasses import replace
 
 import pytest
 
@@ -37,6 +38,10 @@ def test_manifest_reuse_is_request_scoped_and_never_caches_authority(repository,
     assert store.reads == 1
     committed_catalog(repo, store, owner='owner', project_id='p', manifests={})
     assert store.reads == 2
+    # A cache entry with the same key but a different full identity is a miss.
+    manifests[replace(artifact, revision='e' * 64)] = manifests.pop(artifact)
+    committed_catalog(repo, store, owner='owner', project_id='p', heat_id='heat', manifests=manifests)
+    assert store.reads == 3 and len(manifests) == 2
     (root / (artifact.key + '.atomsnap')).write_bytes(b'corrupted')
     failed_request = {}
     with pytest.raises(ArtifactError):

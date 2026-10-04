@@ -322,15 +322,16 @@ export { cleanupSessionResources } from ${modulePath(piRoot, 'packages/ai/dist/s
 export { isContextOverflow, isRecoverableLength } from ${modulePath(piRoot, 'packages/ai/dist/utils/overflow.js')};
 export { isRetryableAssistantError } from ${modulePath(piRoot, 'packages/ai/dist/utils/retry.js')};
 import { openAICompletionsApi } from ${modulePath(piRoot, 'packages/ai/dist/api/openai-completions.lazy.js')};
+import { Agent as GatewayHttpAgent, fetch as gatewayTransportFetch } from 'undici';
 
 const streams = openAICompletionsApi();
 const expectedProvider = ${JSON.stringify(gatewayProvider)};
 const expectedApi = ${JSON.stringify(gatewayApi)};
-// Capture the platform fetch once, before any caller-controlled extension or
-// session code can replace globalThis.fetch.  A caller-supplied fetch is not a
+// Capture the locked transport implementation before caller-controlled code.  A caller-supplied fetch is not a
 // transport adapter: it is an alternate egress implementation, so it is
 // rejected instead of being trusted merely because its input URL was checked.
-const trustedGatewayFetch = globalThis.fetch;
+const trustedGatewayFetch = gatewayTransportFetch;
+const gatewayHttpAgent = new GatewayHttpAgent({ connect: { timeout: 10_000 } });
 const runtimeBindingSymbol = Symbol('workdude-gateway-runtime-binding');
 const runtimeBindings = new WeakMap();
 
@@ -493,7 +494,19 @@ function guardedOptions(model, options = {}) {
       }
       // Node 24.14 fetch with redirect:error can lose stream abort linkage after
       // GC. Manual mode preserves cancellation while never following redirects.
-      const response = await trustedGatewayFetch(input, { ...(init ?? {}), redirect: 'manual' });
+      // Node fetch supplies its own 300s headers/body defaults even when the
+      // SDK abort signal allows a longer call. Override only this trusted
+      // gateway request, keeping transport and SDK on the same finite policy.
+      const timeoutMs = safeOptions.timeoutMs ?? 3_600_000;
+      if (!Number.isFinite(timeoutMs) || timeoutMs <= 0 || timeoutMs > 2147483647) {
+        throw new Error('Enterprise gateway timeout is invalid');
+      }
+      const dispatcher = {
+        dispatch(request, handler) {
+          return gatewayHttpAgent.dispatch({ ...request, headersTimeout: timeoutMs, bodyTimeout: timeoutMs }, handler);
+        },
+      };
+      const response = await trustedGatewayFetch(input, { ...(init ?? {}), redirect: 'manual', dispatcher });
       if ([301, 302, 303, 307, 308].includes(response.status)) {
         await response.body?.cancel().catch(() => undefined);
         throw new Error('Enterprise gateway redirects are disabled');

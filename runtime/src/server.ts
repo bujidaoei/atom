@@ -21,6 +21,7 @@ import type { ExternalSandboxScope } from '../packages/agent-runtime/src/sandbox
 import { allRoles, roleDefinition } from './squad.ts';
 import { runWithRecovery } from './run-recovery.ts';
 import { loadRuntimeConfig } from './config.ts';
+import { generationBudget } from './generation-budget.ts';
 
 const config = loadRuntimeConfig(process.env);
 const { port: PORT, host: HOST } = config;
@@ -81,6 +82,9 @@ async function handle(request: IncomingMessage, response: ServerResponse): Promi
 
 async function startRun(request: IncomingMessage, response: ServerResponse): Promise<void> {
   const body = (await readJson(request)) as RunBody;
+  let budgetMs: number;
+  try { budgetMs = generationBudget(body.budgetMs); }
+  catch { return sendJson(response, 400, { error: 'invalid generation budget' }); }
   const role = roleDefinition(body.role);
   const enableTools = body.enableTools ?? role.tools;
   let sandbox: LocalSandboxClient | BrokerSandboxClient;
@@ -102,7 +106,7 @@ async function startRun(request: IncomingMessage, response: ServerResponse): Pro
   const controller = new AbortController();
   active.set(body.runId, controller);
   const deadline = setTimeout(() => controller.abort(new DOMException('Runtime deadline exceeded', 'TimeoutError')),
-    Math.max(1, Math.min(body.budgetMs ?? 180_000, 1_800_000)) + 1000);
+    budgetMs + 1000);
 
   response.writeHead(200, {
     'content-type': 'application/x-ndjson; charset=utf-8',
@@ -132,7 +136,7 @@ async function startRun(request: IncomingMessage, response: ServerResponse): Pro
           baseUrl: body.gateway.baseUrl,
           masterKey: body.gateway.apiKey,
           model: body.gateway.model,
-          requestTimeoutMs: body.gateway.requestTimeoutMs ?? 300_000,
+          requestTimeoutMs: Math.max(budgetMs, body.gateway.requestTimeoutMs ?? budgetMs),
         },
         agentDir: body.agentDir,
         sandbox,
@@ -147,7 +151,7 @@ async function startRun(request: IncomingMessage, response: ServerResponse): Pro
         workspaceToolNames: ['glob', 'grep', 'read_file', 'write', 'edit'],
         systemPrompt: (body.systemPromptSuffix
           ? `${role.systemPrompt}\n\n## Context from the squad\n${body.systemPromptSuffix}`
-          : role.systemPrompt) + `\n\nThis turn has a wall-clock budget of ${(body.budgetMs ?? 180_000) / 1000} seconds including tools and recovery. Finish core functionality within this budget.`,
+          : role.systemPrompt) + `\n\nThis turn has a wall-clock budget of ${budgetMs / 1000} seconds including tools and recovery. Finish core functionality within this budget.`,
       });
 
       return await runWithRecovery({

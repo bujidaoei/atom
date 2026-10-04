@@ -63,7 +63,8 @@ export async function runPluginAgentSession(
           systemPrompt: options.systemPrompt,
         },
       });
-      services.settingsManager.setHttpIdleTimeoutMs(options.requestTimeoutMs);
+      services.settingsManager.applyOverrides({ httpIdleTimeoutMs: options.requestTimeoutMs,
+            retry: { provider: { timeoutMs: options.requestTimeoutMs } } });
       const created = await createAgentSessionFromServices({
         services,
         sessionManager,

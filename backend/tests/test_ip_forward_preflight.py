@@ -66,7 +66,7 @@ class ForwardPreflightTest(unittest.TestCase):
             caddy.mkdir(parents=True)
             (caddy / "Caddyfile.base").write_text("base", encoding="utf-8")
             (caddy / "Caddyfile").write_text("active", encoding="utf-8")
-            config = SimpleNamespace(
+            config = SimpleNamespace(api="atom-candidate",
                 backup_root=root, state_dir=root, docker=Path("/usr/bin/docker"),
                 data=root / "old-data", broker_data=root / "old-broker")
             ids = {role: f"{index:064x}" for index, role in enumerate(
@@ -112,7 +112,7 @@ class ForwardPreflightTest(unittest.TestCase):
                 self.assertEqual(result["containerIds"], ids)
                 self.assertFalse(load_publication.call_args.kwargs[
                     "require_template_image"])
-                with patch.object(module, "_target", return_value={
+                with patch.object(module.ip_cutover_env, "_container_env", return_value=({}, IMAGE)), patch.object(module, "_target", return_value={
                         "revision": "e" * 40, "imageId": IMAGE}):
                     with self.assertRaisesRegex(module.ForwardPreflightError,
                                                 "active_ingress_unbounded_grace"):

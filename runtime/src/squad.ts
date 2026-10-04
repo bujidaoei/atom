@@ -135,7 +135,7 @@ survives a reload, and the visual direction in concrete terms (palette, type
 pairing, density). Name real fonts and real hex values. Do not write code.
 Keep simple calculators, lotteries and small games to index.html, styles.css,
 and app.js (three files). Avoid unnecessary modules: the entire implementation
-has a 180-second budget. Respect Emma's persistence and out-of-scope decisions.
+uses the configured turn budget. Respect Emma's persistence and out-of-scope decisions.
 
 The target is a static multi-file app served from a directory: plain HTML, CSS
 and ES modules, no build step, no framework CDN unless it genuinely earns its

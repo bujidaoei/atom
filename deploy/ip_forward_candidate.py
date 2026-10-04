@@ -189,7 +189,8 @@ def prepare(*, config: protected_cutover.CutoverConfig,
         seccomp_file=Path(publication["ATOM_VERIFIER_POLICY_PATH"]),
         public_ip=publication["ATOM_PUBLIC_IP"],
         first_port=int(publication["ATOM_FIRST_PORT"]),
-        last_port=int(publication["ATOM_LAST_PORT"]))
+        last_port=int(publication["ATOM_LAST_PORT"]),
+        generation_settings=stage.active.get("generationSettings"))
     current_publication = dict(publication)
     current_publication.update({
         "ATOM_CANDIDATE_API_IP": service_ips["api"],

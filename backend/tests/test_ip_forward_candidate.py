@@ -42,6 +42,7 @@ def _setup(tmp_path, monkeypatch):
                        "public": "172.30.0.7", "caddy": "172.30.0.10"},
         "caddy": {"base": "unused"},
     }
+    active["generationSettings"] = {"ATOM_BUILD_BUDGET_SECONDS": "5400"}
     log = Mock()
     log.read.return_value = {
         "phase": "captured", "capture": stage_module._receipt(captured)}
@@ -57,6 +58,7 @@ def _setup(tmp_path, monkeypatch):
                         lambda path, *, create=False:
                         path.mkdir(mode=0o700) if create else None)
     def env_build(**kwargs):
+        assert kwargs["generation_settings"] == {"ATOM_BUILD_BUDGET_SECONDS": "5400"}
         first, second = (kwargs["output_dir"] / name
                          for name in ("api.env", "broker.env"))
         first.write_text("safe=fixture", encoding="utf-8")

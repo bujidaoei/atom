@@ -51,7 +51,6 @@ export function RaceTab({
   const [loadingModels, setLoadingModels] = useState(true);
   const [selected, setSelected] = useState<string[]>([]);
   const [starting, setStarting] = useState(false);
-  const [budget, setBudget] = useState(180);
   const [startError, setStartError] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
 
@@ -122,7 +121,7 @@ export function RaceTab({
     setStarting(true);
     setStartError(null);
     try {
-      const result = await api.startRace(projectId, selected, budget);
+      const result = await api.startRace(projectId, selected);
       setRace({
         id: result.raceId,
         status: "running",
@@ -187,14 +186,6 @@ export function RaceTab({
               {startError ? <ErrorState title="发起竞速失败" message={startError} compact /> : null}
 
               <div className="flex flex-wrap items-center gap-m">
-                <label className="flex items-center gap-s text-sm text-neutral-60">
-                  每个模型时间上限
-                  <select aria-label="每个模型时间上限" value={budget} disabled={running || starting}
-                    onChange={event => setBudget(Number(event.target.value))}
-                    className="rounded-m border border-neutral-12 bg-base-secondary px-s py-xs text-neutral-95">
-                    <option value={180}>3 分钟</option><option value={360}>6 分钟</option><option value={600}>10 分钟</option>
-                  </select>
-                </label>
                 <Button
                   onClick={() => void startRace()}
                   loading={starting}
@@ -256,7 +247,7 @@ export function RaceTab({
                   activity={heatActivity[heat.id]}
                   isWinner={race.winnerHeatId === heat.id}
                   raceRunning={running}
-                  budget={budget}
+
                   onRetried={() => { void refreshRace(); onChanged(); }}
                   liveElapsed={
                     heat.status === "running" && (heat.runStartedAt || startedAt)
@@ -283,7 +274,6 @@ function HeatCard({
   activity,
   isWinner,
   raceRunning,
-  budget,
   onRetried,
   liveElapsed,
   onAdopted,
@@ -296,7 +286,6 @@ function HeatCard({
   activity: HeatActivity | undefined;
   isWinner: boolean;
   raceRunning: boolean;
-  budget: number;
   onRetried: () => void;
   liveElapsed: number | null;
   onAdopted: () => void;
@@ -382,7 +371,7 @@ function HeatCard({
       {heat.error && !["running", "queued", "done"].includes(heat.status) ? (
         <div className="space-y-xxs border-t border-neutral-8 px-m py-s text-xs text-neutral-60">
           <p className="break-words">{heat.error}</p>
-          <p>可点击「{retryLabel}」重试{heat.status === "timed_out" ? "；如果经常超时，可先调高上方时间上限" : ""}。这个候选尚未完成，暂不能采用。当前草稿是否可以发布，请到「发布与历史」查看。</p>
+          <p>可点击「{retryLabel}」重试。这个候选尚未完成，暂不能采用。当前草稿是否可以发布，请到「发布与历史」查看。</p>
         </div>
       ) : null}
 
@@ -403,7 +392,7 @@ function HeatCard({
           <Button size="sm" variant="secondary" loading={adopting} disabled={raceRunning}
             onClick={() => {
               setAdopting(true); setAdoptError(null);
-              api.retryHeat(projectId, heat.id, budget).then(onRetried)
+              api.retryHeat(projectId, heat.id).then(onRetried)
                 .catch((err: unknown) => setAdoptError(errorMessage(err)))
                 .finally(() => setAdopting(false));
             }}>{retryLabel}</Button>

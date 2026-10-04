@@ -63,7 +63,7 @@ def _serve(app):
     port = listener.getsockname()[1]
     server = uvicorn.Server(uvicorn.Config(app, host='127.0.0.1', port=port,
         log_level='error', access_log=False, proxy_headers=True,
-        forwarded_allow_ips='127.0.0.1'))
+        forwarded_allow_ips='127.0.0.1', timeout_graceful_shutdown=3))
     thread = Thread(target=server.run, kwargs={'sockets': [listener]}, daemon=True)
     thread.start()
     deadline = time.monotonic() + 10

@@ -25,6 +25,7 @@ __pycache__/
 # and must stay in the repository; only the 157 MB per-generation build cache
 # used to recompile the bundle is excluded.
 runtime/.cache/pi-build-generation-*
+runtime/.cache/pi-build-current.json
 
 .DS_Store
 Thumbs.db

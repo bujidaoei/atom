@@ -288,13 +288,13 @@ export const api = {
     }),
 
   // ---- race
-  startRace: (id: string, models: string[], budgetSeconds = 180) =>
+  startRace: (id: string, models: string[], budgetSeconds?: number) =>
     request<{ raceId: string; heats: RaceHeat[] }>(`/api/projects/${id}/race`, {
       method: "POST",
       body: { models, budgetSeconds },
       commandKey: commandKey(),
     }),
-  retryHeat: (id: string, heatId: string, budgetSeconds: number) =>
+  retryHeat: (id: string, heatId: string, budgetSeconds?: number) =>
     request<{ runId: string }>(`/api/projects/${id}/race/${heatId}/retry`, {
       method: "POST", body: { budgetSeconds }, commandKey: commandKey(),
     }),

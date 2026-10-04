@@ -408,7 +408,8 @@ export class ProductAgentRuntime {
               systemPrompt,
             },
           });
-          services.settingsManager.setHttpIdleTimeoutMs(this.options.aiGateway.requestTimeoutMs);
+          services.settingsManager.applyOverrides({ httpIdleTimeoutMs: this.options.aiGateway.requestTimeoutMs,
+            retry: { provider: { timeoutMs: this.options.aiGateway.requestTimeoutMs } } });
           loadedSkills = services.getSkills();
           const created = await createAgentSessionFromServices({
             services,

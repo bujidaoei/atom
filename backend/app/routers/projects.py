@@ -70,11 +70,11 @@ class AcceptanceBody(BaseModel):
 
 class RaceBody(BaseModel):
     models: list[str] = Field(min_length=2, max_length=4)
-    budgetSeconds: int = Field(default=180, ge=180, le=600)
+    budgetSeconds: int = Field(default_factory=lambda: get_settings().build_budget_seconds, ge=1, le=7140)
 
 
 class RetryHeatBody(BaseModel):
-    budgetSeconds: int = Field(default=360, ge=180, le=600)
+    budgetSeconds: int = Field(default_factory=lambda: get_settings().build_budget_seconds, ge=1, le=7140)
 
 
 @router.get("")

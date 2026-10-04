@@ -110,3 +110,22 @@ def test_terminal_stops_reading_and_does_not_accept_a_second_result(monkeypatch)
 
     lines = asyncio.run(scenario())
     assert len(lines) == 1 and lines[0].payload["resultText"] == "first"
+
+
+@pytest.mark.parametrize('role', ['alex', 'bob'])
+def test_effective_budget_propagates_to_model_and_stream(monkeypatch, role):
+    original = httpx.AsyncClient
+    def response(request):
+        body = json.loads(request.content)
+        assert body['budgetMs'] == 5400000
+        assert body['gateway']['requestTimeoutMs'] == 5400000
+        assert request.extensions['timeout']['read'] >= 5400
+        return httpx.Response(200, text='{"kind":"result","resultText":"ok"}\n')
+    monkeypatch.setattr(httpx, 'AsyncClient', lambda **kwargs:
+                        original(transport=httpx.MockTransport(response), **kwargs))
+    async def scenario():
+        return [line async for line in RuntimeClient().run(run_id='r', role=role,
+            budget_seconds=5400, prompt='test', workspace_path=Path('.'),
+            session_path=Path('session'), agent_dir=Path('.'),
+            gateway=GatewayConfig('https://invalid', 'synthetic', 'model'))]
+    assert len(asyncio.run(scenario())) == 1

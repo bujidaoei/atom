@@ -16,3 +16,6 @@ backend/data
 # installed dependencies.
 !runtime/**
 runtime/node_modules
+
+runtime/.cache/pi-build-generation-*
+runtime/.cache/pi-build-current.json
