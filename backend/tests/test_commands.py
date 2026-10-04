@@ -33,6 +33,14 @@ def test_command_replay_survives_terminal_state_and_rejects_changed_payload(
     ]["id"]
     with session_scope() as s:
         s.get(Project, pid).status = initial
+        if action == 'approve':
+            from app.contract_history import commit_snapshot
+            snapshot = commit_snapshot(s, pid, {
+                'requirements': [{'key': 'app', 'title': 'App', 'detail': '',
+                                  'checks': [{'type': 'exists', 'selector': 'main'}]}],
+                'scope': ['App'], 'outOfScope': [], 'architecture': '', 'notes': [],
+            }, expected=None, note='Initial contract')
+            body = {'expectedVersion': snapshot['id']}
     headers = {"Idempotency-Key": "same-command"}
 
     def send():
@@ -186,7 +194,9 @@ def test_heat_continuation_retains_files_and_successful_sibling(signed_in):
 
     asyncio.run(scenario())
     assert len(runtime.calls) == 1 and runtime.calls[0]["gateway"].model == "slow"
-    assert runtime.calls[0]["budget_seconds"] == 360
+    # Generation shares one deadline with repair attempts; setup time is
+    # deducted rather than resetting the entire 360-second allowance.
+    assert 359 <= runtime.calls[0]["budget_seconds"] <= 360
     with session_scope() as s:
         assert s.get(RaceHeat, done_id).input_tokens == 19
         heat = s.get(RaceHeat, hid)
