@@ -98,11 +98,13 @@ def _database_summary(path: Path, expected_version: int) -> dict[str, int]:
                      "backup_integrity_failed")
             _require(db.execute("PRAGMA foreign_key_check").fetchall() == [],
                      "backup_foreign_key_failed")
-            if expected_version in (10, 18):
+            if expected_version in (10, 18, 19):
                 tables = ["projects", "revision_records", "revision_artifacts"]
-                if expected_version == 18:
+                if expected_version in (18, 19):
                     tables.extend(("release_records", "release_publications",
                                    "release_rollback_sources", "project_origin_ports"))
+                if expected_version == 19:
+                    tables.extend(("contract_snapshots", "contract_approvals"))
                 return {name: db.execute(f"SELECT count(*) FROM {name}").fetchone()[0]
                         for name in tables}
             if expected_version == 3:

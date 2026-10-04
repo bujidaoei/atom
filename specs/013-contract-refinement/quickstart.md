@@ -6,3 +6,5 @@
 5. Test malformed model result, timeout/cancel, stale tab, duplicate key, cross-owner/project, old project baseline and multi-page history.
 6. Desktop/mobile real browser: no exceptions/overflow, buttons accessible, pending text survives failure, build cannot discard edits.
 7. Back up and rehearse migration, deploy exact committed image, verify public health/revision and owner workflow. Record IDs and outcomes in evidence.md, never secrets.
+
+After a schema-changing cutover, update the root-owned origin-reconcile environment to a trusted checkout supporting the serving schema, preserving the old file as backup. Verify atom-origin-reconcile and atom-certificate-watch against the active generation, then test a newly reserved project origin from a real browser. Container health alone does not prove new project ingress.

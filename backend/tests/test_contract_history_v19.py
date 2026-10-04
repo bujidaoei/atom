@@ -56,3 +56,18 @@ def test_forward_candidate_migration_keeps_source_backup_and_rejects_downgrade(v
     forward_schema.migrate_candidate(v18, target=19)
     with pytest.raises(ValueError, match='unsupported_forward_schema_transition'):
         forward_schema.migrate_candidate(v18, target=18)
+
+
+def test_forward_backup_inventory_retains_v19_business_counts(v18, tmp_path):
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'deploy'))
+    import paired_backup
+    migrate(v18, tmp_path / 'before19.db', target_version=19)
+    summary = paired_backup._database_summary(v18, 19)
+    assert set(summary) == {'projects', 'revision_records', 'revision_artifacts',
+        'release_records', 'release_publications', 'release_rollback_sources',
+        'project_origin_ports', 'contract_snapshots', 'contract_approvals'}
+    with sqlite3.connect(v18) as db:
+        for table, count in summary.items():
+            assert count == db.execute(f'SELECT count(*) FROM {table}').fetchone()[0]
