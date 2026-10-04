@@ -61,6 +61,9 @@ def test_iterate_preview_restore_reload(signed_in, built_dist, monkeypatch, view
             output = Path(__file__).resolve().parents[2] / '.logs' / 'contract-browser'
             output.mkdir(parents=True, exist_ok=True)
             page.screenshot(path=str(output / f'{viewport["width"]}.png'), full_page=True)
+            with page.expect_response(lambda response: response.url.endswith(f'/api/projects/{pid}/approve')) as approval:
+                page.get_by_role('button', name='开始构建', exact=True).click()
+            assert approval.value.ok, approval.value.text()
             context.close(); browser.close()
     finally:
         server.should_exit = True

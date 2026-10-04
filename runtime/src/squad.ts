@@ -109,11 +109,17 @@ For every flow, include all prerequisites in optional setup (maximum 12 ordered 
 Supported actions: fill {selector,value}, click {selector}, press {selector,key}.
 Fill required inputs BEFORE clicking submit/add/draw. For a lottery, enter names and
 add them before drawing; never assume seed data. Use an outcome selector that proves
-the specific action, not an element already present. Checks must work in listed order.
+the specific action, not an element already present.
+EVERY check runs in a NEW isolated browser context with fresh storage and a new page.
+No check inherits actions, counters, logs, mute state, or localStorage from another.
+Use exists/text only for the initial page. To assert state after interaction, use
+one flow with its own setup and an expect selector encoding the result (for example
+[data-testid='move-count'][data-count='2']). Instruct the engineer to expose those
+state attributes. Never split a flow and its resulting text into separate checks.
 The flow selector is clicked ONCE AFTER setup. Do not repeat that final trigger in
 setup. Example: to exhaust two names, setup clears/resets, adds exactly two names,
 and draws ONCE; the final selector draws the second time and expect proves exhaustion.
-Reset each stateful scenario explicitly; previous checks may have consumed entries.
+Reset each stateful scenario explicitly inside its own setup when needed.
 Do not require forbidden game actions: a snake cannot reverse 180 degrees. Specify
 the initial direction and test a perpendicular turn. Keep checks executable without
 timing-dependent sequences or random outcomes.

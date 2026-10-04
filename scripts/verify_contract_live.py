@@ -5,6 +5,7 @@ the project for inspection, and logs out at completion. Secrets stay in memory.
 """
 import argparse
 import json
+import re
 from pathlib import Path
 import secrets
 import time
@@ -138,12 +139,17 @@ def main():
                 page.get_by_role('button', name='确认恢复', exact=True).click()
                 restored_sound = wait('awaiting_approval', changed=restored['id'])['contract']
                 assert restored_sound['document'] == latest['document']
-                page.screenshot(path=str(args.output / 'desktop-contract.png'), full_page=True)
+                expect(page.get_by_text(re.compile(r'^版本 ' + str(restored_sound['version']) + r' · [0-9]+ 条需求'))).to_be_visible(timeout=15000)
+                expect(page.get_by_role('region', name='确认恢复契约', exact=True)).to_have_count(0)
+                page.get_by_role('button', name='开始构建', exact=True).scroll_into_view_if_needed()
+                page.screenshot(path=str(args.output / 'desktop-contract.png'), full_page=True, animations='disabled')
                 page.set_viewport_size({'width': 390, 'height': 844})
                 assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
-                page.screenshot(path=str(args.output / 'mobile-contract.png'), full_page=True)
+                page.screenshot(path=str(args.output / 'mobile-contract.png'), full_page=True, animations='disabled')
                 page.set_viewport_size({'width': 1440, 'height': 1000})
-                page.get_by_role('button', name='开始构建', exact=True).click()
+                with page.expect_response(lambda response: response.url.endswith(path + '/approve')) as approval:
+                    page.get_by_role('button', name='开始构建', exact=True).click()
+                assert approval.value.ok, f'approval rejected: {approval.value.status}: {approval.value.text()}; sent={approval.value.request.post_data}'
                 ready = wait('ready', timeout=3700)
                 assert ready['contractVersion'] == restored_sound['id'] and ready['files']
                 record('built', revision=ready['revisionId'], snapshot=ready['contractVersion'])
@@ -173,7 +179,7 @@ def main():
                 page.wait_for_timeout(300)
                 assert preview.evaluate('window.__audioStarts') > muted and preview.evaluate('window.__audioPeak') > .001
                 assert not errors, errors
-                page.screenshot(path=str(args.output / 'generated-audio.png'), full_page=True)
+                page.screenshot(path=str(args.output / 'generated-audio.png'), full_page=True, animations='disabled')
                 record('real-browser-audio', moveStarts=move-before, captureStarts=capture-move, mutedStarts=muted-capture, pageErrors=len(errors))
                 context.close(); browser.close()
         finally:

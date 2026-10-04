@@ -2,7 +2,7 @@
 
 **Feature Branch**: `codex/013-contract-refinement`
 **Created**: 2026-10-04
-**Status**: Specified; implementation and acceptance pending
+**Status**: Implemented; final live verification correction in progress
 **Input**: 用户要求微调真实进入契约、满意后单独构建，并可预览与恢复任意历史契约，复用发布历史交互，验证后同步 main 和部署。
 
 ## User Scenarios & Testing
@@ -33,7 +33,7 @@
 ## Requirements
 ### Functional Requirements
 - **FR-001**: 微调与构建是两个独立动作；微调不会写应用代码。
-- **FR-002**: 微调必须结合当前完整契约和修改说明，成功后一次性更新，失败保留旧版。
+- **FR-002**: 微调必须结合当前完整契约和修改说明，成功后一次性更新，失败保留旧版；生成的每项检查需符合独立浏览器上下文的执行规则。
 - **FR-003**: 构建必须采用当前确认版本，历史说明不能覆盖所选版本；拒绝过期操作。
 - **FR-004**: 初次完成、每次成功微调和恢复均保留持久化快照，包含需求、检查、范围、设计及修改来源。
 - **FR-005**: 历史支持分页、只读预览及恢复；恢复追加新版本，不删除过去记录。
