@@ -22,4 +22,4 @@
 T001→T002→T003→T004→T005→T006→T007; T004→T008→T009; T007+T009→T010→T012→T013 candidate cutover→T011 live checks→T013 acceptance. Real public provider/browser acceptance requires the deployed candidate; T013 stays open until T011 passes. US1 first, then history, then acceptance. Independent migration and frontend build checks may run concurrently after their inputs stabilize. No implementation/acceptance task is complete merely because code exists.
 
 ## Follow-up: console entry regression
-- [ ] T015 Reproduce blank /atom, add canonical entry redirect using existing ingress validation/rollback, test /atom and /atom/ in real browsers, deploy and record evidence.
+- [x] T015 Reproduce blank /atom, add canonical entry redirect using existing ingress validation/rollback, test /atom and /atom/ in real browsers, deploy and record evidence.
