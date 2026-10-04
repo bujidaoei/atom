@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { AgentAvatar } from "../components/AgentAvatar";
 import { Button } from "../components/ui/Button";
 import { Icon } from "../components/ui/Icon";
@@ -6,15 +6,22 @@ import { TextAreaField } from "../components/ui/Field";
 import { EmptyState, ErrorState } from "../components/ui/States";
 import { formatDateTime } from "../lib/format";
 import type { AcceptanceRun, ProjectStatus, Requirement, VerificationStatus } from "../lib/types";
-import { countChecks, describeCheck } from "./acceptance";
+import { api, errorMessage } from "../lib/api";
+import type { ContractSnapshot } from "../lib/types";
+import { ContractHistoryPanel, ContractDetails } from "./ContractHistoryPanel";
+import { RequirementCards } from "./RequirementCards";
+import { countChecks } from "./acceptance";
 
 type ContractTabProps = {
+  projectId: string;
+  contract: ContractSnapshot | null;
+  onChanged: () => Promise<void>;
   status: ProjectStatus;
   requirements: Requirement[];
   acceptance: AcceptanceRun | null;
   isolated: boolean;
   verification: VerificationStatus | null;
-  onApprove: (note: string) => Promise<void>;
+  onApprove: () => Promise<void>;
   approving: boolean;
   approveError: string | null;
   onRunAcceptance: () => Promise<void>;
@@ -24,6 +31,7 @@ type ContractTabProps = {
 };
 
 export function ContractTab({
+  projectId, contract, onChanged,
   status,
   requirements,
   acceptance,
@@ -37,7 +45,42 @@ export function ContractTab({
   acceptanceError,
   canRunAcceptance,
 }: ContractTabProps) {
-  const [note, setNote] = useState("");
+  const draftKey = `atom.contract-draft.${projectId}`;
+  const [note, setNote] = useState(() => {
+    try { return sessionStorage.getItem(draftKey) ?? ""; } catch { return ""; }
+  });
+  useEffect(() => {
+    try { if (note) sessionStorage.setItem(draftKey, note); else sessionStorage.removeItem(draftKey); }
+    catch { /* Draft remains in component memory when browser storage is unavailable. */ }
+  }, [draftKey, note]);
+  const [refining, setRefining] = useState(false);
+  const [refineError, setRefineError] = useState<string | null>(null);
+  const [submitted, setSubmitted] = useState<{ version: string | null; note: string } | null>(() => {
+    try { return JSON.parse(sessionStorage.getItem(`${draftKey}.submitted`) ?? "null"); } catch { return null; }
+  });
+  useEffect(() => {
+    try { if (submitted) sessionStorage.setItem(`${draftKey}.submitted`, JSON.stringify(submitted));
+      else sessionStorage.removeItem(`${draftKey}.submitted`); } catch { /* Server head remains authoritative. */ }
+  }, [draftKey, submitted]);
+  const busy = refining || approving || status === "planning" || status === "building";
+  const editable = requirements.length > 0 && !busy;
+  useEffect(() => {
+    if (submitted && contract && contract.id !== submitted.version && contract.note === submitted.note) {
+      setNote(current => current.trim() === submitted.note ? "" : current);
+      setSubmitted(null);
+    }
+  }, [contract, submitted]);
+  async function refine() {
+    const message = note.trim();
+    if (!message || busy) return;
+    setRefining(true); setRefineError(null);
+    try {
+      setSubmitted({ version: contract?.id ?? null, note: message });
+      await api.refineContract(projectId, message, contract?.id ?? null);
+      await onChanged();
+    } catch (error) { setRefineError(errorMessage(error)); }
+    finally { setRefining(false); }
+  }
   const total = countChecks(requirements);
 
   const outcomes = useMemo(() => {
@@ -73,17 +116,17 @@ export function ContractTab({
 
   return (
     <div className="min-h-0 flex-1 overflow-y-auto">
-      {status === "awaiting_approval" ? (
+      {requirements.length > 0 ? (
         <div className="sticky top-0 z-10 border-b-2 border-brand-line bg-brand-alpha-soft px-l py-l backdrop-blur-sm">
           <div className="mx-auto flex max-w-[720px] flex-col gap-m">
             <div className="flex items-start gap-s">
               <AgentAvatar role="emma" size="md" />
               <div>
                 <p className="text-md font-medium text-neutral-95">
-                  契约已就绪，等你点头 Alex 才动手
+                  {busy ? "正在处理，请稍候…" : "先微调契约，满意后再开始构建"}
                 </p>
                 <p className="mt-xxs text-base text-neutral-80">
-                  {requirements.length} 条需求 · {total} 项可机检的验收条件。确认后会消耗额度开始构建。
+                  {contract ? `版本 ${contract.version} · ` : ""}{requirements.length} 条需求 · {total} 项检查。微调会调用规划模型；开始构建后 Alex 才会修改代码。
                 </p>
               </div>
             </div>
@@ -94,17 +137,23 @@ export function ContractTab({
               value={note}
               rows={2}
               onChange={(event) => setNote(event.target.value)}
-              hint="这段话会作为补充说明一起交给 Alex。"
+              hint="点击“继续微调”更新完整契约并保存快照，确认满意后再开始构建。"
+              disabled={busy}
+              maxLength={4000}
             />
 
+            {refineError ? <ErrorState title="微调失败，原契约已保留" message={refineError} compact /> : null}
             {approveError ? <ErrorState title="开始构建失败" message={approveError} compact /> : null}
 
             <div className="flex flex-wrap items-center gap-m">
-              <Button size="lg" loading={approving} onClick={() => void onApprove(note.trim())}>
+              <Button size="lg" variant="secondary" loading={refining || status === "planning"} disabled={!editable || !note.trim()} onClick={() => void refine()}>
+                继续微调
+              </Button>
+              <Button size="lg" loading={approving} disabled={busy || Boolean(note.trim()) || status !== "awaiting_approval"} onClick={() => void onApprove()}>
                 开始构建
               </Button>
               <span className="text-sm text-neutral-60">
-                不满意？在左侧对话里直接说，squad 会重新规划。
+                {note.trim() ? "有尚未提交的修改，请先继续微调。" : status === "ready" ? "可继续微调需求，再按新契约构建。" : "历史版本可在下方预览或恢复。"}
               </span>
             </div>
           </div>
@@ -112,6 +161,7 @@ export function ContractTab({
       ) : null}
 
       <div className="mx-auto flex max-w-[720px] flex-col gap-l p-l">
+        {contract ? <ContractDetails document={contract.document} /> : null}
         <div className="flex flex-wrap items-center justify-between gap-m">
           <div>
             <h2 className="text-md font-medium text-neutral-95">需求与功能检查</h2>
@@ -170,72 +220,9 @@ export function ContractTab({
           </div>
         ) : null}
 
-        {requirements.map((requirement, index) => (
-          <article
-            key={requirement.key}
-            className="hairline rounded-l border-neutral-12 bg-base-tertiary"
-          >
-            <header className="flex items-start gap-s border-b border-neutral-8 px-l py-m">
-              <span className="mt-[2px] font-mono text-xs text-neutral-40">
-                {String(index + 1).padStart(2, "0")}
-              </span>
-              <div className="min-w-0 flex-1">
-                <h3 className="text-md font-medium text-neutral-95">{requirement.title}</h3>
-                <p className="mt-xxs text-base leading-5 text-neutral-60">{requirement.detail}</p>
-              </div>
-              <span className="shrink-0 rounded-full bg-neutral-8 px-s py-[2px] font-mono text-xs text-neutral-60">
-                {requirement.key}
-              </span>
-            </header>
-
-            <ul className="flex flex-col divide-y divide-neutral-8">
-              {requirement.checks.length === 0 ? (
-                <li className="px-l py-s text-sm text-neutral-40">这条需求没有可机检的条件。</li>
-              ) : (
-                requirement.checks.map((check, checkIndex) => {
-                  const outcome = outcomes.get(`${requirement.key}:${checkIndex}`);
-                  return (
-                    <li key={checkIndex} className="flex items-start gap-s px-l py-s">
-                      <span
-                        className={[
-                          "mt-[1px] flex h-4 w-4 shrink-0 items-center justify-center rounded-full",
-                          outcome === undefined
-                            ? "bg-neutral-12 text-neutral-40"
-                            : outcome.passed
-                              ? "bg-success-chip text-success-strong"
-                              : "bg-danger-chip text-danger-strong",
-                        ].join(" ")}
-                      >
-                        {outcome === undefined ? (
-                          <span className="h-[4px] w-[4px] rounded-full bg-current" />
-                        ) : (
-                          <Icon name={outcome.passed ? "check" : "close"} size={11} />
-                        )}
-                      </span>
-                      <div className="min-w-0 flex-1">
-                        <p className="font-mono text-xs leading-5 text-neutral-80">
-                          <span className="mr-xs rounded-full bg-neutral-8 px-xs py-[1px] text-neutral-60">
-                            {check.type}
-                          </span>
-                          {describeCheck(check)}
-                        </p>
-                        {outcome?.note ? (
-                          <p
-                            className={`mt-xxs text-xs leading-4 ${
-                              outcome.passed ? "text-neutral-40" : "text-danger-strong"
-                            }`}
-                          >
-                            {outcome.note}
-                          </p>
-                        ) : null}
-                      </div>
-                    </li>
-                  );
-                })
-              )}
-            </ul>
-          </article>
-        ))}
+        <RequirementCards requirements={requirements} outcomes={outcomes} />
+        <ContractHistoryPanel projectId={projectId} contract={contract} status={status} disabled={busy || Boolean(note.trim())}
+          onChanged={onChanged} />
       </div>
     </div>
   );

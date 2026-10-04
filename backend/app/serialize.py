@@ -39,6 +39,9 @@ def project_summary(project: Project) -> dict[str, Any]:
 
 
 def project_detail(session: Session, project: Project, *, catalog=None) -> dict[str, Any]:
+    from . import contract_history
+    contract = contract_history.current(session, project.id) if contract_history.available(session) else None
+    from .verification_contract import capture_contract
     if get_settings().sandbox_mode == "broker" and catalog is None:
         raise RuntimeError("committed_catalog_required")
     listing = catalog() if catalog else None
@@ -52,6 +55,9 @@ def project_detail(session: Session, project: Project, *, catalog=None) -> dict[
     detail.update(
         {
             "prompt": project.prompt,
+            "contractVersion": contract['id'] if contract else None,
+            "contract": contract,
+            "contractDigest": capture_contract(contract['document']['requirements']).digest if contract else None,
             "eventSeq": project.event_seq,
             "activeRunId": project.active_run_id,
             "latestRun": (
@@ -128,6 +134,10 @@ def acceptance_json(session: Session, project_id: str) -> dict[str, Any] | None:
         .limit(1)
     )
     created_at = _utc(run.created_at)
+    from . import contract_history
+    head = contract_history.current(session, project_id) if contract_history.available(session) else None
+    if head and created_at < _utc(datetime.fromisoformat(head['createdAt'])):
+        return None
     if last_change and created_at < _utc(last_change):
         return None  # Preserve historical evidence; never present it for new code.
     return {

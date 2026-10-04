@@ -5,7 +5,7 @@ import type { ProjectDetail, VerifiedPublication, PublicationHistory, Publicatio
 import { Button } from "../components/ui/Button";
 import { ReleaseControls } from "./ReleaseControls";
 
-const timeLabel = (value: string) => new Date(value).toLocaleString("zh-CN");
+import { HistoryList } from "./HistoryList";
 
 export function ReleaseTab({ project }: { project: ProjectDetail }) {
   const [data, setData] = useState<{ publication: VerifiedPublication | null; history: PublicationHistory } | null>(null);
@@ -79,21 +79,14 @@ export function ReleaseTab({ project }: { project: ProjectDetail }) {
         <section className="space-y-m" aria-label="发布历史">
           <div><h3 className="font-medium text-neutral-95">发布历史</h3><p className="mt-xs text-sm text-neutral-60">恢复只切换网站内容，不会覆盖你正在编辑的草稿或回退业务数据。</p></div>
           {previewError ? <p role="alert" className="text-sm text-danger-strong">{previewError}</p> : null}
-          {!data.history.items.length ? <p className="rounded-xl border border-dashed border-neutral-20 p-l text-sm text-neutral-60">第一次发布后，快照会出现在这里。</p> :
-            <ol className="space-y-s">{data.history.items.map(item => <li key={item.releaseId} className="rounded-xl border border-neutral-12 bg-base-default p-m">
-              <div className="flex flex-wrap items-center justify-between gap-m">
-                <div><p className="text-sm font-medium text-neutral-95">版本 {item.version}{item.isLive ? " · 当前版本" : ""}</p><p className="mt-xs text-xs text-neutral-60">{timeLabel(item.createdAt)}</p>
-                  <p className="mt-xs text-xs text-neutral-60">{item.restoredFrom ? "从历史版本恢复" : "发布快照"} · {item.audience === "public" ? "公开" : "仅自己可见"}</p></div>
-                <div className="flex items-center gap-m">
-                  {item.previewUrl ? <a href={item.previewUrl} target="_blank" rel="noreferrer" className="text-sm text-brand-text hover:underline">预览</a>
-                    : <Button size="sm" variant="secondary" loading={previewBusy === item.releaseId}
-                        disabled={previewBusy !== null} onClick={() => void openSnapshot(item)}>预览</Button>}
-                  {!item.isLive ? <Button size="sm" variant="secondary" onClick={() => { setRestore(item); controls.current?.scrollIntoView({ behavior: "smooth", block: "start" }); }}>恢复此版本</Button> : null}
-                </div>
-              </div>
-            </li>)}</ol>}
-          <div className="flex gap-s">{cursor ? <Button size="sm" variant="secondary" onClick={() => setCursor(undefined)}>返回最新版本</Button> : null}
-            {data.history.nextCursor ? <Button size="sm" variant="secondary" onClick={() => setCursor(data.history.nextCursor ?? undefined)}>更早的版本</Button> : null}</div>
+          <HistoryList items={data.history.items.map(item => ({ ...item, id: item.releaseId, current: item.isLive,
+            description: `${item.restoredFrom ? "从历史版本恢复" : "发布快照"} · ${item.audience === "public" ? "公开" : "仅自己可见"}` }))}
+            empty="第一次发布后，快照会出现在这里。" previewBusy={previewBusy}
+            onPreview={item => void openSnapshot(item)}
+            previewLink={item => item.previewUrl ? <a href={item.previewUrl} target="_blank" rel="noreferrer" className="text-sm text-brand-text hover:underline">预览</a> : null}
+            onRestore={item => { setRestore(item); controls.current?.scrollIntoView({ behavior: "smooth", block: "start" }); }}
+            hasEarlier={Boolean(data.history.nextCursor)} onEarlier={() => setCursor(data.history.nextCursor ?? undefined)}
+            onLatest={cursor ? () => setCursor(undefined) : undefined} />
         </section>
       </> : null}
     </div>

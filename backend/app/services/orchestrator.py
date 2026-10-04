@@ -12,7 +12,7 @@ from typing import Any
 
 from sqlalchemy import select
 
-from .. import storage
+from .. import storage, contract_history
 from ..config import get_settings
 from ..db import session_scope
 from ..errors import ConflictError, OutOfCredits
@@ -86,10 +86,39 @@ class Orchestrator:
             project_id, self._plan(project_id, user_id), status="planning"
         )
 
-    async def start_build(self, project_id: str, user_id: str, note: str | None) -> str:
+    async def start_build(self, project_id: str, user_id: str, note: str | None,
+                          *, expected_version=...) -> str:
+        binding = {}
+        def register(session, job_id):
+            if expected_version is ...:
+                return  # Internal lifecycle callers; HTTP always pins an explicit head.
+            contract_history.lock(session)
+            contract_history.require_head(session, project_id, expected_version)
+            head = contract_history.ensure_baseline(session, project_id)
+            if head is None:
+                raise ConflictError('请先生成完整契约')
+            binding['document'] = head['document']
+            from sqlalchemy import text
+            session.execute(text('INSERT INTO contract_approvals VALUES (:job,:p,:snapshot,:time)'),
+                {'job': job_id, 'p': project_id, 'snapshot': head['id'],
+                 'time': datetime.now(timezone.utc).isoformat()})
         return self._spawn(
-            project_id, self._build(project_id, user_id, note, phase="build")
+            project_id, self._build(project_id, user_id, note, phase="build", binding=binding),
+            on_register=register,
         )
+
+    async def start_refine(self, project_id: str, user_id: str, message: str, expected_version) -> str:
+        binding = {}
+        def register(session, _job_id):
+            contract_history.lock(session)
+            contract_history.require_head(session, project_id, expected_version)
+            head = contract_history.ensure_baseline(session, project_id)
+            if head is None:
+                raise ConflictError('请先生成完整契约')
+            binding.update(head)
+            session.add(Message(project_id=project_id, role='user', content=message))
+        return self._spawn(project_id, self._refine(project_id, user_id, message, binding),
+                           status='planning', on_register=register)
 
     async def start_revise(self, project_id: str, user_id: str, message: str) -> str:
         return self._spawn(
@@ -241,13 +270,15 @@ class Orchestrator:
 
     # --------------------------------------------------------------- private
 
-    def _spawn(self, project_id: str, coro, *, status: str = "building") -> str:
+    def _spawn(self, project_id: str, coro, *, status: str = "building", on_register=None) -> str:
         if self.active(project_id):
             coro.close()
             raise ConflictError("该项目已有任务在运行")
         job_id = new_id()
         try:
             with session_scope() as session:
+                if on_register:
+                    on_register(session, job_id)
                 project = session.get(Project, project_id)
                 if project:
                     project.status = status
@@ -329,11 +360,10 @@ class Orchestrator:
         planned = [
             step["role"] for step in plan["steps"] if step["role"] in PLANNING_ORDER
         ]
-        order = [role for role in PLANNING_ORDER if role in planned] or list(
-            PLANNING_ORDER
-        )
+        order = [role for role in PLANNING_ORDER if role in planned or role in ('emma', 'bob')]
 
         transcript: list[tuple[str, str]] = [("Mike 的计划", mike.text)]
+        contract_text, architecture = '', ''
         for role in order:
             outcome = await self._turn(
                 project_id,
@@ -350,12 +380,39 @@ class Orchestrator:
                 return
             transcript.append((f"{role.capitalize()} 的产出", outcome.text))
             if role == "emma":
-                _apply_requirements(project_id, outcome.text)
+                contract_text = outcome.text
+            if role == 'bob':
+                architecture = outcome.text
 
+        _apply_requirements(project_id, contract_text, architecture=architecture)
         await self._finish(project_id, status="awaiting_approval")
 
+    async def _refine(self, project_id, user_id, message, binding):
+        await self._set_status(project_id, 'planning')
+        gateway = _gateway_for(user_id, planning=True)
+        prompt = ('这是契约微调，不执行代码构建。请输出修改后的完整契约 JSON，保留用户未要求删除的需求和检查，'
+                  '将本次修改纳入 requirements 和 scope，消除 outOfScope 中与新需求冲突的排除项。'
+                  '不要仅回复变更片段，也不要因为条数限制丢失现有需求。\n用户本次修改：' + message)
+        context = contract_history.build_context(binding['document'])
+        emma = await self._turn(project_id, user_id, role='emma', phase='refine', gateway=gateway,
+                                prompt=prompt, context=context, render=_render_contract)
+        if emma.failed:
+            await self._finish_turn_failure(project_id, emma, '契约微调失败，原版本已保留')
+            return
+        document = _contract_document(emma.text, architecture=binding['document']['architecture'], notes=binding['document']['notes'] + [message])
+        bob = await self._turn(project_id, user_id, role='bob', phase='refine', gateway=gateway,
+                               prompt='根据修改后的完整契约更新实现方案，明确处理用户新增要求，不写代码。\n' + message,
+                               context=contract_history.build_context(document))
+        if bob.failed:
+            await self._finish_turn_failure(project_id, bob, '契约设计更新失败，原版本已保留')
+            return
+        document['architecture'] = bob.text
+        with session_scope() as session:
+            contract_history.commit_snapshot(session, project_id, document, expected=binding['id'], note=message)
+        await self._finish(project_id, status='awaiting_approval')
+
     async def _build(
-        self, project_id: str, user_id: str, note: str | None, *, phase: str
+        self, project_id: str, user_id: str, note: str | None, *, phase: str, binding=None
     ) -> None:
         gateway = _gateway_for(user_id)
         prompt, _ = _project_prompt(project_id)
@@ -370,7 +427,7 @@ class Orchestrator:
             phase=phase,
             gateway=gateway,
             prompt=_build_prompt(project_id, prompt, note, phase=phase),
-            context=_squad_context(project_id),
+            context=contract_history.build_context(binding['document']) if binding else _squad_context(project_id),
         )
         if outcome.failed:
             await self._finish_turn_failure(project_id, outcome, '生成失败')
@@ -906,27 +963,23 @@ def _apply_plan(project_id: str, plan: dict[str, Any]) -> None:
         project.kind = plan["kind"]
 
 
-def _apply_requirements(project_id: str, text: str) -> None:
-    requirements = parsing.normalize_requirements(text)
-    if not requirements or any(not item["checks"] for item in requirements):
-        raise ValueError("契约没有有效验收检查，请重新规划")
+def _contract_document(text: str, *, architecture: str, notes=None):
+    data = parsing.extract_json_object(text)
+    if not isinstance(data, dict):
+        raise ValueError("契约未返回有效 JSON，原版本已保留")
+    document = {'requirements': data.get('requirements'), 'scope': data.get('scope', []),
+                'outOfScope': data.get('outOfScope', []), 'architecture': architecture,
+                'notes': notes or []}
+    contract_history.validate_document(document)
+    return document
+
+
+def _apply_requirements(project_id: str, text: str, *, architecture: str = '') -> None:
+    document = _contract_document(text, architecture=architecture)
     with session_scope() as session:
-        for existing in session.scalars(
-            select(Requirement).where(Requirement.project_id == project_id)
-        ):
-            session.delete(existing)
-        session.flush()
-        for position, item in enumerate(requirements):
-            session.add(
-                Requirement(
-                    project_id=project_id,
-                    key=item["key"],
-                    title=item["title"],
-                    detail=item["detail"],
-                    checks_json=json.dumps(item["checks"], ensure_ascii=False),
-                    position=position,
-                )
-            )
+        head = contract_history.current(session, project_id)
+        contract_history.commit_snapshot(session, project_id, document,
+            expected=head['id'] if head else None, note='初始契约' if head is None else '重新规划契约')
 
 
 def _context_block(parts: list[tuple[str, str]]) -> str:
@@ -938,6 +991,10 @@ def _context_block(parts: list[tuple[str, str]]) -> str:
 def _squad_context(project_id: str) -> str:
     """Everything Alex needs: the squad's notes plus the acceptance contract."""
     with session_scope() as session:
+        if contract_history.available(session):
+            head = contract_history.current(session, project_id)
+            if head:
+                return contract_history.build_context(head['document'])
         messages = session.scalars(
             select(Message)
             .where(

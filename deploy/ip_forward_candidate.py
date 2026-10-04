@@ -22,6 +22,7 @@ import ip_forward_stage
 import ip_forward_writers
 import paired_backup
 import protected_cutover
+import forward_schema
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 from app.ip_ingress import (IngressError, IpIngressConfig,
@@ -101,7 +102,7 @@ def _source_handoff(config: protected_cutover.CutoverConfig,
 def prepare(*, config: protected_cutover.CutoverConfig,
             stage: ip_forward_stage.ForwardStage,
             successor_source: Path, successor_revision: str,
-            successor_image: str) -> PreparedCandidate:
+            successor_image: str, target_schema: int = 18) -> PreparedCandidate:
     """Validate the captured pair, then create only private candidate inputs."""
     _require(getattr(os, "geteuid", lambda: -1)() == 0,
              "root_required")
@@ -138,12 +139,13 @@ def prepare(*, config: protected_cutover.CutoverConfig,
     _require(verified == restored
              and verified["manifestSha256"] == stage.captured.manifest_sha256
              and verified["oldImageId"] == stage.active["imageId"]
-             and verified["schemas"] == {"data": 18, "broker": 3},
+             and verified["schemas"] in ({"data": 18, "broker": 3}, {"data": 19, "broker": 3}),
              "forward_candidate_pair_mismatch")
-    protected_cutover._database(candidate / "data" / "atom.db", 18,
+    protected_cutover._database(candidate / "data" / "atom.db", forward_schema.version(candidate / "data" / "atom.db"),
                                 broker=False)
     protected_cutover._database(candidate / "broker" / "registry.db", 3,
                                 broker=True)
+    forward_schema.migrate_candidate(candidate / "data" / "atom.db", target=target_schema)
     publication = stage.publication
     routes = ip_forward_preflight._active_routes(
         candidate / "data" / "atom.db",

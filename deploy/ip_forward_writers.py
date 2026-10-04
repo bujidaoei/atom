@@ -14,6 +14,7 @@ import subprocess
 import time
 
 import protected_cutover
+import forward_schema
 
 
 STOP_ORDER = ("verifier", "preview", "public", "broker", "api")
@@ -131,7 +132,7 @@ def stop(config: protected_cutover.CutoverConfig,
             _run(config.docker, "container", "stop", "--time", str(GRACE[role]),
                  ids[role], timeout=GRACE[role] + 20)
             _identity(config, role, ids[role], running=False)
-        protected_cutover._database(candidate / "data" / "atom.db", 18, broker=False)
+        protected_cutover._database(candidate / "data" / "atom.db", forward_schema.version(candidate / "data" / "atom.db"), broker=False)
         protected_cutover._database(candidate / "broker" / "registry.db", 3,
                                     broker=True)
     except BaseException as failure:
@@ -169,7 +170,7 @@ def ensure_stopped(config: protected_cutover.CutoverConfig,
             _run(config.docker, "container", "stop", "--time",
                  str(GRACE[role]), ids[role], timeout=GRACE[role] + 20)
         _identity(config, role, ids[role], running=False)
-    protected_cutover._database(candidate / "data" / "atom.db", 18,
+    protected_cutover._database(candidate / "data" / "atom.db", forward_schema.version(candidate / "data" / "atom.db"),
                                 broker=False)
     protected_cutover._database(candidate / "broker" / "registry.db", 3,
                                 broker=True)

@@ -98,7 +98,10 @@ Respond with a single JSON object and nothing else:
   ]
 }
 
-Produce exactly 3 or 4 requirements, each with 1 to 3 checks. At least one
+For initial planning, prefer 3 or 4 requirements, each with 1 to 3 checks.
+For contract refinement, preserve every existing requirement unless the user
+explicitly removes it. Return the complete updated contract, adding requirements
+as needed (at most 128), and remove exclusions that conflict with the new request. At least one
 requirement overall must use a "flow" check so the build is proven interactive
 rather than static. Selectors must be ones you are instructing the engineer to
 create, so always use data-testid attributes.

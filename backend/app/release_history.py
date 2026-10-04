@@ -22,7 +22,7 @@ def publication_history(path, *, owner: str, project_id: str,
             db.row_factory = sqlite3.Row
             db.execute('PRAGMA query_only=ON')
             db.execute('BEGIN')
-            if db.execute('PRAGMA user_version').fetchone()[0] not in (16, 17, 18):
+            if db.execute('PRAGMA user_version').fetchone()[0] not in (16, 17, 18, 19):
                 raise VerificationError('publication_policy_schema_required')
             if db.execute('SELECT 1 FROM projects WHERE id=? AND user_id=?', (project_id, owner)).fetchone() is None:
                 raise VerificationError('release_not_found')

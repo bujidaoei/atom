@@ -49,7 +49,7 @@ def inspect_live_legacy(database: Path, published_root: Path, store: SnapshotSto
         db.row_factory = sqlite3.Row
         db.execute('PRAGMA query_only=ON')
         db.execute('BEGIN')
-        if db.execute('PRAGMA user_version').fetchone()[0] not in (17, 18):
+        if db.execute('PRAGMA user_version').fetchone()[0] not in (17, 18, 19):
             raise LegacyPublicationError('legacy_import_schema_required')
         row = db.execute('''SELECT p.slug,p.live,p.project_id,o.user_id,o.status,o.active_run_id,
                     w.id AS workspace_id,w.current_revision_id,w.active_attempt_id,

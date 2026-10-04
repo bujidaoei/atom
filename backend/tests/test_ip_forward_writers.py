@@ -50,6 +50,11 @@ class FakeDocker:
 
 
 class ForwardWritersTest(unittest.TestCase):
+    def setUp(self):
+        # This suite injects the whole database boundary, including its version
+        # read; actual v18/v19 files are covered by migration/preflight tests.
+        self.enterContext(patch.object(module.forward_schema, 'version', return_value=18))
+
     def setup(self, fake):
         config = SimpleNamespace(docker=Path("/usr/bin/docker"), api="atom-candidate",
                                  broker="atom-candidate-broker")

@@ -84,7 +84,7 @@ def _restore_unexposed(*, config: protected_cutover.CutoverConfig,
 def run_locked(*, config: protected_cutover.CutoverConfig,
                publication_file: Path, source_revision: str,
                successor_source: Path, successor_revision: str,
-               successor_image: str) -> dict[str, str]:
+               successor_image: str, target_schema: int = 18) -> dict[str, str]:
     """Run every ordinary phase while the caller retains the host lock."""
     stage = ip_forward_stage.stage_locked(
         config=config, publication_file=publication_file,
@@ -95,7 +95,7 @@ def run_locked(*, config: protected_cutover.CutoverConfig,
         prepared = ip_forward_candidate.prepare(
             config=config, stage=stage, successor_source=successor_source,
             successor_revision=successor_revision,
-            successor_image=successor_image)
+            successor_image=successor_image, target_schema=target_schema)
     except BaseException as failure:
         try:
             identity = ip_forward_identity.read(
@@ -183,7 +183,7 @@ def run_locked(*, config: protected_cutover.CutoverConfig,
 
 def run(*, config_file: Path, publication_file: Path,
         source_revision: str, successor_source: Path,
-        successor_revision: str, successor_image: str) -> dict[str, str]:
+        successor_revision: str, successor_image: str, target_schema: int = 18) -> dict[str, str]:
     """Acquire one exclusive host lock around every checked-to-mutated step."""
     config = protected_cutover.load_config(config_file)
     with protected_cutover.host_lock():
@@ -192,7 +192,7 @@ def run(*, config_file: Path, publication_file: Path,
             source_revision=source_revision,
             successor_source=successor_source,
             successor_revision=successor_revision,
-            successor_image=successor_image)
+            successor_image=successor_image, target_schema=target_schema)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -203,6 +203,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--successor-source", required=True, type=Path)
     parser.add_argument("--successor-revision", required=True)
     parser.add_argument("--successor-image", required=True)
+    parser.add_argument("--target-schema", type=int, choices=(18, 19), default=18)
     args = parser.parse_args(argv)
     try:
         result = run(
@@ -211,7 +212,7 @@ def main(argv: list[str] | None = None) -> int:
             source_revision=args.source_revision,
             successor_source=args.successor_source,
             successor_revision=args.successor_revision,
-            successor_image=args.successor_image)
+            successor_image=args.successor_image, target_schema=args.target_schema)
     except (TransactionError, protected_cutover.CutoverError,
             ip_forward_preflight.ForwardPreflightError,
             ip_forward_journal.JournalError,

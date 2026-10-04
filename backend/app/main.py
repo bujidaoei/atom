@@ -41,6 +41,8 @@ async def lifespan(_app: FastAPI):
         verify_schema(engine)
         if resources is None:
             Base.metadata.create_all(engine)
+            from .migrations.contract_history_v19 import initialize_development
+            initialize_development(engine)
         await orchestrator.reconcile()
         orchestrator.execution = resources
         _app.state.execution = resources

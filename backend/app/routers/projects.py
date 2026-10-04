@@ -9,7 +9,7 @@ from fastapi.responses import PlainTextResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
-from .. import storage
+from .. import storage, contract_history
 from ..config import get_settings
 from ..deps import CurrentUser, DbSession, OwnedProject
 from ..errors import AtomError
@@ -51,6 +51,15 @@ class CreateProject(BaseModel):
 
 class ApproveBody(BaseModel):
     note: str | None = Field(default=None, max_length=2000)
+    expectedVersion: str | None = Field(default=None, pattern=r'^[0-9a-f]{32}$')
+
+
+class ContractVersionBody(BaseModel):
+    expectedVersion: str | None = Field(pattern=r'^[0-9a-f]{32}$')
+
+
+class RefineContractBody(ContractVersionBody):
+    message: str = Field(min_length=1, max_length=4000)
 
 
 class ReviseBody(BaseModel):
@@ -197,11 +206,75 @@ async def approve(
     if (replay := command.replay()) is not None:
         return replay
     _guard(project, {"awaiting_approval"})
+    if body.note and body.note.strip():
+        raise HTTPException(422, '请先点击“继续微调”，将补充说明更新到契约后再开始构建')
     try:
-        job = await orchestrator.start_build(project.id, user.id, body.note)
+        job = await orchestrator.start_build(project.id, user.id, None, expected_version=body.expectedVersion)
+    except contract_history.ContractConflict as error:
+        raise HTTPException(409, str(error)) from error
+    except ValueError as error:
+        raise HTTPException(422, str(error)) from error
     except AtomError as error:
         raise HTTPException(error.status_code, error.detail) from error
     return command.save({"runId": job})
+
+
+_CONTRACT_IDLE = {'awaiting_approval', 'ready', 'error', 'cancelled', 'timed_out', 'interrupted'}
+
+
+@router.get('/{project_id}/contracts')
+def contract_versions(project: OwnedProject, session: DbSession,
+                      before: Annotated[int | None, Query(ge=1)] = None):
+    from fastapi.responses import JSONResponse
+    return JSONResponse(contract_history.history(session, project.id, before=before), headers={'Cache-Control': 'no-store'})
+
+
+@router.get('/{project_id}/contracts/{snapshot_id}')
+def contract_snapshot(snapshot_id: str, project: OwnedProject, session: DbSession):
+    from fastapi.responses import JSONResponse
+    item = contract_history.snapshot(session, project.id, snapshot_id)
+    if item is None:
+        raise HTTPException(404, '契约版本不存在')
+    return JSONResponse({'snapshot': item}, headers={'Cache-Control': 'no-store'})
+
+
+@router.post('/{project_id}/contracts/refine')
+async def refine_contract(body: RefineContractBody, project: OwnedProject, user: CurrentUser,
+                          session: DbSession, request: Request):
+    command = Command(session, project.id, request, 'contract.refine', body.model_dump())
+    if (replay := command.replay()) is not None:
+        return replay
+    _guard(project, _CONTRACT_IDLE)
+    if not body.message.strip():
+        raise HTTPException(422, '请填写微调说明')
+    try:
+        job = await orchestrator.start_refine(project.id, user.id, body.message.strip(), body.expectedVersion)
+    except contract_history.ContractConflict as error:
+        raise HTTPException(409, str(error)) from error
+    except ValueError as error:
+        raise HTTPException(422, str(error)) from error
+    except AtomError as error:
+        raise HTTPException(error.status_code, error.detail) from error
+    return command.save({'runId': job})
+
+
+@router.post('/{project_id}/contracts/{snapshot_id}/restore')
+async def restore_contract(snapshot_id: str, body: ContractVersionBody, project: OwnedProject,
+                           session: DbSession, request: Request):
+    command = Command(session, project.id, request, 'contract.restore', {'source': snapshot_id, **body.model_dump()})
+    if (replay := command.replay()) is not None:
+        return replay
+    _guard(project, _CONTRACT_IDLE)
+    try:
+        item = contract_history.restore(session, project.id, snapshot_id, expected=body.expectedVersion)
+        result = command.save({'snapshot': item})
+        session.commit()
+    except contract_history.ContractConflict as error:
+        raise HTTPException(409, str(error)) from error
+    except LookupError as error:
+        raise HTTPException(404, str(error)) from error
+    await bus.publish(project.id, 'project.updated', {'status': 'awaiting_approval'})
+    return result
 
 
 @router.post("/{project_id}/revise")

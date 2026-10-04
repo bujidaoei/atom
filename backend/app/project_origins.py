@@ -37,7 +37,7 @@ class ProjectOriginRepository:
         self.path = Path(path)
         self.first_port, self.last_port, self.timeout = first_port, last_port, lock_timeout
         try:
-            if verify(self.path) not in (17, 18):
+            if verify(self.path) not in (17, 18, 19):
                 raise ProjectOriginError('origin_schema_required')
         except MigrationError:
             raise ProjectOriginError('origin_schema_required') from None
@@ -59,7 +59,7 @@ class ProjectOriginRepository:
             db.execute('PRAGMA foreign_keys=ON')
             db.execute('PRAGMA synchronous=FULL')
             db.execute('BEGIN IMMEDIATE' if write else 'BEGIN')
-            if _schema(db) not in (17, 18):
+            if _schema(db) not in (17, 18, 19):
                 raise ProjectOriginError('origin_schema_required')
             yield db
             db.execute('COMMIT')
@@ -85,7 +85,7 @@ class ProjectOriginRepository:
                 or not isinstance(project_id, str) or not project_id or len(project_id) > 100):
             raise ProjectOriginError('invalid_origin_transaction')
         try:
-            if _schema(db) not in (17, 18):
+            if _schema(db) not in (17, 18, 19):
                 raise ProjectOriginError('origin_schema_required')
             return self._reserve_in_db(db, project_id)
         except sqlite3.IntegrityError:

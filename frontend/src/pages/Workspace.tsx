@@ -192,12 +192,12 @@ function ProjectWorkspace({ id }: { id: string | undefined }) {
     }
   }
 
-  async function approve(note: string) {
+  async function approve() {
     if (!id) return;
     setApproving(true);
     setApproveError(null);
     try {
-      await api.approve(id, note || undefined);
+      await api.approve(id, project?.contractVersion ?? null);
       await load(true);
     } catch (err) {
       setApproveError(errorMessage(err));
@@ -383,9 +383,9 @@ function ProjectWorkspace({ id }: { id: string | undefined }) {
         </div>
       ) : null}
 
-      <div className={`flex min-h-0 flex-1 flex-col md:flex-row md:overflow-hidden ${tab === "release" ? "overflow-hidden" : "overflow-y-auto"}`}>
+      <div className={`flex min-h-0 flex-1 flex-col md:flex-row md:overflow-hidden ${(tab === "release" || tab === "contract") ? "overflow-hidden" : "overflow-y-auto"}`}>
         <section
-          className={`${tab === "release" ? "hidden md:flex" : "flex"} min-h-[420px] flex-col border-b border-neutral-12 md:min-h-0 md:w-[46%] md:max-w-[560px] md:border-b-0 md:border-r`}
+          className={`${(tab === "release" || tab === "contract") ? "hidden md:flex" : "flex"} min-h-[420px] flex-col border-b border-neutral-12 md:min-h-0 md:w-[46%] md:max-w-[560px] md:border-b-0 md:border-r`}
           aria-label="对话"
         >
           <Conversation
@@ -407,7 +407,7 @@ function ProjectWorkspace({ id }: { id: string | undefined }) {
               minRows={1}
               placeholder={
                 project.status === "awaiting_approval"
-                  ? "对契约有意见？直接说，squad 会重新规划。"
+                  ? "请在契约页填写微调说明。"
                   : "接着改：例如把按钮改成绿色。"
               }
               meta={
@@ -421,7 +421,7 @@ function ProjectWorkspace({ id }: { id: string | undefined }) {
           </div>
         </section>
 
-        <section className={`flex min-w-0 flex-1 flex-col md:min-h-0 ${tab === "release" ? "min-h-0" : "min-h-[520px]"}`} aria-label="产物面板">
+        <section className={`flex min-w-0 flex-1 flex-col md:min-h-0 ${(tab === "release" || tab === "contract") ? "min-h-0" : "min-h-[520px]"}`} aria-label="产物面板">
           <div
             role="tablist"
             aria-label="产物视图"
@@ -496,11 +496,15 @@ function ProjectWorkspace({ id }: { id: string | undefined }) {
               className="flex min-h-0 flex-1 flex-col"
             >
               <ContractTab
+                key={project.id}
                 status={project.status}
                 requirements={project.requirements}
                 acceptance={project.acceptance}
                 isolated={project.isolatedPreviewEnabled}
-                verification={verification}
+                verification={project.contractDigest && verification?.contractDigest !== project.contractDigest ? null : verification}
+                projectId={project.id}
+                contract={project.contract}
+                onChanged={() => load(true)}
                 onApprove={approve}
                 approving={approving}
                 approveError={approveError}

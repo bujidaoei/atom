@@ -88,7 +88,7 @@ class PreviewAccessRepository:
             db.row_factory = None
             version = _schema(db)
             db.row_factory = sqlite3.Row
-            if version != 18:
+            if version not in (18, 19):
                 raise PreviewAccessError('preview_schema_required')
             yield db
             db.execute('COMMIT')

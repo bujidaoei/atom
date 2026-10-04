@@ -31,7 +31,7 @@ class AuditArchiving:
     @staticmethod
     def _schema(db):
         # The owning repository transaction has already checked exact DDL and migration hashes.
-        if db.execute('PRAGMA user_version').fetchone()[0] not in (9, 10, 13, 14, 15, 16, 17, 18):
+        if db.execute('PRAGMA user_version').fetchone()[0] not in (9, 10, 13, 14, 15, 16, 17, 18, 19):
             raise ArchiveError('archive_schema_required')
 
     def archive(self, *, archive_id, operator_id, policy_id, expected_generation, after=0, upper=None, expected_context=None):
@@ -134,7 +134,7 @@ class AuditArchiving:
                 return dict(old)
         def prepare():
             with self.repository._transaction(read_only=True) as db:
-                if db.execute('PRAGMA user_version').fetchone()[0] not in (10, 13, 14, 15, 16, 17, 18):
+                if db.execute('PRAGMA user_version').fetchone()[0] not in (10, 13, 14, 15, 16, 17, 18, 19):
                     raise ArchiveError('isolated_recovery_schema_required')
                 row = db.execute('SELECT * FROM security_audit_archives WHERE archive_id=?', (archive_id,)).fetchone()
                 if row is None or row['archive_store_id'] != self.store_id:
@@ -152,7 +152,7 @@ class AuditArchiving:
         # Short bounded synchronous transaction: no network/file IO and no await after admission.
         # Cancellation cannot detach an unowned background write; callers can inspect/replay by ID.
         with self.repository._transaction() as db:
-            if db.execute('PRAGMA user_version').fetchone()[0] not in (10, 13, 14, 15, 16, 17, 18):
+            if db.execute('PRAGMA user_version').fetchone()[0] not in (10, 13, 14, 15, 16, 17, 18, 19):
                 raise ArchiveError('isolated_recovery_schema_required')
             current = db.execute('SELECT * FROM security_audit_archives WHERE archive_id=?', (archive_id,)).fetchone()
             if current is None or dict(current) != row:
@@ -199,7 +199,7 @@ class AuditArchiving:
             receipts = db.execute('SELECT count(*) FROM security_audit_archive_recoveries WHERE archive_id=?',(archive_id,)).fetchone()[0]
             isolated = (db.execute('SELECT count(*) FROM security_audit_isolated_recoveries WHERE archive_id=?',
                                   (archive_id,)).fetchone()[0]
-                        if db.execute('PRAGMA user_version').fetchone()[0] in (10, 13, 14, 15, 16, 17, 18) else None)
+                        if db.execute('PRAGMA user_version').fetchone()[0] in (10, 13, 14, 15, 16, 17, 18, 19) else None)
         continuation = dict(policy_id=row['policy_id'],expected_generation=row['policy_generation'],after=last,
             upper=row['upper_sequence'],expected_context=row['context_sha256']) if more else None
         result = dict(archive=row,last_sequence=last,continuation=continuation,recovery_receipts=receipts,deletion_authorized=False)

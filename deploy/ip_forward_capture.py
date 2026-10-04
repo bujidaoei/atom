@@ -20,6 +20,7 @@ import ip_forward_preflight
 import ip_forward_writers
 import paired_backup
 import protected_cutover
+import forward_schema
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 from app.ip_ingress import (IngressError, IpIngressConfig,
@@ -109,7 +110,7 @@ def _verify_cos(*, config: protected_cutover.CutoverConfig, candidate: Path,
         "-m", "app.artifact_transfer", "--database", "/data/atom.db",
         "--verify-only"], timeout=600)
     digest = result.get("inventory_sha256")
-    _require(result.get("schema_version") == 18
+    _require(result.get("schema_version") == forward_schema.version(candidate / "data" / "atom.db")
              and result.get("artifact_count") == artifacts
              and type(result.get("artifact_bytes")) is int
              and (result["artifact_bytes"] > 0 if artifacts else
@@ -167,7 +168,7 @@ def capture(*, config: protected_cutover.CutoverConfig,
         _require(actual_routes == routes, "forward_origin_ledger_changed")
         caddy_digest = _maintenance(config, source=source, caddy_id=ids["caddy"],
                                     publication=publication, routes=routes)
-        protected_cutover._database(source / "data" / "atom.db", 18, broker=False)
+        protected_cutover._database(source / "data" / "atom.db", forward_schema.version(source / "data" / "atom.db"), broker=False)
         protected_cutover._database(source / "broker" / "registry.db", 3,
                                     broker=True)
     except (ip_cutover_apply.ApplyError, IngressError,
@@ -183,7 +184,7 @@ def capture(*, config: protected_cutover.CutoverConfig,
     try:
         captured = paired_backup.capture(data=source / "data", broker=source / "broker",
             caddy=source / "caddy" / "Caddyfile", destination=backup,
-            image_id=image, app_schema=18, broker_schema=3)
+            image_id=image, app_schema=forward_schema.version(source / "data" / "atom.db"), broker_schema=3)
         checked = paired_backup.verify(backup)
         _require(captured == checked and checked.get("status") == "verified",
                  "forward_backup_mismatch")

@@ -122,6 +122,9 @@ export type RaceSummary = {
 };
 
 export type ProjectDetail = ProjectSummary & {
+  contractVersion: string | null;
+  contractDigest: string | null;
+  contract: ContractSnapshot | null;
   eventSeq: number;
   prompt: string;
   messages: Message[];
@@ -137,6 +140,16 @@ export type ProjectDetail = ProjectSummary & {
   revisionAdoptionAvailable: boolean;
   isolatedPreviewEnabled: boolean;
   race: RaceSummary | null;
+};
+
+export type ContractDocument = {
+  requirements: Requirement[]; scope: string[]; outOfScope: string[]; architecture: string; notes: string[];
+};
+export type ContractSnapshot = {
+  id: string; version: number; createdAt: string; note: string; sourceId: string | null; document: ContractDocument;
+};
+export type ContractHistory = {
+  currentId: string | null; items: Omit<ContractSnapshot, 'document'>[]; nextCursor: number | null;
 };
 
 export type VerifiedPublication = {

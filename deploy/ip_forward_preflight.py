@@ -25,6 +25,7 @@ import ip_cutover_rollback
 import ip_forward_identity
 import ip_forward_journal
 import protected_cutover
+import forward_schema
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 from app.ip_ingress import IngressError, IpIngressConfig, render_ip_routes  # noqa: E402
@@ -130,7 +131,7 @@ def _publication(path: Path, config: protected_cutover.CutoverConfig,
 
 def _active_routes(database: Path, first: int, last: int, *,
                    require_idle: bool = True) -> tuple[OriginRoute, ...]:
-    protected_cutover._database(database, 18, broker=False,
+    protected_cutover._database(database, forward_schema.version(database), broker=False,
                                 require_idle=require_idle)
     try:
         with closing(sqlite3.connect(database.as_uri() + "?mode=ro", uri=True,

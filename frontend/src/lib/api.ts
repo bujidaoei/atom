@@ -13,6 +13,8 @@ import type {
   VerifiedPublication,
   PublicationHistory,
   VerificationStatus,
+  ContractSnapshot,
+  ContractHistory,
 } from "./types";
 
 /**
@@ -222,11 +224,23 @@ export const api = {
   // ---- main loop
   plan: (id: string, key = commandKey()) =>
     request<{ runId: string }>(`/api/projects/${id}/plan`, { method: "POST", commandKey: key }),
-  approve: (id: string, note?: string) =>
+  approve: (id: string, expectedVersion: string | null) =>
     request<{ runId: string }>(`/api/projects/${id}/approve`, {
       method: "POST",
-      body: note ? { note } : {},
+      body: { expectedVersion },
       commandKey: commandKey(),
+    }),
+  refineContract: (id: string, message: string, expectedVersion: string | null) =>
+    request<{ runId: string }>(`/api/projects/${id}/contracts/refine`, {
+      method: 'POST', body: { message, expectedVersion }, commandKey: commandKey(),
+    }),
+  contractHistory: (id: string, before?: number, signal?: AbortSignal) =>
+    request<ContractHistory>(`/api/projects/${id}/contracts${before ? `?before=${before}` : ''}`, { signal }),
+  contractSnapshot: (id: string, version: string, signal?: AbortSignal) =>
+    request<{ snapshot: ContractSnapshot }>(`/api/projects/${id}/contracts/${version}`, { signal }),
+  restoreContract: (id: string, version: string, expectedVersion: string | null) =>
+    request<{ snapshot: ContractSnapshot }>(`/api/projects/${id}/contracts/${version}/restore`, {
+      method: 'POST', body: { expectedVersion }, commandKey: commandKey(),
     }),
   revise: (id: string, message: string) =>
     request<{ runId: string }>(`/api/projects/${id}/revise`, {
