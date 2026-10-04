@@ -128,3 +128,34 @@ def test_two_distinct_revisions_keep_all_resource_bytes_and_reject_invalid_paths
             assert client.get(paths[0] + 'app.js').status_code == 404
         for tail in ('%2e%2e/app.js', '%252e%252e/app.js', '%2fapp.js', '%5capp.js'):
             assert client.get(paths[1] + tail).status_code == 404
+
+
+def test_replacement_after_handoff_collection_remains_source_bound(views, monkeypatch):
+    import time
+    access, _store, _hosts, request = views
+    now = int(time.time())
+    monkeypatch.setattr('app.preview_access.time.time', lambda: now)
+    grant = access.issue(**request)
+    session = access.exchange(project_id='project', handoff=grant.secret)
+    now += 61
+    access.issue(**request)  # Collects expired one-use handoff, not its valid session.
+    with sqlite3.connect(access.path) as db:
+        assert db.execute('SELECT count(*) FROM preview_handoffs WHERE token_hash=?', (grant.view_id,)).fetchone()[0] == 0
+    other = AccessRepository(access.path).create_console_session(user_id='user', lifetime_seconds=900)
+    access.issue(**{**request, 'source_session_id': other.id}, replace_view_id=grant.view_id)
+    assert access.authorize(project_id='project', session_secret=session.secret, view_id=grant.view_id)
+    access.issue(**request, replace_view_id=grant.view_id)
+    with pytest.raises(PreviewAccessError):
+        access.authorize(project_id='project', session_secret=session.secret, view_id=grant.view_id)
+
+
+def test_revoked_source_sessions_do_not_consume_new_login_capacity(views):
+    access, _store, _hosts, request = views
+    for _ in range(8):
+        grant = access.issue(**request)
+        access.exchange(project_id='project', handoff=grant.secret)
+    sessions = AccessRepository(access.path)
+    sessions.revoke_console_session(user_id='user', session_id=request['source_session_id'])
+    renewed = sessions.create_console_session(user_id='user', lifetime_seconds=900)
+    grant = access.issue(**{**request, 'source_session_id': renewed.id})
+    assert access.exchange(project_id='project', handoff=grant.secret).revision_id == request['revision_id']

@@ -13,7 +13,7 @@ Pass before and after design: clean worktree from fetched main; unrelated work p
 
 ## Design
 1. `preview_paths.py` owns canonical view namespace and root-resource redirects. Public selector is existing handoff hash, never a credential. Reject noncanonical paths/traversal/reserved generated paths.
-2. Repository authorization matches selector plus secret/project/revision/source session. An explicit owner/source-scoped replacement revokes only the previous view atomically with issuance. Reuse v18 tables and quotas.
+2. Repository authorization matches selector plus secret/project/revision/source session. An explicit owner/source-scoped replacement revokes only the previous view atomically with issuance. Reuse v18 tables and quotas; authorize session replacement independently of collected handoff rows and exclude revoked source sessions from active quota (CR-002).
 3. Port-specific `__Secure-atom_preview_<port>` cookie: Secure/HttpOnly/Lax/no Domain; Path=`/_atom/view/<selector>/`. Path limits ambient Cookie header growth, not authority; console proof remains essential across same-IP ports.
 4. Root-relative requests redirect using an exact same-origin scoped Referer. Redirect serves no content; destination independently authenticates. Missing/ambiguous selector denies. Content uses same-origin referrers; no generated source rewriting.
 5. Trusted bootstrap consumes grant, checks authenticated entry availability, emits UI-only status and navigates to scoped root. Trusted resume rechecks access on refresh. Parent validates source window, origin, selector, message shape; status never authorizes content or functional verification.

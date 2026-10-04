@@ -34,3 +34,6 @@ Independent test: real invalid JavaScript triggers bounded diagnostic repair and
 
 ## Dependencies and execution
 T001–T002 precede foundation. T004 precedes T005–T007; T008–T009 depend on protocol and precede T010–T011. CR-001 research T003 is independent of preview implementation; T012 precedes T013–T015. All functional/security gates precede T016–T019. Research can run alongside independent local work; shared-file edits remain sequential. No unchecked implementation, simulated business result or unexecuted test is accepted.
+
+## Change CR-002 — access lifecycle acceptance finding
+- [x] T020 [US2/US3] Replace sessions using their own scope after handoff collection; count only live source sessions for quota. Add real repository regressions and synchronize FR-015/research/evidence. Re-run final exact-image release gate.

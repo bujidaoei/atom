@@ -154,13 +154,19 @@ class PreviewAccessRepository:
                     if prior['consumed_at'] is None and prior['created_at'] <= now < prior['expires_at']:
                         db.execute('UPDATE preview_handoffs SET consumed_at=? WHERE token_hash=?',
                                    (now, replace_view_id))
-                    db.execute('UPDATE preview_sessions SET revoked_at=? WHERE handoff_hash=? '
-                               'AND revoked_at IS NULL', (now, replace_view_id))
+                # Sessions outlive their one-use handoff rows. Authorize replacement
+                # against the session itself after handoff garbage collection.
+                db.execute('UPDATE preview_sessions SET revoked_at=? WHERE handoff_hash=? '
+                           'AND project_id=? AND owner_id=? AND source_session_id=? '
+                           'AND revoked_at IS NULL',
+                           (now, replace_view_id, project_id, owner_id, source_session_id))
             db.execute('DELETE FROM preview_sessions WHERE expires_at<=?', (now,))
             db.execute('DELETE FROM preview_handoffs WHERE expires_at<=?', (now,))
-            active = db.execute('''SELECT count(*) FROM preview_handoffs
-                WHERE project_id=? AND owner_id=? AND consumed_at IS NULL AND expires_at>?''',
-                (project_id, owner_id, now)).fetchone()[0]
+            active = db.execute('''SELECT count(*) FROM preview_handoffs h
+                JOIN console_sessions s ON s.id=h.source_session_id AND s.user_id=h.owner_id
+                WHERE h.project_id=? AND h.owner_id=? AND h.consumed_at IS NULL AND h.expires_at>?
+                AND s.revoked_at IS NULL AND s.created_at<=? AND s.expires_at>?''',
+                (project_id, owner_id, now, now, now)).fetchone()[0]
             if active >= 32:
                 raise PreviewAccessError('preview_capacity')
             expires = min(now + 60, source['expires_at'])
@@ -191,9 +197,11 @@ class PreviewAccessRepository:
                                   session_id=row['source_session_id'], now=now)
             self._revision(db, owner_id=row['owner_id'], project_id=project_id,
                            revision_id=row['revision_id'], require_selected=False)
-            count = db.execute('''SELECT count(*) FROM preview_sessions
-                WHERE project_id=? AND owner_id=? AND revoked_at IS NULL AND expires_at>?''',
-                (project_id, row['owner_id'], now)).fetchone()[0]
+            count = db.execute('''SELECT count(*) FROM preview_sessions p
+                JOIN console_sessions s ON s.id=p.source_session_id AND s.user_id=p.owner_id
+                WHERE p.project_id=? AND p.owner_id=? AND p.revoked_at IS NULL AND p.expires_at>?
+                AND s.revoked_at IS NULL AND s.created_at<=? AND s.expires_at>?''',
+                (project_id, row['owner_id'], now, now, now)).fetchone()[0]
             if count >= 8:
                 raise PreviewAccessError('preview_capacity')
             expires = min(now + 900, source['expires_at'])

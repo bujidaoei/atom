@@ -77,6 +77,8 @@ Acceptance: reproduce the reported parser failure from real bytes where availabl
 - **FR-013**: Syntax failures MUST be diagnosed from actual files and support bounded, revision-aware repair with cancellation/deadline enforcement; validation cannot be bypassed or converted to a false success.
 - **FR-014**: Failure messages MUST identify file/line/actionable cause while keeping temporary infrastructure paths and raw stacks out of the main user-facing message.
 
+- **FR-015**: Revoked/expired source sessions MUST NOT occupy active preview quotas; explicit source-bound replacement MUST work after one-use handoff collection.
+
 ### Key Entities
 
 - **Preview view**: one owner-authorized saved revision, access lifetime and independent resource namespace.
