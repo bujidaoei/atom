@@ -87,12 +87,11 @@ async def main_test():
         assert detail.status_code==200,detail.text
         project=detail.json()['project']
         assert project['legacyPublicationAvailable'] is False
-        assert project['legacyAdoptionAvailable'] is False
+        assert project['revisionAdoptionAvailable'] is False
         denied=await client.post('/api/projects/p/publish',headers=headers)
         assert denied.status_code==409
         denied_adoption=await client.post('/api/projects/p/race/heat/adopt',headers=headers)
-        assert denied_adoption.status_code==409
-        assert '旧目录复制' in denied_adoption.json()['detail']
+        assert denied_adoption.status_code in (403,404)
         with session_scope() as s:
             assert s.get(Race,'race').winner_heat_id is None
             assert s.get(Project,'p').status=='ready'

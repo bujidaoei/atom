@@ -1,9 +1,11 @@
 """Dependency-free deployment preflight tests for Windows and target Linux."""
 
 import importlib.util
+from contextlib import closing
 import json
 import os
 from pathlib import Path
+import sqlite3
 import stat
 import sys
 import tempfile
@@ -37,6 +39,30 @@ def config(root: Path) -> dict:
 
 
 class ProtectedCutoverPreflightTest(unittest.TestCase):
+    def test_live_origin_integrity_keeps_upgrade_idle_guard(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            database = Path(temporary) / "atom.db"
+            with closing(sqlite3.connect(database)) as db:
+                db.execute("PRAGMA user_version=18")
+                db.execute("CREATE TABLE projects (active_run_id TEXT)")
+                db.execute("CREATE TABLE revision_attempts (state TEXT)")
+                db.execute("INSERT INTO projects VALUES ('running')")
+                db.execute("INSERT INTO revision_attempts VALUES ('open')")
+                db.commit()
+            with self.assertRaisesRegex(cutover.CutoverError, "active_project"):
+                cutover._database(database, 18, broker=False)
+            cutover._database(database, 18, broker=False, require_idle=False)
+            broker = Path(temporary) / "broker.db"
+            with closing(sqlite3.connect(broker)) as db:
+                db.execute("PRAGMA user_version=3")
+                db.execute("CREATE TABLE attempts (state TEXT)")
+                db.execute("INSERT INTO attempts VALUES ('running')")
+                db.commit()
+            with self.assertRaisesRegex(cutover.CutoverError,
+                                        "live_broker_attempt"):
+                cutover._database(broker, 3, broker=True)
+            cutover._database(broker, 3, broker=True, require_idle=False)
+
     def test_config_rejects_unknown_fields_overlap_and_invalid_profile(self):
         with tempfile.TemporaryDirectory() as temporary:
             valid = config(Path(temporary))

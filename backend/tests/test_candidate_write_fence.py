@@ -1,0 +1,135 @@
+"""Logical candidate fingerprints distinguish data writes from page layout."""
+
+from contextlib import closing
+import importlib.util
+import json
+import os
+from pathlib import Path
+import sqlite3
+import sys
+import tempfile
+import unittest
+
+
+DEPLOY = Path(__file__).resolve().parents[2] / "deploy"
+sys.path.insert(0, str(DEPLOY))
+spec = importlib.util.spec_from_file_location(
+    "candidate_write_fence", DEPLOY / "candidate_write_fence.py")
+fence = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(fence)
+
+
+class CandidateWriteFenceTest(unittest.TestCase):
+    def test_layout_changes_do_not_look_like_user_writes(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            data = Path(temporary).resolve()
+            path = data / "atom.db"
+            with closing(sqlite3.connect(path)) as db, db:
+                db.execute("CREATE TABLE content(id INTEGER PRIMARY KEY, body BLOB)")
+                db.execute("INSERT INTO content VALUES (1, ?)", (b"real-content",))
+                db.executemany("INSERT INTO content VALUES (?, ?)",
+                               [(index, b"padding" * 100) for index in range(2, 200)])
+                db.execute("DELETE FROM content WHERE id>1")
+            original = fence.database_fingerprint(path)
+            with closing(sqlite3.connect(path)) as db, db:
+                db.execute("VACUUM")
+            self.assertEqual(fence.database_fingerprint(path), original)
+            with closing(sqlite3.connect(path)) as db, db:
+                db.execute("UPDATE content SET body=? WHERE id=1", (b"changed",))
+            self.assertNotEqual(fence.database_fingerprint(path), original)
+
+    def test_state_fingerprint_covers_files_and_schema(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            data = Path(temporary).resolve()
+            with closing(sqlite3.connect(data / "atom.db")) as db, db:
+                db.execute("CREATE TABLE items(id INTEGER PRIMARY KEY, note TEXT)")
+                db.execute("INSERT INTO items VALUES (1, 'saved')")
+            artifact = data / "published" / "index.html"
+            artifact.parent.mkdir()
+            artifact.write_text("first", encoding="utf-8")
+            baseline = fence.state_fingerprint(data)
+            artifact.write_text("second", encoding="utf-8")
+            self.assertNotEqual(fence.state_fingerprint(data), baseline)
+            artifact.write_text("first", encoding="utf-8")
+            self.assertEqual(fence.state_fingerprint(data), baseline)
+            with closing(sqlite3.connect(data / "atom.db")) as db, db:
+                db.execute("CREATE TABLE new_user_state(id INTEGER PRIMARY KEY)")
+            self.assertNotEqual(fence.state_fingerprint(data), baseline)
+
+    def test_refuses_symlinked_candidate_files(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            data = Path(temporary).resolve()
+            with closing(sqlite3.connect(data / "atom.db")) as db, db:
+                db.execute("CREATE TABLE content(id INTEGER PRIMARY KEY)")
+            target = data / "target.txt"
+            target.write_text("value", encoding="utf-8")
+            link = data / "linked.txt"
+            try:
+                link.symlink_to(target)
+            except OSError:
+                self.skipTest("symlink creation is unavailable")
+            with self.assertRaisesRegex(fence.FenceError, "candidate_symlink_present"):
+                fence.state_fingerprint(data)
+
+    def test_candidate_covers_broker_rows_but_not_process_lease(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            candidate = Path(temporary).resolve()
+            data = candidate / "data"
+            broker = candidate / "broker"
+            data.mkdir()
+            broker.mkdir()
+            with closing(sqlite3.connect(data / "atom.db")) as db, db:
+                db.execute("CREATE TABLE projects(id INTEGER PRIMARY KEY)")
+            with closing(sqlite3.connect(broker / "registry.db")) as db, db:
+                db.execute("CREATE TABLE operations(id INTEGER PRIMARY KEY, state TEXT)")
+                db.execute("INSERT INTO operations VALUES (1, 'complete')")
+            lease = broker / "registry.lease"
+            lease.write_text("0", encoding="ascii")
+            baseline = fence.candidate_fingerprint(candidate)
+            lease.write_text("1", encoding="ascii")
+            self.assertEqual(fence.candidate_fingerprint(candidate), baseline)
+            with closing(sqlite3.connect(broker / "registry.db")) as db, db:
+                db.execute("INSERT INTO operations VALUES (2, 'queued')")
+            self.assertNotEqual(fence.candidate_fingerprint(candidate), baseline)
+
+    @unittest.skipUnless(hasattr(os, "geteuid") and os.geteuid() == 0,
+                         "root-private baseline requires root")
+    def test_sealed_baseline_detects_real_business_write_and_rejects_tampering(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            root.chmod(0o700)
+            candidate = root / "candidate"
+            (candidate / "data").mkdir(parents=True)
+            (candidate / "broker").mkdir()
+            with closing(sqlite3.connect(candidate / "data" / "atom.db")) as db, db:
+                db.execute("CREATE TABLE releases(id INTEGER PRIMARY KEY, revision TEXT)")
+                db.execute("INSERT INTO releases VALUES (1, 'initial')")
+            with closing(sqlite3.connect(candidate / "broker" / "registry.db")) as db, db:
+                db.execute("CREATE TABLE operations(id INTEGER PRIMARY KEY)")
+            revision = "a" * 40
+            image = "sha256:" + "b" * 64
+            baseline_path = root / "baseline.json"
+            digest = fence.capture_baseline(
+                baseline_path, candidate_directory=candidate,
+                revision=revision, candidate_image=image)
+            identity = dict(path=baseline_path, candidate_directory=candidate,
+                            revision=revision, candidate_image=image,
+                            expected_digest=digest)
+            self.assertTrue(fence.compare_baseline(**identity))
+            with closing(sqlite3.connect(candidate / "data" / "atom.db")) as db, db:
+                db.execute("UPDATE releases SET revision='published' WHERE id=1")
+            self.assertFalse(fence.compare_baseline(**identity))
+            with self.assertRaisesRegex(fence.FenceError,
+                                        "baseline_identity_mismatch"):
+                fence.read_baseline(**{**identity, "expected_digest": "0" * 64})
+            record = json.loads(baseline_path.read_text("utf-8"))
+            record["stateSha256"] = "0" * 64
+            baseline_path.write_text(json.dumps(record), encoding="utf-8")
+            baseline_path.chmod(0o600)
+            with self.assertRaisesRegex(fence.FenceError,
+                                        "baseline_identity_mismatch"):
+                fence.compare_baseline(**identity)
+
+
+if __name__ == "__main__":
+    unittest.main()

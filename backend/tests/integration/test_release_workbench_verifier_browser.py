@@ -66,6 +66,7 @@ def test_ui_runs_real_private_verification_and_publishes(
     migrate(path, tmp_path / 'before-ui-v13.db', target_version=13)
     migrate(path, tmp_path / 'before-ui-v14.db', target_version=14)
     migrate(path, tmp_path / 'before-ui-v15.db', target_version=15)
+    migrate(path, tmp_path / 'before-ui-v16.db', target_version=16)
     payload, artifact = snapshot(b'<html>heat</html>')
     assert artifact == receipt.artifact
     root = tmp_path / 'artifacts'
@@ -181,35 +182,29 @@ def test_ui_runs_real_private_verification_and_publishes(
                 browser.close()
                 raise AssertionError(diagnostic) from error
             page.get_by_role('tab', name='发布', exact=True).click()
-            panel = page.get_by_label('发布工作台')
-            controls = panel.get_by_label('可信发布操作')
-            controls.get_by_role('button', name='预约当前修订验证').click()
-            controls.get_by_role('button', name='执行已预约验证').wait_for()
-            reserved = VerificationRepository(path).latest(owner='user', project_id='project')
-            assert reserved is not None and reserved.result is None
-            controls.get_by_role('button', name='执行已预约验证').click()
-            controls.get_by_text('当前修订已有完整通过的可信验证。').wait_for(timeout=60000)
+            panel = page.get_by_label('发布与历史', exact=True)
+            controls = panel.get_by_label('发布操作')
+            controls.get_by_role('button', name='检查功能', exact=True).click()
+            controls.get_by_text('当前版本已通过检查。').wait_for(timeout=60000)
             result = VerificationRepository(path).latest(owner='user', project_id='project')
-            assert result is not None and result.request.id == reserved.request.id
-            assert result.result is not None and result.result.outcome == 'passed'
+            assert result is not None and result.result is not None and result.result.outcome == 'passed'
             with sqlite3.connect(path) as db:
                 assert db.execute('SELECT count(*) FROM verification_attestations '
-                                  'WHERE request_id=?', (reserved.request.id,)).fetchone() == (1,)
+                                  'WHERE request_id=?', (result.request.id,)).fetchone() == (1,)
 
-            controls.get_by_role('combobox', name='发布受众').select_option(audience)
-            controls.get_by_role('textbox', name='发布短链接').fill('verified-ui-site')
-            controls.get_by_role('checkbox').first.check()
-            controls.get_by_role('button', name='发布经验证版本').click()
-            panel.get_by_role('heading', name='线上版本', exact=True).wait_for()
+            controls.get_by_role('combobox', name='谁可以访问').select_option(audience)
+            controls.get_by_role('textbox', name='网站链接名称').fill('verified-ui-site')
+            controls.get_by_role('button', name='发布网站').click()
+            panel.get_by_role('heading', name='当前已发布', exact=True).wait_for()
             publication = ReleaseRepository(path).current(owner='user', project_id='project')
             assert publication is not None and publication.live
-            assert publication.verification_id == reserved.request.id
+            assert publication.verification_id == result.request.id
             assert publication.audience == audience and publication.slug == 'verified-ui-site'
             page.reload(wait_until='domcontentloaded')
             page.get_by_role('tab', name='发布', exact=True).click()
-            page.get_by_label('发布工作台').get_by_text(publication.release_id, exact=True).wait_for()
+            page.get_by_label('发布与历史', exact=True).get_by_role('heading', name='当前已发布', exact=True).wait_for()
             assert (200, ORIGIN + '/atom/api/projects/project/verifications/' +
-                    reserved.request.id + '/run') in responses
+                    result.request.id + '/run') in responses
             assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
             assert not failures, failures
             page.screenshot(path=str(tmp_path / f'verifier-ui-{viewport["width"]}.png'),

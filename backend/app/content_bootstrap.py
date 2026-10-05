@@ -1,6 +1,8 @@
 """Top-level browser bootstrap with a fixed configured console destination."""
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from ipaddress import ip_address
+import re
 from urllib.parse import urlencode
 
 from starlette.responses import Response
@@ -21,15 +23,27 @@ BOOTSTRAP_HEADERS = {
 @dataclass(frozen=True)
 class ContentNavigation:
     console_origin: str
+    console_base_path: str = ''
 
     def __post_init__(self):
         value = self.console_origin
         if not isinstance(value, str) or not value.startswith('https://'):
             raise ValueError('invalid_content_console_origin')
+        if (type(self.console_base_path) is not str or len(self.console_base_path) > 160
+                or re.fullmatch(r'(?:/[A-Za-z0-9_-]+)*', self.console_base_path) is None):
+            raise ValueError('invalid_content_console_path')
+        authority = value[8:]
         try:
-            ContentHosts(value[8:])
-        except ContentHostError:
-            raise ValueError('invalid_content_console_origin') from None
+            address = ip_address(authority.strip('[]'))
+        except ValueError:
+            try:
+                ContentHosts(authority)
+            except ContentHostError:
+                raise ValueError('invalid_content_console_origin') from None
+        else:
+            canonical = f'[{address.compressed}]' if address.version == 6 else address.compressed
+            if authority != canonical:
+                raise ValueError('invalid_content_console_origin')
 
     def validate_content_hosts(self, hosts):
         console = self.console_origin[8:]
@@ -55,7 +69,7 @@ def bootstrap_response(scope, hosts, access, navigation):
     if any(key.lower() in (b'purpose', b'sec-purpose') for key, _ in headers):
         raise ExchangeRequestError(403)
     credential = access.bootstrap(binding_id=binding)
-    location = navigation.console_origin + '/content-access?' + urlencode({
+    location = navigation.console_origin + navigation.console_base_path + '/content-access?' + urlencode({
         'binding': binding, 'challenge': credential.challenge,
     })
     response = Response(status_code=303, headers={**BOOTSTRAP_HEADERS, 'Location': location})

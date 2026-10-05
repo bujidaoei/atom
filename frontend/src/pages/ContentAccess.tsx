@@ -71,8 +71,7 @@ export function ContentAccessPage() {
         <h2 className="text-xl font-medium break-words mb-xl">{scope.projectTitle}</h2>
         <dl className="grid grid-cols-1 sm:grid-cols-[7rem_minmax(0,1fr)] gap-x-l gap-y-s text-base">
           <dt className="text-neutral-60">版本状态</dt><dd>{scope.isCurrentRelease ? "当前发布版本" : "历史发布版本"}</dd>
-          <dt className="text-neutral-60">发布版本</dt><dd className="font-mono text-sm break-all">{scope.releaseId}</dd>
-          <dt className="text-neutral-60">内容修订</dt><dd className="font-mono text-sm break-all">{scope.revisionId}</dd>
+          <dt className="text-neutral-60">发布时间</dt><dd>{new Date(scope.releaseCreatedAt * 1000).toLocaleString("zh-CN")}</dd>
           <dt className="text-neutral-60">可见范围</dt><dd>{scope.audience === "owner" ? "仅项目所有者" : "公开发布"}</dd>
           <dt className="text-neutral-60">确认有效期</dt><dd>{new Date(scope.expiresAt * 1000).toLocaleTimeString("zh-CN")}</dd>
         </dl>

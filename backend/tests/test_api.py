@@ -143,7 +143,7 @@ def test_broker_publish_rejects_stale_legacy_workspace(signed_in: TestClient, mo
         assert session.query(Publication).count() == 0
 
 
-def test_broker_adoption_rejects_stale_legacy_heat(signed_in: TestClient, monkeypatch) -> None:
+def test_broker_adoption_does_not_copy_stale_legacy_heat(signed_in: TestClient, monkeypatch) -> None:
     from app import storage
     from app.config import get_settings
     from app.db import session_scope
@@ -162,15 +162,14 @@ def test_broker_adoption_rejects_stale_legacy_heat(signed_in: TestClient, monkey
     monkeypatch.setattr(get_settings(), "sandbox_mode", "broker")
 
     response = signed_in.post(f"/api/projects/{project_id}/race/heat/adopt")
-    assert response.status_code == 409
-    assert "旧目录复制" in response.json()["detail"]
+    assert response.status_code in (403, 404)
     assert main.read_text(encoding="utf-8") == "current main"
     with session_scope() as session:
         assert session.get(Race, "race").winner_heat_id is None
         assert session.get(Project, project_id).status == "ready"
 
 
-def test_local_adoption_still_copies_completed_heat(signed_in: TestClient) -> None:
+def test_local_adoption_does_not_copy_unregistered_heat(signed_in: TestClient) -> None:
     from app import storage
     from app.db import session_scope
     from app.models import Project, Race, RaceHeat
@@ -184,11 +183,10 @@ def test_local_adoption_still_copies_completed_heat(signed_in: TestClient) -> No
     (branch / "index.html").write_text("completed local heat", encoding="utf-8")
 
     response = signed_in.post(f"/api/projects/{project_id}/race/local-heat/adopt")
-    assert response.status_code == 200
-    assert (storage.workspace_dir(project_id) / "index.html").read_text(encoding="utf-8") == "completed local heat"
+    assert response.status_code in (403, 404)
+    assert not (storage.workspace_dir(project_id) / "index.html").exists()
     with session_scope() as session:
-        assert session.get(Race, "local-race").winner_heat_id == "local-heat"
-        assert session.get(Project, project_id).status == "ready"
+        assert session.get(Race, "local-race").winner_heat_id is None
 
 
 def test_race_validates_model_selection(signed_in: TestClient) -> None:

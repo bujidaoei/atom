@@ -45,7 +45,9 @@ def _origin(value: str) -> str:
                        for char in value)):
             raise ValueError
         parts = urlsplit(value)
-        if (parts.scheme != 'http' or parts.hostname not in ('127.0.0.1', '::1')
+        allowed_loopback = parts.hostname in ('127.0.0.1', '::1')
+        allowed_private_service = parts.netloc == 'atom-verifier:8765'
+        if (parts.scheme != 'http' or not (allowed_loopback or allowed_private_service)
                 or parts.username is not None or parts.password is not None
                 or parts.path not in ('', '/') or parts.query or parts.fragment
                 or parts.port is None or not 1 <= parts.port <= 65535

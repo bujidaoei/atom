@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { withBase } from "../lib/api";
+import { ApiError, openProjectStream } from "../lib/api";
 import type { ProjectStatus, RunEvent, RunEventPayload } from "../lib/types";
 import { EMPTY, reduceEvent, type StreamState, type ConnectionState } from "./stream-state";
+import { splitSseFrames } from "./sse-frames";
 export type { TimelineItem, ToolStatus, HeatActivity } from "./stream-state";
 
 type UseProjectStreamOptions = {
@@ -41,18 +42,16 @@ export function useProjectStream({ projectId, enabled, snapshotStatus, onProject
 
     let closed = false;
     let retryTimer: number | undefined;
+    const controller = new AbortController();
+    const currentProjectId = projectId;
 
     setConnection((current) => (current === "retrying" ? current : "connecting"));
-    const source = new EventSource(
-      withBase(`/api/projects/${projectId}/events?after=${lastSeq.current}`),
-      { withCredentials: true },
-    );
 
-    function handle(raw: MessageEvent<string>) {
+    function handle(raw: string) {
       if (closed) return;
       let event: RunEvent;
       try {
-        event = JSON.parse(raw.data) as RunEvent;
+        event = JSON.parse(raw) as RunEvent;
       } catch {
         return;
       }
@@ -68,24 +67,48 @@ export function useProjectStream({ projectId, enabled, snapshotStatus, onProject
       setState((current) => reduceEvent(current, event));
     }
 
-    source.addEventListener("open", () => {
-      if (!closed) { setConnection("open"); updatedRef.current({}); }
-    });
-    source.addEventListener("run", handle as EventListener);
-    source.addEventListener("message", handle as EventListener);
-    source.addEventListener("error", () => {
-      if (closed) return;
-      source.close();
-      setConnection("retrying");
-      attempt.current += 1;
-      const delay = Math.min(1000 * 2 ** (attempt.current - 1), 15000);
-      retryTimer = window.setTimeout(() => setReconnectKey((key) => key + 1), delay);
-    });
+    async function connect() {
+      let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+      try {
+        const body = await openProjectStream(currentProjectId, lastSeq.current,
+          controller.signal);
+        if (closed) return;
+        reader = body.getReader();
+        setConnection("open");
+        updatedRef.current({});
+        const decoder = new TextDecoder();
+        let pending = "";
+        while (!closed) {
+          const chunk = await reader.read();
+          if (chunk.done) throw new Error("stream_closed");
+          const parsed = splitSseFrames(
+            pending + decoder.decode(chunk.value, { stream: true }));
+          pending = parsed.pending;
+          for (const frame of parsed.frames) {
+            if (frame.event === "run" || frame.event === "message") handle(frame.data);
+          }
+        }
+      } catch (error) {
+        if (closed || controller.signal.aborted) return;
+        if (error instanceof ApiError && error.status === 401) {
+          setConnection("idle");
+          return;
+        }
+        setConnection("retrying");
+        attempt.current += 1;
+        const delay = Math.min(1000 * 2 ** (attempt.current - 1), 15000);
+        retryTimer = window.setTimeout(() => setReconnectKey((key) => key + 1), delay);
+      } finally {
+        reader?.releaseLock();
+      }
+    }
+
+    void connect();
 
     return () => {
       closed = true;
       if (retryTimer) window.clearTimeout(retryTimer);
-      source.close();
+      controller.abort();
     };
   }, [projectId, enabled, reconnectKey]);
 

@@ -1,0 +1,100 @@
+# Feature Specification: Publish snapshots and optional functional checks
+
+**Feature Branch**: `codex/009-publish-experience`
+**Created**: 2026-10-02
+**Status**: IP-only isolation, owner snapshot publication, proof-authenticated streaming, cross-port denial and revision-bound race adoption deployed; timer and controlled host-restart recovery passed, while literal power loss, remaining browser gates and observed certificate renewal remain open
+**Input**: Repair check HTTP500, restore simple publication, make publishing a comprehensible history of restorable published snapshots; retain Atom runtime.
+
+## User Scenarios & Testing
+### User Story 1 - Run understandable functional checks (Priority: P1)
+Creators can check the actual generated page and distinguish feature failures from service failures.
+**Why this priority**: Ordinary generated projects currently encounter HTTP500.
+**Independent Test**: Run checks after generation, save and reload actual observations.
+**Acceptance Scenarios**:
+1. Given generation history, completed checks save and reload without HTTP500.
+2. Given newer saved content, old results are not presented as current evidence.
+3. A service failure says checking did not finish, not that the application failed.
+
+### User Story 2 - Publish directly (Priority: P1)
+Owners publish a saved website without separately completing functional acceptance.
+**Why this priority**: Isolated-workspace mode currently blocks publication.
+**Independent Test**: Publish an existing saved page without passing checks and compare the public page to the selected saved content.
+**Acceptance Scenarios**:
+1. Default publication succeeds with one primary action and no mandatory functional-check step.
+2. Failed or unavailable optional checks do not block publication or become a false verified claim.
+3. Concurrent edits and failed publication preserve the previous live version.
+4. Anonymous and foreign owners cannot change publication; public application content cannot exercise console authority.
+
+### User Story 3 - Browse and restore published snapshots (Priority: P1)
+Owners see the current live version and a chronological publication history, preview any retained historical publication and restore it.
+**Why this priority**: The user explicitly defines the publication page as a snapshot and recovery experience.
+**Independent Test**: Publish two distinct versions, preview and restore the first, reload and compare the live page and history.
+**Acceptance Scenarios**:
+1. Every publication creates a durable saved version, timestamp and public link.
+2. The main page uses plain Chinese states such as current online, unpublished and unpublished changes; hashes and internal infrastructure terminology are not primary content.
+3. Restoring a historical publication switches the live content without overwriting the editing draft, and creates a new traceable history event.
+4. Unpublish removes public access; retained history remains available to the owner.
+5. Missing/corrupt historical content is clearly identified and cannot replace a healthy live version.
+
+### User Story 4 - Adopt a completed race candidate (Priority: P1)
+Owners can preview a completed candidate and make its exact saved revision the main editing draft. Adoption does not publish it or change the current public site.
+**Independent Test**: Adopt one completed heat, reload the workspace, and compare the new draft to the heat while the public release remains unchanged. A stale main revision, changed heat, missing artifact or foreign owner must not alter the draft.
+
+### Edge Cases
+Missing entry page, corrupt artifacts, active edits, double clicks, stale selections, interrupted requests, unavailable checker, old evidence, historical projects and public URLs, failed migration, unsafe content and cross-owner requests.
+
+## Requirements
+### Functional Requirements
+- **FR-001**: Explain functional checks in plain Chinese; distinguish unfinished checking from failed assertions.
+- **FR-002**: Default publication must not require passing optional functional checks; retain mandatory ownership, content integrity and isolation.
+- **FR-003**: Publish exactly the selected saved version, never a stale working directory.
+- **FR-004**: Provide chronological published snapshots, historical previews, live restoration and unpublish with concurrent-change protection.
+- **FR-005**: Prioritize the public link, current online version, publish update and history; hide internal IDs and diagnostic details behind optional disclosure. An unfinished generation may block publishing that generation, but its user-facing explanation must name the incomplete generation rather than falsely claim that an optional functional check failed or is mandatory. A failed race heat must not imply that an unrelated ready main draft cannot be published.
+- **FR-005a**: In the optional multi-model flow, describe parallel outputs as candidate versions and costs in points, keeping internal heat/credit names out of primary copy. A failed candidate must show its actual failure text separately from the next action, without duplicated punctuation or implying that every failure is a timeout.
+- **FR-006**: Preserve project data, editing drafts and SHA-locked Atom runtime.
+- **FR-007**: Keep research, design, tasks and real evidence synchronized in Spec Kit; never mark untested delivery accepted.
+- **FR-008**: Back up before deployment, test failure recovery and verify actual public delivery on desktop and mobile.
+
+### Key Entities
+Saved version: immutable content. Functional check: version-bound observations and outcome. Publication snapshot: owner, saved version, publication time and address. History event: publish, restore or unpublish with durable ordering. Policy: optional functional quality versus mandatory safety.
+
+## Success Criteria
+### Measurable Outcomes
+- **SC-001**: A regression reproduces the reported HTTP500 and proves results save and reload after correction.
+- **SC-002**: An owner publishes a saved page using one primary action without manual prerequisite checks.
+- **SC-003**: Initial publication, update and restoration serve exactly the selected content; injected failures preserve the prior live version.
+- **SC-004**: Real-browser tests verify history, restore, no console authority for public content and no horizontal overflow on desktop/mobile.
+- **SC-005**: Deployment has a traceable commit, protected backup, verified recovery path and real evidence.
+- **SC-006**: Real browsers prove that public and draft pages preserve their own native storage across reload/update/restore and cannot access console authority or another project's storage. A controlled browser check proves results belong to the exact owner-initiated saved revision and rejects forged page submissions.
+- **SC-007**: A recovery drill shows that an unchanged post-cutover candidate can restore the exact old pair, while an injected durable user write blocks old-schema rollback before the live candidate is replaced and retains that write for forward recovery.
+- **SC-008**: During protected activation, real certificate-verified project content routes pass legacy import readiness while the console origin rejects writes; the candidate baseline is sealed before console traffic is enabled, and a failed phase restores the old pair or retains the candidate if new durable writes appeared.
+- **SC-009**: After an old-schema rollback is refused because a real owner release changed the candidate ledger, a protected forward deployment starts from that retained ledger, keeps the release/history and draft intact, preserves each project's HTTPS origin, and proves a further owner write and public read through the new image. A failed forward phase preserves the last serving data generation.
+- **SC-010**: After a real owner creates a new project, its two committed HTTPS origins become reachable without an operator command; direct publication succeeds once the host has reconciled ingress. An interrupted deployment or mismatched serving generation causes the reconciler to refuse changes, and a failed TLS probe leaves the previous public version in place for a later retry.
+- **SC-011**: In a production-configured, real-browser session with durable console proof enabled, the project event stream connects with HTTP 200, displays a real emitted update, reconnects after a stopped stream and reloads without repeated 401 responses. Cookie-only cross-port requests remain denied.
+- **SC-012**: After a real interrupted forward transaction and host service restart, the root-owned periodic operator detects one identity-validated incomplete journal, runs the existing write-fenced recovery before ingress reconciliation, and restores the correct data generation without losing a published byte or changing an unrelated service ID. A healthy `awaiting_acceptance` generation remains serving, while orphan or multiple incomplete receipts cause no recovery mutation.
+- **SC-013**: A real proxy error with a synthetic console-proof header never emits that value into Caddy runtime logs. Production applies the same policy without changing the six serving container identities, committed origins, public page bytes, or authenticated console behavior; normal and maintenance Caddy bases retain the policy.
+- **SC-014**: A bounded, independent host check certificate-verifies the console and every committed project origin, reports the earliest expiry and active fingerprint, and fails before a trusted IP certificate reaches its final 36 hours without renewal. A real production run covers all current origins without changing publication, ingress or service identities; actual automatic renewal remains a separate observed gate.
+- **SC-015**: In a real owner session, preview and adopt a completed race heat, reload its exact bytes as the main draft, and observe the unchanged public release and publication history. Repeating the same request returns the same adoption receipt; stale, forged-origin, missing-content and foreign-owner requests do not change the draft or winner. A first race candidate without a prior main revision has a tested path or a clearly identified unmet requirement.
+
+## Assumptions
+- Scope is the current generated website product, not arbitrary backend hosting.
+- Restoring a publication changes the public version and preserves the editing draft. It does not roll back browser-local or external service data.
+- Existing feature-008 uncommitted work stays in the original checkout; this isolated checkout starts from committed source.
+- Broader feature-008 infrastructure tasks remain separately open; this feature does not claim all enterprise work complete.
+
+## COS amendment
+- **FR-009**: Persist immutable publication content in configured private Tencent COS and publication metadata in the mounted server database. Secrets stay in ignored environment files; checked-in examples have empty credentials. Storage failure must not change the live publication.
+- **FR-010**: Public generated JavaScript, including legacy `/p/{slug}` links, must remain isolated from the console and other projects' browser storage. The user has no domain and prefers the server IP; deployment must establish and test a safe IP-only isolation architecture or keep public activation pending. A different port alone does not isolate HTTP cookies.
+- **FR-011**: Draft preview and functional checks must execute generated JavaScript outside the console origin. The owner must retain native scripts and browser storage in preview; a saved race-heat revision must also open through the same owner-scoped isolated preview while an unsaved heat cannot execute generated code on the console origin. An isolated server browser must collect real observations for a specific owner-initiated, version-bound check run. Generated pages cannot submit their own check results.
+- **FR-012**: When using same-IP HTTPS ports, every authenticated console API request must require a durable console-origin proof in addition to its HttpOnly session cookie. Project preview/public origins must be stable, unique and never reassigned across projects or releases; capacity exhaustion and ingress failure must leave the previous publication intact.
+- **FR-013**: The trusted verifier coordinator must start independently of the console with an exact worker image, private control credential and resource-bounded browser workers. It must share the authoritative ledger and private artifact store, publish no host port, and be reachable from the console only on a dedicated Docker bridge at an explicitly allowed service origin. It must report unhealthy if its daemon lease is lost, release its lease on orderly shutdown and reconcile orphan workers before a successor accepts work. A protected deployment must start and validate it before enabling owner-initiated checks.
+- **FR-014**: A schema-changing operational rollback to preserved old containers may proceed only when the system proves that the candidate has no unmerged durable user writes. After such writes, preserve the live candidate and require a data-reconciling forward recovery instead of silently re-exposing the old database. This operator safety gate must not add prerequisites to a user's ordinary snapshot publish or historical-version restore.
+- **FR-015**: Deployment must preserve the real HTTPS readiness check for each legacy publication while preventing authenticated console writes until legacy import and a durable candidate baseline complete. A failure in this interval must not expose an unsealed writer or promote an older database over unmerged user state.
+- **FR-016**: After FR-014 refuses an old-schema rollback, the operator must have a protected forward deployment that takes the current candidate ledger and broker registry as its sole data source. It must quiesce every writer, make and verify a new paired backup, prepare a separate candidate generation, preserve immutable artifacts, COS bindings and never-reused project origins, and verify exact image/schema compatibility before exposing the replacement. Failure must resume the last compatible serving generation without discarding committed owner work. A future schema change requires its own explicit migration and cannot reuse the schema10-to-18 import path.
+- **FR-017**: Present Atom as its own product. User-facing copy should explain Atom's independently built workflow and publication snapshots without describing the site as an Atoms replica or an official atoms.dev implementation.
+- **FR-018**: A newly created project with committed preview/public IP origins must become publishable without manual ingress commands. A separate least-privilege host reconciler must apply only committed routes under the deployment lock, never expose Docker control to the application, refuse an interrupted cutover or mismatched service generation, and verify real HTTPS before a publication is accepted. A failed reconcile must preserve the previous ingress and release pointer and remain retryable.
+- **FR-019**: Keep authenticated project progress streaming functional when console proof is mandatory. The browser must send the same session-bound proof as other console API requests, parse bounded server events incrementally and reconnect from the last applied sequence without relaxing the server's cookie-plus-proof boundary or leaking proof into a URL.
+- **FR-020**: The root-owned host operator must detect and reconcile an interrupted forward transaction after a process or host restart using its durable exact-identity journal and existing write fence. It must run before normal origin ingress reconciliation under the same deployment lock, never recover a healthy serving `awaiting_acceptance` receipt as a fault, and fail closed on orphan or ambiguous receipts. No Docker or recovery authority moves into the application.
+- **FR-021**: IP ingress must redact the session-bound `X-Atom-Console-Proof` header from both normal and maintenance Caddy runtime error logs while continuing to forward it unchanged to the authenticated API. An idempotent root-owned migration must validate the exact serving generation, use the atomic ingress controller, verify all committed HTTPS origins and preserve a recoverable prior configuration; conflicting logging policies must fail closed.
+- **FR-022**: Monitor the short-lived IP certificate outside the application with a root-owned, least-privilege scheduled check. It must derive current committed ports from the exact serving generation, use normal trust and IP-name verification on every TLS origin, impose a bounded deadline, avoid exposing credentials, and signal failure with a stable code when any certificate is invalid, inconsistent or near expiry. Monitoring must never block an ordinary user publication.
+- **FR-023**: A completed race heat may be adopted only by its owner using its exact immutable source revision and the observed main draft revision. Verify private artifact bytes before an atomic, idempotent main-head advance, record provenance and the winning heat, and refuse stale, active or incomplete work. Adoption never updates the current public release. The UI must explain that adopting changes the draft, and publication remains a separate action.

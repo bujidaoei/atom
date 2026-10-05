@@ -10,7 +10,10 @@ from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-class Settings(BaseSettings):
+from .storage_config import ObjectStorageSettings
+
+
+class Settings(ObjectStorageSettings):
     """Process configuration. Every key is overridable via an ``ATOM_`` env var."""
 
     model_config = SettingsConfigDict(
@@ -21,8 +24,16 @@ class Settings(BaseSettings):
     environment: Literal["development", "test", "production"] = "development"
     secret: str = Field(repr=False)
     session_mode: Literal["legacy", "durable"] = "legacy"
+    console_proof_required: bool = False
     console_origin: str | None = None
     content_host_suffix: str | None = None
+    ip_preview_enabled: bool = False
+    ip_public_enabled: bool = False
+    ip_preview_address: str | None = None
+    ip_preview_first_port: int | None = None
+    ip_preview_last_port: int | None = None
+    ip_ingress_ca_file: Path | None = None
+    publication_verification: Literal['advisory', 'required'] = 'advisory'
     cookie_secure: bool = False
     cookie_path: str = "/"
     session_days: int = Field(default=14, ge=1, le=90)
@@ -33,7 +44,6 @@ class Settings(BaseSettings):
     # --- storage --------------------------------------------------------
     data_dir: Path = Path("./data")
     db_path: Path = Path("./data/atom.db")
-
     # --- model gateway --------------------------------------------------
     llm_base_url: str = "https://ai-gateway.skg.com/v1"
     llm_api_key: str = Field(default="", repr=False)
@@ -105,12 +115,40 @@ class Settings(BaseSettings):
             ContentNavigation(self.console_origin)
             if not self.cookie_secure or self.cookie_path != '/':
                 raise ValueError('durable sessions require secure root cookies')
+        elif self.console_proof_required:
+            raise ValueError('console proof requires durable sessions')
         if self.content_host_suffix is not None:
             from .content_hosts import ContentHosts
             from .content_bootstrap import ContentNavigation
             if self.session_mode != 'durable':
                 raise ValueError('content handoff requires durable sessions')
             ContentNavigation(self.console_origin).validate_content_hosts(ContentHosts(self.content_host_suffix))
+        if self.ip_preview_enabled:
+            if (self.session_mode != 'durable' or not self.console_proof_required
+                    or self.verifier_origin is None
+                    or self.ip_preview_address is None
+                    or self.ip_preview_first_port is None or self.ip_preview_last_port is None):
+                raise ValueError('ip preview requires durable console proof, verifier and complete origin configuration')
+            if (self.ip_ingress_ca_file is not None and
+                    (not self.ip_ingress_ca_file.is_absolute()
+                     or not self.ip_ingress_ca_file.is_file())):
+                raise ValueError('ip ingress CA file must be an absolute readable file')
+            # Validate the literal address without touching the database here.
+            try:
+                parsed = ip_address(self.ip_preview_address.strip('[]'))
+                canonical = f'[{parsed.compressed}]' if parsed.version == 6 else parsed.compressed
+                if canonical != self.ip_preview_address:
+                    raise ValueError
+            except ValueError:
+                raise ValueError('ip preview requires a canonical literal address') from None
+            if (type(self.ip_preview_first_port) is not int or type(self.ip_preview_last_port) is not int
+                    or not 1024 <= self.ip_preview_first_port < self.ip_preview_last_port <= 65535
+                    or self.ip_preview_last_port - self.ip_preview_first_port + 1 > 512):
+                raise ValueError('invalid ip preview port range')
+            if self.console_origin != f'https://{canonical}':
+                raise ValueError('ip preview must use the console IP address')
+        if self.ip_public_enabled and not self.ip_preview_enabled:
+            raise ValueError('ip public delivery requires isolated preview and console proof')
         self.sandbox_mode = self.sandbox_mode or ('broker' if self.environment == 'production' else 'local')
         if self.environment == 'production' and self.sandbox_mode != 'broker':
             raise ValueError('production requires broker execution')

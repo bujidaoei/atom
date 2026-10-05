@@ -17,7 +17,7 @@ from .execution_service import ExecutionGateway, execution_resources
 from .sandbox.client import BrokerClientError
 from .errors import AtomError
 from .models import Base
-from .routers import audit, content_access, auth, preview, projects, publish, releases, settings, usage, verifications
+from .routers import adoptions, audit, content_access, auth, preview, preview_access, projects, publish, releases, settings, usage, verifications
 from .schema_guard import verify as verify_schema
 from .services.orchestrator import orchestrator
 from .services.runtime_client import runtime_client
@@ -86,7 +86,7 @@ async def lifespan(_app: FastAPI):
                     orchestrator.execution = None
 
 
-app = FastAPI(title="Atoms Demo API", version="1.0.0", lifespan=lifespan)
+app = FastAPI(title="Atom API", version="1.0.0", lifespan=lifespan)
 app.state.content_issuer = BoundedOperations()
 app.state.audit_reads = BoundedOperations(capacity=4)
 app.state.release_operations = BoundedOperations(capacity=2)
@@ -180,8 +180,10 @@ app.include_router(content_access.router, prefix="/api")
 app.include_router(audit.router, prefix="/api")
 app.include_router(settings.router, prefix="/api")
 app.include_router(projects.router, prefix="/api")
+app.include_router(adoptions.router, prefix="/api")
 app.include_router(verifications.router, prefix="/api")
 app.include_router(releases.router, prefix="/api")
+app.include_router(preview_access.router, prefix="/api")
 app.include_router(publish.router, prefix="/api")
 app.include_router(usage.router, prefix="/api")
 

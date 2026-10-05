@@ -1,0 +1,45 @@
+# Replace the existing single-file-mounted Caddy container only in the
+# protected cutover. A directory bind lets the host controller atomically
+# replace Caddyfile and then verify every committed project listener.
+name: atom-ip-ingress
+
+services:
+  atom-tls:
+    image: ${ATOM_CADDY_IMAGE:?set the pinned Caddy image}
+    container_name: atom-tls
+    restart: unless-stopped
+    networks:
+      ingress:
+        ipv4_address: ${ATOM_CADDY_PROXY_IP:?set the pinned Caddy bridge IP}
+    ports:
+      - "443:443/tcp"
+      - "${ATOM_FIRST_PORT:?set the reserved first port}-${ATOM_LAST_PORT:?set the reserved last port}:${ATOM_FIRST_PORT:?set the reserved first port}-${ATOM_LAST_PORT:?set the reserved last port}/tcp"
+    volumes:
+      - type: bind
+        source: ${ATOM_CADDY_CONFIG_DIR:?set the protected Caddy config directory}
+        target: /etc/caddy
+        read_only: true
+      - type: volume
+        source: caddy-data
+        target: /data
+      - type: volume
+        source: caddy-config
+        target: /config
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  ingress:
+    external: true
+    name: ${ATOM_PROXY_NETWORK:?set the existing Caddy network}
+
+volumes:
+  caddy-data:
+    external: true
+    name: ${ATOM_CADDY_DATA_VOLUME:?set the existing Caddy data volume}
+  caddy-config:
+    external: true
+    name: ${ATOM_CADDY_CONFIG_VOLUME:?set the existing Caddy config volume}

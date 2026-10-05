@@ -12,7 +12,7 @@ import uuid
 
 from starlette.responses import JSONResponse
 
-from .artifacts import ArtifactStore
+from .artifacts import SnapshotStore, configured_artifact_store
 from .execution import ExecutionCoordinator, ExecutionError
 from .execution_http import ExecutionAPI
 from .revisions import RevisionRepository, RevisionError
@@ -48,7 +48,7 @@ class DatabaseLease:
 @dataclass(frozen=True)
 class ExecutionResources:
     repository: RevisionRepository
-    store: ArtifactStore
+    store: SnapshotStore
     coordinator: ExecutionCoordinator
     api: ExecutionAPI
 
@@ -104,7 +104,7 @@ async def execution_resources(settings):
     lease = DatabaseLease(settings.db_path)
     try:
         repository = RevisionRepository(settings.db_path)
-        store = ArtifactStore(settings.artifact_dir)
+        store = configured_artifact_store(settings, settings.artifact_dir)
         completion = CompletionGrantCodec(settings.completion_grant_key.encode(), max_lifetime=7200)
         async with BrokerClient(settings.broker_origin, settings.broker_admin_token,
                                 GrantCodec(settings.broker_grant_key.encode(), max_lifetime=7200)) as broker:

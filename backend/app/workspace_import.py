@@ -7,7 +7,7 @@ from dataclasses import dataclass
 import io
 from pathlib import Path
 
-from .artifacts import Artifact, ArtifactStore
+from .artifacts import Artifact, SnapshotStore
 from .revisions import RevisionError, RevisionRepository
 from .snapshots import export_snapshot
 
@@ -19,7 +19,7 @@ class ImportedWorkspace:
     artifact: Artifact
 
 
-def import_workspace(repository: RevisionRepository, store: ArtifactStore, *,
+def import_workspace(repository: RevisionRepository, store: SnapshotStore, *,
                      owner: str, project_id: str, source: Path,
                      heat_id: str | None = None) -> ImportedWorkspace:
     workspace = repository.ensure_workspace(owner, project_id, heat_id)
@@ -28,8 +28,10 @@ def import_workspace(repository: RevisionRepository, store: ArtifactStore, *,
         raise RevisionError('invalid_import_source')
     try:
         resolved = source.resolve(strict=True)
-        if (resolved.is_relative_to(store.root.resolve())
-                or any(path.resolve().is_relative_to(resolved) for path in (repository.path, store.root))):
+        local_root = store.local_root
+        protected = (repository.path,) if local_root is None else (repository.path, local_root)
+        if ((local_root is not None and resolved.is_relative_to(local_root.resolve()))
+                or any(path.resolve().is_relative_to(resolved) for path in protected)):
             raise RevisionError('invalid_import_source')
     except (OSError, RuntimeError):
         raise RevisionError('invalid_import_source') from None

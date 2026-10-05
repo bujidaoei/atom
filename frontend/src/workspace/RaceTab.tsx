@@ -6,12 +6,15 @@ import { EmptyState, ErrorState, LoadingState } from "../components/ui/States";
 import { Spinner } from "../components/ui/Spinner";
 import { api, errorMessage, withBase } from "../lib/api";
 import { formatBytes, formatElapsed, formatNumber } from "../lib/format";
+import { openRevisionPreview } from "../lib/previewAccess";
 import type { RaceHeat, RaceSummary } from "../lib/types";
 import type { HeatActivity } from "./useProjectStream";
 
 type RaceTabProps = {
   projectId: string;
-  legacyAdoptionAvailable: boolean;
+  isolatedPreview: boolean;
+  revisionAdoptionAvailable: boolean;
+  mainRevisionId: string | null;
   initialRace: RaceSummary | null;
   heatActivity: Record<string, HeatActivity>;
   /** Called after a heat is adopted so the project and preview refresh. */
@@ -33,7 +36,9 @@ const HEAT_STATUS: Record<RaceHeat["status"], { label: string; tone: string }> =
 
 export function RaceTab({
   projectId,
-  legacyAdoptionAvailable,
+  isolatedPreview,
+  revisionAdoptionAvailable,
+  mainRevisionId,
   initialRace,
   heatActivity,
   onAdopted,
@@ -143,7 +148,7 @@ export function RaceTab({
           <div>
             <h2 className="text-md font-medium text-neutral-95">竞速构建</h2>
             <p className="mt-xxs text-sm text-neutral-60">
-              同一份契约交给 2–4 个模型并行构建，挑一个合入主工作区。每个 heat 各扣 1 credit。
+              同一份需求交给 2–4 个模型分别生成。你可以预览结果，再选择一个作为工作区草稿。每个候选版本消耗 1 点额度。
             </p>
           </div>
 
@@ -201,7 +206,7 @@ export function RaceTab({
                 <span className="text-sm text-neutral-60">
                   已选 {selected.length} 个
                   {selected.length < 2 ? "，至少要 2 个" : selected.length > 4 ? "，最多 4 个" : ""}
-                  {canStart ? "" : " · 需要先确认契约"}
+                  {canStart ? "" : " · 需要先确认需求"}
                 </span>
               </div>
             </>
@@ -219,7 +224,7 @@ export function RaceTab({
         ) : (
           <section className="flex flex-col gap-m">
             <div className="flex items-center gap-s">
-              <h3 className="text-md font-medium text-neutral-95">本轮 heats</h3>
+              <h3 className="text-md font-medium text-neutral-95">本轮候选版本</h3>
               <Badge
                 tone={
                   race.status === "running"
@@ -244,7 +249,9 @@ export function RaceTab({
                 <HeatCard
                   key={heat.id}
                   projectId={projectId}
-                  legacyAdoptionAvailable={legacyAdoptionAvailable}
+                  isolatedPreview={isolatedPreview}
+                  revisionAdoptionAvailable={revisionAdoptionAvailable}
+                  mainRevisionId={mainRevisionId}
                   heat={heat}
                   activity={heatActivity[heat.id]}
                   isWinner={race.winnerHeatId === heat.id}
@@ -269,7 +276,9 @@ export function RaceTab({
 
 function HeatCard({
   projectId,
-  legacyAdoptionAvailable,
+  isolatedPreview,
+  revisionAdoptionAvailable,
+  mainRevisionId,
   heat,
   activity,
   isWinner,
@@ -280,7 +289,9 @@ function HeatCard({
   onAdopted,
 }: {
   projectId: string;
-  legacyAdoptionAvailable: boolean;
+  isolatedPreview: boolean;
+  revisionAdoptionAvailable: boolean;
+  mainRevisionId: string | null;
   heat: RaceHeat;
   activity: HeatActivity | undefined;
   isWinner: boolean;
@@ -292,8 +303,11 @@ function HeatCard({
 }) {
   const [adopting, setAdopting] = useState(false);
   const [adoptError, setAdoptError] = useState<string | null>(null);
+  const [openingPreview, setOpeningPreview] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
   const status = HEAT_STATUS[heat.status];
   const incompleteSaved = Boolean(heat.incompleteSavedRevisionId);
+  const previewRevisionId = heat.incompleteSavedRevisionId ?? heat.revisionId;
   const retryLabel = incompleteSaved ? '从已保存版本继续生成'
     : heat.revisionId ? '基于已有版本重新生成' : '重新生成此赛道';
 
@@ -317,7 +331,7 @@ function HeatCard({
       </header>
 
       <div className="relative aspect-[16/10] bg-base-secondary-alt">
-        {heat.previewUrl && (heat.status === "done" || heat.fileCount > 0) ? (
+        {!isolatedPreview && heat.previewUrl && (heat.status === "done" || heat.fileCount > 0) ? (
           <iframe
             src={`${withBase(heat.previewUrl)}?run=${heat.runId ?? ""}&status=${heat.status}`}
             title={`${heat.model} 的预览`}
@@ -328,7 +342,11 @@ function HeatCard({
         ) : (
           <div className="flex h-full items-center justify-center px-m text-center">
             <p className="text-sm text-neutral-40">
-              {!["queued", "running", "done"].includes(heat.status)
+              {isolatedPreview && previewRevisionId
+                ? "打开已保存版本，在独立窗口查看这条赛道。"
+                : isolatedPreview && heat.previewUrl
+                ? "赛道预览需要先成为已保存版本，避免在工作区执行生成的脚本。"
+                : !["queued", "running", "done"].includes(heat.status)
                 ? (heat.error ?? "这一路失败了")
                 : (activity?.label ?? "等待第一个文件…")}
             </p>
@@ -339,8 +357,8 @@ function HeatCard({
       <dl className="grid grid-cols-2 gap-x-m gap-y-xs border-t border-neutral-8 px-m py-s text-xs">
         <Stat label="耗时" value={formatElapsed(liveElapsed)} />
         <Stat label="文件" value={`${heat.fileCount} 个 · ${formatBytes(heat.bytes)}`} />
-        <Stat label="入 token" value={formatNumber(heat.inputTokens)} />
-        <Stat label="出 token" value={formatNumber(heat.outputTokens)} />
+        <Stat label="输入 Token" value={formatNumber(heat.inputTokens)} />
+        <Stat label="输出 Token" value={formatNumber(heat.outputTokens)} />
       </dl>
 
       {activity && heat.status === "running" ? (
@@ -355,11 +373,32 @@ function HeatCard({
         </p>
       ) : null}
 
-      {heat.error && !["running", "queued", "done"].includes(heat.status) ? (
-        <p className="border-t border-neutral-8 px-m py-s text-xs text-neutral-60">{heat.error}。可在上方调整时间上限后{retryLabel}；未完成版本尚未通过验收，不能采用或发布。</p>
+      {previewError ? (
+        <p className="border-t border-neutral-8 px-m py-xs text-xs text-danger-strong" role="alert">
+          {previewError}
+        </p>
       ) : null}
 
-      <footer className="mt-auto flex items-center gap-s border-t border-neutral-8 px-m py-s">
+      {heat.error && !["running", "queued", "done"].includes(heat.status) ? (
+        <div className="space-y-xxs border-t border-neutral-8 px-m py-s text-xs text-neutral-60">
+          <p className="break-words">{heat.error}</p>
+          <p>可点击「{retryLabel}」重试{heat.status === "timed_out" ? "；如果经常超时，可先调高上方时间上限" : ""}。这个候选尚未完成，暂不能采用。当前草稿是否可以发布，请到「发布与历史」查看。</p>
+        </div>
+      ) : null}
+
+      <footer className="mt-auto flex flex-wrap items-center gap-s border-t border-neutral-8 px-m py-s">
+        {isolatedPreview && previewRevisionId ? (
+          <Button size="sm" variant="secondary" loading={openingPreview}
+            onClick={() => {
+              setOpeningPreview(true);
+              setPreviewError(null);
+              void openRevisionPreview(projectId, previewRevisionId)
+                .catch((error: unknown) => setPreviewError(errorMessage(error)))
+                .finally(() => setOpeningPreview(false));
+            }}>
+            预览已保存版本
+          </Button>
+        ) : null}
         {!["running", "queued", "done"].includes(heat.status) ? (
           <Button size="sm" variant="secondary" loading={adopting} disabled={raceRunning}
             onClick={() => {
@@ -373,13 +412,14 @@ function HeatCard({
           size="sm"
           variant={isWinner ? "secondary" : "primary"}
           loading={adopting}
-          disabled={heat.status !== "done" || raceRunning || !legacyAdoptionAvailable}
-          title={!legacyAdoptionAvailable ? "隔离赛道尚无按修订确认的采用入口" : undefined}
+          disabled={heat.status !== "done" || raceRunning || !revisionAdoptionAvailable || !heat.revisionId}
+          title={heat.status === "done" ? "把此已保存版本设为主工作区草稿，不会自动发布" : undefined}
           onClick={() => {
+            if (!heat.revisionId) return;
             setAdopting(true);
             setAdoptError(null);
             api
-              .adoptHeat(projectId, heat.id)
+              .adoptHeat(projectId, heat.id, heat.revisionId, mainRevisionId)
               .then(() => onAdopted())
               .catch((err: unknown) => setAdoptError(errorMessage(err)))
               .finally(() => setAdopting(false));
@@ -387,10 +427,10 @@ function HeatCard({
         >
           采用
         </Button>
-        {heat.status === "done" && !legacyAdoptionAvailable ? (
-          <span className="text-xs text-neutral-60">按修订采用尚未开放</span>
+        {heat.status === "done" && revisionAdoptionAvailable ? (
+          <span className="text-xs text-neutral-60">采用后成为工作区草稿，发布版本保持不变</span>
         ) : null}
-        {heat.previewUrl ? (
+        {!isolatedPreview && heat.previewUrl ? (
           <a
             href={withBase(heat.previewUrl)}
             target="_blank"

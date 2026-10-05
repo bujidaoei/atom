@@ -1,0 +1,12 @@
+[Unit]
+Description=Check Atom project-origin ingress for committed additions
+
+[Timer]
+OnBootSec=15s
+OnUnitInactiveSec=10s
+AccuracySec=1s
+Unit=atom-origin-reconcile.service
+
+[Install]
+WantedBy=timers.target
+
