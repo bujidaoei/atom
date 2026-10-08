@@ -10,7 +10,7 @@ Branch: `codex/014-artifact-recovery`. Created: 2026-10-08. Status: implementati
 ## Requirements
 - FR-001 Preserve exact snapshot hashes, private access, immutable publication and no fallback to stale local workspaces.
 - FR-002 Classify invalid credentials, permission denial, signature rejection and missing objects into fixed codes. Never include SDK messages, signed URLs or credentials in user responses/logs.
-- FR-003 COS readiness must perform a bounded real read of a registered artifact, validate its digest/metadata, cache for a configurable finite interval and serialize concurrent probes. Local development remains supported.
+- FR-003 COS readiness must perform a bounded real read of a registered artifact, validate its digest/metadata, cache for a configurable finite interval and serialize concurrent probes. Empty installations read the canonical empty snapshot initialized by successful operator preflight; an absent marker fails closed. Local development remains supported.
 - FR-004 Deny new project creation and execution admission when the configured storage probe fails; health must return 503 with storage=false. Authentication remains available for diagnosis/recovery.
 - FR-005 Provide a separate explicit operator preflight that verifies a new private immutable snapshot through PUT/readback and verifies all registered objects. Enforce the same preflight automatically in forward deployment before maintenance or writer interruption. Deployment cannot be accepted on reads alone.
 - FR-006 Preserve existing data, unrelated changes and SHA-locked Pi; synchronize spec, plan, tasks and evidence; synchronize GitHub main and deploy only with verified backup/rollback gates.

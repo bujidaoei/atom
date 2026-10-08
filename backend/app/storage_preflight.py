@@ -10,6 +10,7 @@ from .artifacts import ArtifactError, _describe
 from .artifact_transfer import TransferError, verify_registered_remote
 from .cos_artifacts import CosArtifactStore
 from .storage_config import ObjectStorageSettings
+from .storage_readiness import initialization_snapshot
 
 
 def verify_storage(database: Path, store):
@@ -22,8 +23,13 @@ def verify_storage(database: Path, store):
     artifact = _describe(payload)
     if store.put(payload) != artifact or store.read(artifact.key) != payload:
         raise ArtifactError('artifact_digest_mismatch')
+    initial = initialization_snapshot()
+    marker = _describe(initial)
+    if store.put(initial) != marker or store.read(marker.key) != initial:
+        raise ArtifactError('artifact_digest_mismatch')
     receipt = verify_registered_remote(database, store)
     return {'ok': True, 'write_readback': True, 'probe_key': artifact.key,
+            'initialization_key': marker.key,
             **receipt.__dict__}
 
 

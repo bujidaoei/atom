@@ -3,6 +3,7 @@ from contextlib import closing
 import logging
 from pathlib import Path
 import sqlite3
+import struct
 from threading import Lock
 import time
 
@@ -22,6 +23,12 @@ def storage_message(code: str) -> str:
 
 class StorageUnavailable(AtomError):
     status_code = 503
+
+
+def initialization_snapshot() -> bytes:
+    """Canonical empty snapshot initialized by the explicit write preflight."""
+    manifest = b'{"files":[],"version":1}'
+    return b'ATOMSNAP1\n' + struct.pack('>I', len(manifest)) + manifest
 
 
 class StorageReadiness:
@@ -47,9 +54,7 @@ class StorageReadiness:
                     db.execute('PRAGMA query_only=ON')
                     row = db.execute('SELECT key,revision,size FROM revision_artifacts '
                                      'ORDER BY size,key LIMIT 1').fetchone()
-                if row is None:
-                    raise ArtifactError('artifact_not_initialized')
-                expected = Artifact(*row)
+                expected = Artifact(*row) if row is not None else _describe(initialization_snapshot())
                 if _describe(self.store.read(expected.key)) != expected:
                     raise ArtifactError('artifact_digest_mismatch')
             except ArtifactError as error:
