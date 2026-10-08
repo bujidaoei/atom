@@ -1,6 +1,6 @@
 # Feature Specification: Artifact access recovery
 
-Branch: `codex/014-artifact-recovery`. Created: 2026-10-08. Status: implementation; live restoration pending valid COS credentials.
+Branch: `codex/014-artifact-recovery`. Created: 2026-10-08. Status: deployed and accepted. Live COS/provider/server-verifier/owner-browser gates passed; original failed book request retried successfully to contract approval.
 
 ## User scenarios and acceptance
 1. P1: The owner opens an existing project and creates/plans a new project using real immutable snapshots. Acceptance requires authenticated production reads and a real provider run after COS access is restored.
