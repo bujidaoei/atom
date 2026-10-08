@@ -8,3 +8,9 @@
 6. Authenticate as the owner and open screenshot project88b8208c0d394ce48ac1a2e863e31003; confirm exact registered files and preview. Create an isolated real project, perform real planning/build, validate stored artifacts and browser functionality. Keep tasks open until observed.
 
 Rollback: retain the existing image/container identities, protected source data and backup. After new writes, preserve/reconcile them before source restoration; never blindly copy an older database over live work. Credential rollback alone cannot restore a deleted/disabled cloud identity.
+
+## Proved historical charge compensation
+
+Use the exact tested image's `python -m app.storage_refunds --database /data/atom.db --backup /backup/<new-private-name>.db --run-id <proved-run>` only for explicitly selected undispatched storage failures. The CLI creates/verifies a new backup before atomically validating and compensating all selected runs. It never overwrites a backup or removes historical entries. Replays are idempotent, but require a different backup filename. Ambiguous events, attempts or charges fail the entire request.
+
+On this host, retain the protected-cutover lock and exact serving-container/data identities; refuse active work and stop API/broker plus other data writers before mutation. Execute from a target-local operation that survives SSH disconnects. Restore preview/public/verifier dependencies first, require verifier readiness, then use the existing coordinated API/broker restart; API startup requires the verifier. Restore all original identities/health even when the compensation fails. The incident's first resume attempt used the wrong dependency order and failed; the corrected coordinated resume succeeded. Never infer a successful recovery merely from a successful compensation receipt.
