@@ -129,7 +129,7 @@ def test_runtime_health_uses_authentication_and_detects_rejection(monkeypatch, c
         monkeypatch.setattr(get_settings(), 'sandbox_mode', 'broker')
         unavailable=client.get('/api/health')
         assert unavailable.status_code==503
-        assert unavailable.json()=={'ok':False,'runtime':True,'broker':False}
+        assert unavailable.json()=={'ok':False,'runtime':True,'broker':False,'storage':True}
         monkeypatch.setattr(get_settings(), 'sandbox_mode', 'local')
         monkeypatch.setattr(get_settings(), "runtime_token", "different-synthetic-runtime-token-12345")
         monkeypatch.setattr(main, "runtime_client", RuntimeClient())

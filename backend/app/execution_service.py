@@ -17,6 +17,7 @@ from .execution import ExecutionCoordinator, ExecutionError
 from .execution_http import ExecutionAPI
 from .revisions import RevisionRepository, RevisionError
 from .workspace_import import import_workspace
+from .storage_readiness import StorageReadiness
 from .sandbox.client import BrokerClient, BrokerClientError
 from .sandbox.grants import GrantCodec, CompletionGrantCodec
 
@@ -51,8 +52,11 @@ class ExecutionResources:
     store: SnapshotStore
     coordinator: ExecutionCoordinator
     api: ExecutionAPI
+    readiness: StorageReadiness | None = None
 
     async def prepare_run(self, *, owner, project_id, run_id, heat_id, source, budget):
+        if self.readiness is not None:
+            await asyncio.to_thread(self.readiness.require_available)
         if isinstance(budget, bool) or not isinstance(budget, (int, float)) or not 0 < budget <= 7140:
             raise ExecutionError('invalid_execution_budget')
         attempt, grant = uuid.uuid4().hex, uuid.uuid4().hex
@@ -105,6 +109,12 @@ async def execution_resources(settings):
     try:
         repository = RevisionRepository(settings.db_path)
         store = configured_artifact_store(settings, settings.artifact_dir)
+        readiness = None
+        if settings.storage_backend == 'cos':
+            from .cos_artifacts import CosArtifactStore
+            readiness = StorageReadiness(settings.db_path,
+                CosArtifactStore(settings, operation_seconds=4),
+                interval=settings.storage_probe_interval_seconds)
         completion = CompletionGrantCodec(settings.completion_grant_key.encode(), max_lifetime=7200)
         async with BrokerClient(settings.broker_origin, settings.broker_admin_token,
                                 GrantCodec(settings.broker_grant_key.encode(), max_lifetime=7200)) as broker:
@@ -112,7 +122,7 @@ async def execution_resources(settings):
             coordinator = ExecutionCoordinator(repository, broker, completion_codec=completion)
             await coordinator.reconcile()
             try:
-                yield ExecutionResources(repository, store, coordinator, ExecutionAPI(coordinator, store, completion))
+                yield ExecutionResources(repository, store, coordinator, ExecutionAPI(coordinator, store, completion), readiness)
             finally:
                 await coordinator.reconcile()
     finally:

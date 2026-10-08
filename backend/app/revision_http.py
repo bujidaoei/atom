@@ -8,6 +8,7 @@ from .artifacts import ArtifactError
 from .revisions import RevisionError
 from .revision_view import materialized_revision, committed_catalog
 from .snapshots import SnapshotError
+from .storage_readiness import storage_message
 
 _READS = BoundedSemaphore(1)
 
@@ -25,7 +26,9 @@ def _resources(request):
         if error.code in ('revision_not_found', 'revision_not_initialized', 'invalid_revision_request'):
             raise HTTPException(404, '还没有已登记的文件版本') from None
         raise HTTPException(503, '版本暂不可读取') from None
-    except (ArtifactError, SnapshotError, OSError):
+    except ArtifactError as error:
+        raise HTTPException(503, storage_message(error.code)) from None
+    except (SnapshotError, OSError):
         raise HTTPException(503, '版本暂不可读取') from None
     finally:
         _READS.release()

@@ -17,6 +17,8 @@ from ..config import get_settings
 from ..db import session_scope
 from ..errors import ConflictError, OutOfCredits
 from ..execution_service import ExecutionResources
+from ..artifacts import ArtifactError
+from ..storage_readiness import storage_message
 from ..revision_view import materialized_revision, committed_catalog
 from ..events import bus
 from ..models import (
@@ -82,12 +84,14 @@ class Orchestrator:
         return project_id in self._stopping or task is not None and not task.done()
 
     async def start_plan(self, project_id: str, user_id: str) -> str:
+        await self.require_storage()
         return self._spawn(
             project_id, self._plan(project_id, user_id), status="planning"
         )
 
     async def start_build(self, project_id: str, user_id: str, note: str | None,
                           *, expected_version=...) -> str:
+        await self.require_storage()
         binding = {}
         def register(session, job_id):
             if expected_version is ...:
@@ -108,6 +112,7 @@ class Orchestrator:
         )
 
     async def start_refine(self, project_id: str, user_id: str, message: str, expected_version) -> str:
+        await self.require_storage()
         binding = {}
         def register(session, _job_id):
             contract_history.lock(session)
@@ -121,6 +126,7 @@ class Orchestrator:
                            status='planning', on_register=register)
 
     async def start_revise(self, project_id: str, user_id: str, message: str) -> str:
+        await self.require_storage()
         return self._spawn(
             project_id, self._build(project_id, user_id, message, phase="revise")
         )
@@ -153,6 +159,7 @@ class Orchestrator:
         budget_seconds: int | None = None,
         only_heat: str | None = None,
     ) -> str:
+        await self.require_storage()
         return self._spawn(
             project_id,
             self._race(project_id, user_id, race_id, budget_seconds, only_heat),
@@ -269,6 +276,11 @@ class Orchestrator:
         await self._finish(project_id, status=status, note=note)
 
     # --------------------------------------------------------------- private
+
+    async def require_storage(self):
+        readiness = getattr(self.execution, 'readiness', None)
+        if readiness is not None:
+            await asyncio.to_thread(readiness.require_available)
 
     def _spawn(self, project_id: str, coro, *, status: str = "building", on_register=None) -> str:
         if self.active(project_id):
@@ -808,6 +820,8 @@ class Orchestrator:
             status, error = 'failed', validation_error
             if completed_revision:
                 error += '；文件已保存，但尚未通过生成检查'
+        except ArtifactError as exc:
+            status, error = 'failed', storage_message(exc.code)
         except Exception as exc:
             status, error = "failed", str(exc) or type(exc).__name__
         if status != "done":

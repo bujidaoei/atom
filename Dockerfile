@@ -86,7 +86,7 @@ ENV ATOM_DATA_DIR=/data \
     PI_OFFLINE=1
 
 EXPOSE 80
-HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=20s --start-period=40s --retries=3 \
     CMD curl -fsS http://127.0.0.1/api/health || exit 1
 
 CMD ["supervisord", "-c", "/etc/supervisor/supervisord.conf"]

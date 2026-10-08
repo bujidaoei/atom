@@ -101,6 +101,9 @@ def create_project(
     body: CreateProject, user: CurrentUser, session: DbSession, request: Request
 ) -> dict[str, object]:
     prompt = body.prompt.strip()
+    readiness = getattr(getattr(request.app.state, 'execution', None), 'readiness', None)
+    if readiness is not None:
+        readiness.require_available()
     settings = get_settings()
     origins = None
     if settings.ip_preview_enabled:
@@ -433,6 +436,7 @@ async def start_race(
         raise HTTPException(status.HTTP_402_PAYMENT_REQUIRED, "额度不足以发起这场比拼")
 
     try:
+        await orchestrator.require_storage()
         race_id = orchestrator.create_race(project.id, models)
         await orchestrator.start_race(project.id, user.id, race_id, body.budgetSeconds)
     except AtomError as error:
@@ -485,6 +489,7 @@ async def retry_heat(
         raise HTTPException(409, "只能继续未完成的赛道")
     if user.credits < 1:
         raise HTTPException(402, "额度不足以继续赛道")
+    await orchestrator.require_storage()
     race.status = "running"
     heat.status, heat.error = "queued", None
     session.commit()

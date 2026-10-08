@@ -8,6 +8,23 @@ from .artifacts import ArtifactError, _describe
 from .snapshots import MAX_ARCHIVE_BYTES
 
 
+def service_error(error):
+    """Translate only known status/code pairs; SDK text may contain secrets."""
+    try:
+        status, code = error.get_status_code(), error.get_error_code()
+    except (KeyError, TypeError, ValueError):
+        return ArtifactError('artifact_io_error')
+    if status == 403 and code in ('InvalidAccessKeyId', 'InvalidSecurity', 'ExpiredToken', 'InvalidToken'):
+        return ArtifactError('artifact_credentials_invalid')
+    if status == 403 and code == 'SignatureDoesNotMatch':
+        return ArtifactError('artifact_signature_invalid')
+    if status == 403 and code in ('AccessDenied', 'AccessForbidden'):
+        return ArtifactError('artifact_access_denied')
+    if status == 404 and code == 'NoSuchKey':
+        return ArtifactError('artifact_not_found')
+    return ArtifactError('artifact_io_error')
+
+
 def _read(client, bucket, key):
     response = client.get_object(Bucket=bucket, Key=key)
     raw = response['Body'].get_raw_stream()
@@ -50,7 +67,7 @@ def transfer(control, payload):
             existing = _read(client, control['bucket'], key)
         except CosServiceError as error:
             if error.get_status_code() != 404 or error.get_error_code() != 'NoSuchKey':
-                raise ArtifactError('artifact_io_error') from None
+                raise service_error(error) from None
             existing = None
         if existing is not None:
             if _describe(existing).key != control['key']:
@@ -67,9 +84,12 @@ def transfer(control, payload):
                 ACL='private', ContentType='application/octet-stream', EnableMD5=True)
         except CosServiceError as error:
             if error.get_status_code() != 409 or error.get_error_code() != 'ObjectAlreadyExists':
-                raise ArtifactError('artifact_io_error') from None
+                raise service_error(error) from None
         # A successful upload alone is not a publication receipt. Verify readback.
-        return _read(client, control['bucket'], key)
+        try:
+            return _read(client, control['bucket'], key)
+        except CosServiceError as error:
+            raise service_error(error) from None
 
 
 def main():

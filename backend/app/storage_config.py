@@ -12,6 +12,7 @@ class ObjectStorageSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix='ATOM_', env_file='.env',
         extra='ignore', hide_input_in_errors=True)
     storage_backend: Literal['local', 'cos'] = 'local'
+    storage_probe_interval_seconds: int = Field(default=15, ge=1, le=60)
     upload_dir: Path | None = None
     storage_s3_endpoint: str = ''
     storage_s3_access_key: SecretStr = Field(default=SecretStr(''), repr=False, exclude=True)

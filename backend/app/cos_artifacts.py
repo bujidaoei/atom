@@ -12,7 +12,8 @@ from .snapshots import MAX_ARCHIVE_BYTES
 
 _OPERATIONS = BoundedSemaphore(1)
 _ERRORS = {'artifact_not_found', 'artifact_io_error', 'artifact_digest_mismatch',
-           'invalid_artifact', 'artifact_transport_timeout'}
+           'invalid_artifact', 'artifact_transport_timeout', 'artifact_credentials_invalid',
+           'artifact_access_denied', 'artifact_signature_invalid'}
 
 
 class CosArtifactStore:

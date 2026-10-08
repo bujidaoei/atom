@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+import asyncio
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -170,9 +171,11 @@ async def health() -> JSONResponse:
                 broker_ready = True
             except BrokerClientError:
                 pass
-        ready = runtime_ready and broker_ready
+        readiness = getattr(resources, 'readiness', None)
+        storage_ready = await asyncio.to_thread(readiness.check) if readiness is not None else get_settings().storage_backend == 'local'
+        ready = runtime_ready and broker_ready and storage_ready
         return JSONResponse(status_code=200 if ready else 503,
-                            content={'ok':ready,'runtime':runtime_ready,'broker':broker_ready})
+                            content={'ok':ready,'runtime':runtime_ready,'broker':broker_ready,'storage':storage_ready})
     return JSONResponse(status_code=200 if runtime_ready else 503,
                         content={"ok": runtime_ready, "runtime": runtime_ready})
 

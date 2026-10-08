@@ -11,6 +11,7 @@ _TMP = tempfile.mkdtemp(prefix="atom-tests-")
 os.environ.update(
     {
         "ATOM_ENVIRONMENT": "test",
+        "ATOM_STORAGE_BACKEND": "local",
         "ATOM_SECRET": "synthetic-test-session-key-32-characters",
         "ATOM_RUNTIME_TOKEN": "synthetic-test-runtime-key-32-characters",
         "ATOM_DATA_DIR": _TMP,
