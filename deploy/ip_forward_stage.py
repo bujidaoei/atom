@@ -18,6 +18,7 @@ import ip_forward_journal
 import ip_forward_preflight
 import ip_forward_writers
 import protected_cutover
+import artifact_preflight
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 from app.ip_ingress import IpIngressConfig  # noqa: E402
@@ -109,6 +110,11 @@ def stage_locked(*, config: protected_cutover.CutoverConfig,
         publication_file, config, active["imageId"],
         require_template_image=False)
     source = Path(active["candidateDirectory"])
+    try:
+        artifact_preflight.verify(config=config, source=source, image=successor_image,
+                                 storage_env=Path(publication['ATOM_STORAGE_ENV_FILE']))
+    except artifact_preflight.ArtifactPreflightError as error:
+        raise StageError('forward_storage_unavailable') from error
     routes = ip_forward_preflight._active_routes(
         source / "data" / "atom.db", int(publication["ATOM_FIRST_PORT"]),
         int(publication["ATOM_LAST_PORT"]))

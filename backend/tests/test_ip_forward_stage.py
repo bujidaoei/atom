@@ -27,6 +27,7 @@ class ForwardStageTest(TestCase):
                                         enumerate(("api", "broker", "preview",
                                                    "public", "verifier", "caddy"), 1)}}
         self.publication = {"ATOM_FIRST_PORT": "20000",
+                            "ATOM_STORAGE_ENV_FILE": "/etc/atom/storage.env",
                             "ATOM_LAST_PORT": "20127",
                             "ATOM_PUBLIC_IP": "192.0.2.10",
                             "ATOM_ACME_DIRECTORY":
@@ -40,7 +41,7 @@ class ForwardStageTest(TestCase):
             "d" * 64, "e" * 64, 62, 72, "f" * 64)
         self.order = []
 
-    def _call(self, *, capture_failure=False, stop_failure=False,
+    def _call(self, *, capture_failure=False, stop_failure=False, storage_failure=False,
               resume_failure=False):
         controller = Mock()
         controller.transition_base.side_effect = lambda _payload, maintenance: (
@@ -61,10 +62,15 @@ class ForwardStageTest(TestCase):
             if capture_failure:
                 raise capture.CaptureError("injected_backup_failure")
             return self.captured
+        def storage_check(**_kwargs):
+            self.order.append('storage')
+            if storage_failure:
+                raise stage.artifact_preflight.ArtifactPreflightError('storage_preflight_failed')
         with patch.object(stage.ip_forward_preflight, "_inspect_locked",
                           return_value=self.active) as inspect, \
              patch.object(stage.ip_forward_preflight, "_publication",
                           return_value=self.publication), \
+             patch.object(stage.artifact_preflight, 'verify', side_effect=storage_check), \
              patch.object(stage.ip_forward_preflight, "_active_routes",
                           return_value=tuple()), \
              patch.object(stage, "_controller", return_value=controller), \
@@ -83,6 +89,14 @@ class ForwardStageTest(TestCase):
              patch.object(stage.ip_forward_writers, "resume",
                           side_effect=resume) as resume_call, \
              patch.object(stage.ip_forward_capture, "capture", side_effect=take):
+            if storage_failure:
+                with self.assertRaisesRegex(stage.StageError, 'forward_storage_unavailable'):
+                    stage.stage_locked(config=self.config,
+                        publication_file=Path('/etc/atom/publication'), revision=self.revision,
+                        successor_source=Path('/source'), successor_revision=self.successor,
+                        successor_image='sha256:' + 'd' * 64)
+                self.assertEqual(self.order, ['storage'])
+                return
             if capture_failure or stop_failure:
                 expected_error = ("forward_source_recovery_failed"
                                   if resume_failure else "forward_stage_failed")
@@ -109,9 +123,13 @@ class ForwardStageTest(TestCase):
 
     def test_maintenance_precedes_stop_and_capture(self):
         self._call()
+        self.assertLess(self.order.index('storage'), self.order.index('maintenance'))
         self.assertLess(self.order.index("maintenance"), self.order.index("stop"))
         self.assertLess(self.order.index("stop"), self.order.index("capture"))
         self.assertEqual(self.order[-1], "captured")
+
+    def test_failed_storage_never_touches_ingress_or_writers(self):
+        self._call(storage_failure=True)
 
     def test_capture_failure_resumes_source_before_reopening_ingress(self):
         self._call(capture_failure=True)

@@ -7,7 +7,7 @@
 - [x] T005 Implement bounded cached readiness, health and pre-mutation admission checks; concurrent probe, recovery, HTTP admission and health tests passed.
 - [x] T006 Implement explicit COS write/readback plus complete inventory deployment preflight; tests reject denied PUT/missing inventory and preserve real SQLite business rows. Successful live COS preflight remains T009.
 - [ ] T007 Run focused/full backend tests, frontend build and exact target-Linux tests; record results.
-- [ ] T008 Synchronize GitHub main and fix branch without overwriting unrelated work.
+- [x] T008 Synchronize GitHub main and fix branch without overwriting unrelated work. Both contain application commit a2becea5e5c2c5f5db432cecca12300899e229ce; protected original changes remain in named stash.
 - [ ] T009 Restore valid COS credentials, verify all registered artifacts, take verified paired backup and deploy exact image through protected transaction.
 - [ ] T010 Accept authenticated screenshot project opening and real new-project planning/generation in browser; record exact evidence and remaining limits.
 
