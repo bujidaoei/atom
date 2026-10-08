@@ -14,6 +14,7 @@ Branch: `codex/014-artifact-recovery`. Created: 2026-10-08. Status: implementati
 - FR-004 Deny new project creation and execution admission when the configured storage probe fails; health must return 503 with storage=false. Authentication remains available for diagnosis/recovery.
 - FR-005 Provide a separate explicit operator preflight that verifies a new private immutable snapshot through PUT/readback and verifies all registered objects. Enforce the same preflight automatically in forward deployment before maintenance or writer interruption. Deployment cannot be accepted on reads alone.
 - FR-006 Preserve existing data, unrelated changes and SHA-locked Pi; synchronize spec, plan, tasks and evidence; synchronize GitHub main and deploy only with verified backup/rollback gates.
+- FR-007 A storage/preparation failure before runtime dispatch must not charge a model turn. Correct the two proved historical undispatched charges through append-only, idempotent ledger compensation after a verified backup; never delete historical charges or guess from zero tokens alone.
 
 ## Success criteria
 Exact fault regressions, full backend checks and frontend build pass. Existing screenshot project opens; a separate real project completes planning and produces a registered snapshot. Valid credentials and actual COS/provider/browser observations are required for live acceptance.

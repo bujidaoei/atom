@@ -719,6 +719,7 @@ class Orchestrator:
         completed_revision = None
         validation_error = None
         execution_args = {}
+        runtime_invoked = False
         broker_mode = get_settings().sandbox_mode == 'broker'
         unfinished_files = _unfinished_files_note()
         try:
@@ -730,6 +731,7 @@ class Orchestrator:
                         run_id=run_id, heat_id=heat_id, source=workspace, budget=budget)
                     execution_args = {'execution_lease':lease, 'execution_repository':self.execution.repository,
                                       'execution_owner':user_id}
+                runtime_invoked = True
                 async with aclosing(
                     self._client.run(
                         run_id=run_id,
@@ -874,14 +876,15 @@ class Orchestrator:
             project = session.get(Project, project_id)
             if project and project.active_run_id == run_id:
                 project.active_run_id = None
-            credits.charge(
-                session,
-                user_id,
-                reason=phase,
-                run_id=run_id,
-                input_tokens=input_tokens,
-                output_tokens=output_tokens,
-            )
+            if runtime_invoked:
+                credits.charge(
+                    session,
+                    user_id,
+                    reason=phase,
+                    run_id=run_id,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                )
             if record_message and text:
                 # Mike and Emma answer in JSON because the pipeline parses it.
                 # The chat log is for the user, so store a readable version.

@@ -10,5 +10,6 @@
 - [x] T008 Synchronize GitHub main and fix branch without overwriting unrelated work. Both contain final application/deployment commit6647cd51c61ead5a843ecfc3652e9e08322e763a; protected original changes remain in named stash.
 - [ ] T009 Restore valid COS credentials, verify all registered artifacts, take verified paired backup and deploy exact image through protected transaction.
 - [ ] T010 Accept authenticated screenshot project opening and real new-project planning/generation in browser; record exact evidence and remaining limits.
+- [ ] T011 Verify pre-dispatch storage failures cannot charge credits; implement/test guarded idempotent compensation and restore the two proved incident charges after backup.
 
 Dependencies: T001→T002→T003→T004/T005/T006→T007. Publishing the tested source for exact server image tests requires T008 after focused regressions; the broad regression can finish concurrently. T007+T008+valid cloud credentials→T009→T010. Cloud credential repair may proceed independently. No simulated test or diagnosis closes T009/T010.

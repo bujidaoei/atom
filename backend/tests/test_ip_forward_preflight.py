@@ -1,6 +1,5 @@
 """Focused failures for the read-only active-generation deployment gate."""
 
-import importlib.util
 from contextlib import closing, contextmanager
 from pathlib import Path
 import sqlite3
@@ -13,11 +12,7 @@ from unittest.mock import patch
 
 DEPLOY = Path(__file__).resolve().parents[2] / "deploy"
 sys.path.insert(0, str(DEPLOY))
-spec = importlib.util.spec_from_file_location("ip_forward_preflight",
-                                          DEPLOY / "ip_forward_preflight.py")
-module = importlib.util.module_from_spec(spec)
-sys.modules[spec.name] = module
-spec.loader.exec_module(module)
+import ip_forward_preflight as module
 
 IMAGE = "sha256:" + "b" * 64
 CADDY_IMAGE = "sha256:" + "c" * 64

@@ -1,5 +1,4 @@
 """The rollback bundle must capture real SQLite WAL content and every file."""
-import importlib.util
 import os
 from pathlib import Path
 import sqlite3
@@ -9,10 +8,8 @@ import pytest
 
 
 SCRIPT = Path(__file__).resolve().parents[2] / "deploy" / "paired_backup.py"
-spec = importlib.util.spec_from_file_location("paired_backup", SCRIPT)
-paired = importlib.util.module_from_spec(spec)
-sys.modules[spec.name] = paired
-spec.loader.exec_module(paired)
+sys.path.insert(0, str(SCRIPT.parent))
+import paired_backup as paired
 IMAGE = "sha256:" + "a" * 64
 
 

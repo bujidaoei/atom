@@ -1,6 +1,5 @@
 """Dependency-free deployment preflight tests for Windows and target Linux."""
 
-import importlib.util
 from contextlib import closing
 import json
 import os
@@ -13,10 +12,8 @@ import unittest
 
 
 SCRIPT = Path(__file__).resolve().parents[2] / "deploy" / "protected_cutover.py"
-spec = importlib.util.spec_from_file_location("protected_cutover", SCRIPT)
-cutover = importlib.util.module_from_spec(spec)
-sys.modules[spec.name] = cutover
-spec.loader.exec_module(cutover)
+sys.path.insert(0, str(SCRIPT.parent))
+import protected_cutover as cutover
 
 
 def config(root: Path) -> dict:

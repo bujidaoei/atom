@@ -1,6 +1,5 @@
 """Selected exact-identity writer quiescence and recovery checks."""
 
-import importlib.util
 from pathlib import Path
 import sys
 from types import SimpleNamespace
@@ -10,11 +9,7 @@ from unittest.mock import patch
 
 DEPLOY = Path(__file__).resolve().parents[2] / "deploy"
 sys.path.insert(0, str(DEPLOY))
-spec = importlib.util.spec_from_file_location("ip_forward_writers",
-                                           DEPLOY / "ip_forward_writers.py")
-module = importlib.util.module_from_spec(spec)
-sys.modules[spec.name] = module
-spec.loader.exec_module(module)
+import ip_forward_writers as module
 
 
 class FakeDocker:

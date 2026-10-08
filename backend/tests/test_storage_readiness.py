@@ -105,6 +105,54 @@ def test_execution_admission_precedes_spawn_and_model(tmp_path, monkeypatch):
         asyncio.run(runner.start_plan('project', 'owner'))
 
 
+def test_prepare_failure_cannot_charge_an_undispatched_turn(signed_in, monkeypatch):
+    from sqlalchemy import select
+    from app.config import get_settings
+    from app.db import session_scope
+    from app.models import CreditEntry, Run, User
+    from app.services.runtime_client import GatewayConfig
+    response = signed_in.post('/api/projects', json={'prompt': 'prepare must fail safely'})
+    project_id = response.json()['project']['id']
+    with session_scope() as session:
+        user = session.scalar(select(User))
+        owner, before = user.id, user.credits
+    async def prepare(**_kwargs): raise ArtifactError('artifact_credentials_invalid')
+    async def cancel(_run): pass
+    def dispatch(**_kwargs): pytest.fail('no runtime dispatch may occur')
+    monkeypatch.setattr(get_settings(), 'sandbox_mode', 'broker')
+    runner = Orchestrator(SimpleNamespace(run=dispatch, cancel=cancel))
+    runner.execution = SimpleNamespace(prepare_run=prepare)
+    result = asyncio.run(runner._turn(project_id, owner, role='mike', phase='plan',
+        gateway=GatewayConfig('https://synthetic.invalid', 'synthetic', 'test-model'), prompt='plan'))
+    assert result.failed and '存储认证失效' in result.error
+    with session_scope() as session:
+        assert session.get(User, owner).credits == before
+        assert list(session.scalars(select(CreditEntry))) == []
+        assert session.scalar(select(Run)).status == 'failed'
+
+
+def test_dispatched_turn_retains_existing_flat_credit_policy(signed_in):
+    from sqlalchemy import select
+    from app.db import session_scope
+    from app.models import CreditEntry, User
+    from app.services.runtime_client import GatewayConfig
+    project_id = signed_in.post('/api/projects', json={'prompt': 'credit policy test'}).json()['project']['id']
+    with session_scope() as session:
+        user = session.scalar(select(User))
+        owner, before = user.id, user.credits
+    calls = []
+    async def dispatch(**kwargs):
+        calls.append(kwargs['run_id'])
+        yield SimpleNamespace(kind='result', type=None, payload={})
+    runner = Orchestrator(SimpleNamespace(run=dispatch))
+    result = asyncio.run(runner._turn(project_id, owner, role='mike', phase='plan',
+        gateway=GatewayConfig('https://synthetic.invalid', 'synthetic', 'test-model'), prompt='plan'))
+    assert not result.failed and len(calls) == 1
+    with session_scope() as session:
+        assert session.get(User, owner).credits == before - 1
+        assert session.scalar(select(CreditEntry)).delta == -1
+
+
 def test_health_reports_storage_failure(monkeypatch):
     from app.main import app, health
     from app.config import get_settings

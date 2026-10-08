@@ -1,7 +1,6 @@
 """Root-private forward identity receipt and refusal checks."""
 
 import hashlib
-import importlib.util
 import json
 import os
 from pathlib import Path
@@ -13,11 +12,7 @@ from unittest.mock import patch
 
 DEPLOY = Path(__file__).resolve().parents[2] / 'deploy'
 sys.path.insert(0, str(DEPLOY))
-spec = importlib.util.spec_from_file_location('ip_forward_identity',
-                                             DEPLOY / 'ip_forward_identity.py')
-module = importlib.util.module_from_spec(spec)
-sys.modules[spec.name] = module
-spec.loader.exec_module(module)
+import ip_forward_identity as module
 
 
 @skipUnless(os.name == 'posix' and getattr(os, 'geteuid', lambda: -1)() == 0,

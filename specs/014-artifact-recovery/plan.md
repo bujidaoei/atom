@@ -12,3 +12,6 @@ Python/FastAPI, bounded COS SDK subprocess, SQLite revision ledger, existing pro
 
 ## Implementation order
 Document evidence → fault tests → error classification/readiness/admission/preflight → regression/build → main synchronization → target image tests → credential/preflight/backup → cutover → live acceptance.
+
+## Accounting continuation
+Production investigation also proved two zero-token failed plan runs have no revision execution attempts and only squad.role_started/run.failed events, yet each has a -1 plan credit entry. `_turn` must charge only after invocation of the runtime, preserving the existing per-turn policy for dispatched runs. `app.storage_refunds` is an explicit operator tool: validate real schema and selected run IDs, serialize with BEGIN IMMEDIATE, require the exact evidence above and one original -1 charge, append one +1 compensation, and preserve the original ledger. Replays do not restore twice; any uncertain attempt/event or mismatched charge aborts the whole transaction. CLI requires a verified private backup. Quiesce API/broker writers through a target-local guarded operation before applying production compensation, then resume the unchanged pair even on failure. This accounting correction does not repair COS access or accept deployment.
