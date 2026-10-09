@@ -2,7 +2,7 @@
 
 **Feature Branch**: `codex/015-interaction-integrity`
 **Created**: 2026-10-09
-**Status**: Investigation confirmed; implementation pending
+**Status**: Accepted — implemented, genuinely tested and deployed on 2026-10-09; see evidence.md and deployment.md
 **Input**: Verify colleague screenshots reporting calculator, todo and expense buttons doing nothing, repair comprehensively, synchronize GitHub main and deploy to the existing server.
 
 ## User Scenarios & Testing
