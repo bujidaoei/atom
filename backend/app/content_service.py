@@ -14,7 +14,7 @@ from .content_bootstrap import BOOTSTRAP_PATH, ContentNavigation, bootstrap_resp
 from .content_cookies import content_session_cookie
 from .content_exchange import (EXCHANGE_PATH, EXCHANGE_HEADERS, ExchangeRequestError,
                                validate_exchange, receive_handoff, exchange_response)
-from .content_policy import ContentPolicyError, is_control_path
+from .content_policy import ContentPolicyError, is_control_path, GENERATED_CONTENT_HEADERS
 from .content_hosts import ContentHostError
 from .project_origins import ProjectOriginError
 from .project_port_hosts import ProjectPortHosts
@@ -24,12 +24,7 @@ from .release_view import materialized_content, materialized_private_content
 from .snapshots import SnapshotError
 from .verification_repository import VerificationError
 
-HEADERS = {
-    'Cache-Control':'no-store',
-    'X-Content-Type-Options':'nosniff',
-    'Referrer-Policy':'no-referrer',
-    'Content-Security-Policy':"default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'; worker-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; sandbox allow-scripts allow-same-origin",
-}
+HEADERS = dict(GENERATED_CONTENT_HEADERS)
 
 
 @dataclass(frozen=True)

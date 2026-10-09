@@ -105,6 +105,12 @@ as needed (at most 128), and remove exclusions that conflict with the new reques
 requirement overall must use a "flow" check so the build is proven interactive
 rather than static. Selectors must be ones you are instructing the engineer to
 create, so always use data-testid attributes.
+Cover EVERY primary state-changing action (calculate, add, complete, delete,
+clear/reset, restore) with its own flow that clicks that control and proves the
+resulting state. A working Enter shortcut cannot replace a mouse-click check.
+For form actions include a separate keyboard scenario where supported, using
+press in setup and a non-mutating final click to inspect its state. Native input
+validation and invalid-input errors must have observable outcomes.
 For every flow, include all prerequisites in optional setup (maximum 12 ordered actions).
 Supported actions: fill {selector,value}, click {selector}, press {selector,key}.
 Fill required inputs BEFORE clicking submit/add/draw. For a lottery, enter names and
@@ -180,6 +186,11 @@ Hard requirements:
 - Split real work into styles.css and app.js rather than one giant file.
 - No build step and no network fetches at runtime. Everything ships in the
   workspace.
+- Delivery and browser acceptance share a sandbox permitting local form submit
+  events and native validation, with form-action 'none' and connect-src 'none'.
+  Handle form submit with preventDefault for local state changes; preserve mouse
+  and Enter parity without registering duplicate click/submit actions. Do not
+  depend on native form navigation, fetch, workers or external resources.
 - Implement every acceptance check you were given, using exactly the selectors
   named in them.
 - Follow the approved contract for persistence; use localStorage only when required.

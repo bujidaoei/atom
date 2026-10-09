@@ -117,6 +117,16 @@ def observe_contract(browser, contract: VerificationContract, url: str, *, budge
                 context = browser.new_context(service_workers='block', accept_downloads=False)
                 context.route('**/*', route_request)
                 context.route_web_socket('**/*', route_socket)
+                # CSP may deny IO before Playwright's request routes run. Keep
+                # those attempted policy violations as durable failed checks,
+                # rather than accepting a page that catches its denied fetch.
+                context.expose_binding('__atom_policy_denied', lambda _source: blocked.append(True))
+                context.add_init_script("""(() => {
+                  const denied = window.__atom_policy_denied;
+                  document.addEventListener('securitypolicyviolation', event => {
+                    if (event.disposition === 'enforce') denied();
+                  });
+                })();""")
                 page = context.new_page()
                 page.set_default_timeout(_remaining(deadline, ceiling_ms=1500))
 

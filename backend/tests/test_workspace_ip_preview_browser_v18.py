@@ -101,6 +101,18 @@ def test_workspace_opens_isolated_saved_preview(
             assert frame.locator('body').inner_text() == 'heat'
             iframe = page.locator('iframe[title="项目预览"]')
             inner = iframe.element_handle().content_frame()
+            assert 'allow-forms' in iframe.get_attribute('sandbox').split()
+            # Exercise both the actual service CSP and the built workspace's
+            # iframe flags. Either layer denying forms must fail this check.
+            inner.evaluate('''() => {
+              const form = document.createElement('form');
+              form.innerHTML = '<input required value="input"><button>Submit</button>';
+              form.addEventListener('submit', e => { e.preventDefault(); form.dataset.count = '1'; });
+              document.body.append(form);
+            }''')
+            frame.get_by_role('button', name='Submit', exact=True).click()
+            assert frame.locator('form').get_attribute('data-count') == '1'
+            inner.evaluate("() => document.querySelector('form').remove()")
             inner.evaluate('window.previewCounter = 7')
             for label, width in [('平板', 768), ('手机', 390), ('桌面', None)] * 4:
                 page.get_by_role('button', name=label, exact=True).click()

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { GENERATED_CONTENT_SANDBOX } from "./content-policy";
 import { Button } from "../components/ui/Button";
 import { EmptyState } from "../components/ui/States";
 import { errorMessage } from "../lib/api";
@@ -89,7 +90,7 @@ export function IsolatedPreview({ projectId, revisionId }: { projectId: string; 
     {revisionId ? <div className="relative flex min-h-0 flex-1 flex-col">
       <PreviewSurface viewport={viewport}>
         {navigation ? <iframe key={navigation.serial} ref={frame} src={navigation.src}
-          title="项目预览" sandbox="allow-scripts allow-same-origin" referrerPolicy="no-referrer"
+          title="项目预览" sandbox={GENERATED_CONTENT_SANDBOX} referrerPolicy="no-referrer"
           onLoad={() => { if (ready.current) { window.clearTimeout(loadDeadline.current); setState("displayed"); } }}
           className="h-full w-full border-0 bg-white" /> : null}
       </PreviewSurface>

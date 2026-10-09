@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { GENERATED_CONTENT_SANDBOX } from "./content-policy";
 import { Button } from "../components/ui/Button";
 import { Badge } from "../components/ui/Badge";
 import { Icon } from "../components/ui/Icon";
@@ -324,7 +325,7 @@ function HeatCard({
           <iframe
             src={`${withBase(heat.previewUrl)}?run=${heat.runId ?? ""}&status=${heat.status}`}
             title={`${heat.model} 的预览`}
-            sandbox="allow-scripts allow-same-origin"
+            sandbox={GENERATED_CONTENT_SANDBOX}
             tabIndex={-1}
             className="h-full w-full border-0 bg-white"
           />

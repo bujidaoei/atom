@@ -14,7 +14,7 @@ from threading import Thread
 from urllib.parse import urlsplit
 
 from .artifacts import Artifact
-from .content_policy import validate_content_manifest
+from .content_policy import validate_content_manifest, GENERATED_CONTENT_HEADERS
 from .snapshots import receive_snapshot, verify_snapshot
 
 
@@ -79,9 +79,8 @@ def pinned_snapshot_origin(payload: bytes, artifact: Artifact):
             self.send_response(200)
             self.send_header('Content-Type', media)
             self.send_header('Content-Length', str(len(body)))
-            self.send_header('Cache-Control', 'no-store')
-            self.send_header('X-Content-Type-Options', 'nosniff')
-            self.send_header('Referrer-Policy', 'no-referrer')
+            for name, value in GENERATED_CONTENT_HEADERS.items():
+                self.send_header(name, value)
             self.end_headers()
             if self.command == 'GET':
                 self.wfile.write(body)
